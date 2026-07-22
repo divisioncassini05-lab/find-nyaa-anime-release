@@ -1156,10 +1156,14 @@ def render_season_batch_reply(
     scope_label = "精确单季包" if coverage.get("scope") == "exact" else "含目标季的多季合集"
     minimum = coverage.get("min_gib_per_episode")
     maximum = coverage.get("max_gib_per_episode")
-    if coverage.get("source_exempt"):
+    average = coverage.get("average_gib_per_episode")
+    quality_basis = coverage.get("quality_basis")
+    if quality_basis == "source_exempt" or coverage.get("source_exempt"):
         size_range = "BDMV/Remux 高画质来源"
+    elif quality_basis == "average" and average is not None:
+        size_range = f"平均 {average:g} GiB/集（范围 {minimum:g}-{maximum:g}）"
     elif minimum is not None and maximum is not None:
-        size_range = f"{minimum:g}-{maximum:g} GiB/集"
+        size_range = f"逐集 {minimum:g}-{maximum:g} GiB"
     else:
         size_range = "逐集体积已核验"
     lines = [
@@ -1194,10 +1198,17 @@ def render_failure_reply(
     if has_above_range_release:
         release_unqualified = f"{subject}当前区间内没有合格资源，但有高于该区间的资源可选。"
     elif intent is SearchIntent.SEASON_BATCH:
-        release_unqualified = (
-            f"{subject}存在对应发布，但没有资源的每个正篇文件都满足{tier_label}档位；"
-            "未达当前硬门槛的候选不会展示。"
-        )
+        reasons = []
+        if int((diagnostic or {}).get("aggregate_floor_rejected_count") or 0) > 0:
+            reasons.append(f"整季总大小不足以让正篇平均值达到{tier_label}最低线")
+        if int((diagnostic or {}).get("absolute_floor_rejected_count") or 0) > 0:
+            reasons.append("至少一个正篇文件低于 1 GiB 绝对底线")
+        if int((diagnostic or {}).get("average_range_rejected_count") or 0) > 0:
+            reasons.append(f"正篇平均体积不在{tier_label}档位")
+        if int((diagnostic or {}).get("explicit_per_file_rejected_count") or 0) > 0:
+            reasons.append("至少一个正篇文件不满足你明确给出的体积范围")
+        detail = "；".join(reasons) or f"正篇平均体积不符合{tier_label}档位"
+        release_unqualified = f"{subject}存在对应发布，但{detail}；未达门槛的候选不会展示。"
     else:
         release_unqualified = f"{subject}存在对应发布，但没有资源满足{tier_label}档位。"
     messages = {
@@ -1231,6 +1242,34 @@ def render_quality_fallback_question(
             str(candidate.get("title") or ""),
             f"{candidate.get('size')} | {candidate.get('seeders')} 做种 | {subtitle}",
             "是否降级到轻量观看？",
+        ]
+    )
+
+
+def premium_source_type(candidate: dict[str, Any]) -> str:
+    title = str(candidate.get("title") or "")
+    if re.search(r"(?<![a-z0-9])bdmv(?![a-z0-9])", title, re.I):
+        return "BDMV"
+    if re.search(r"(?<![a-z0-9])remux(?![a-z0-9])", title, re.I):
+        return "Remux"
+    return "高码率压制"
+
+
+def render_quality_upgrade_question(
+    display_title: str,
+    season: str | None,
+    candidate: dict[str, Any],
+) -> str:
+    coverage = candidate.get("coverage") or {}
+    season_label = canonical_season(season) or "S01"
+    episode_count = coverage.get("expected_episodes") or coverage.get("main_file_count") or "?"
+    source_type = candidate.get("source_type") or premium_source_type(candidate)
+    return "\n".join(
+        [
+            f"《{display_title}》{season_label} 整季没有合格的普通观看或轻量观看资源。",
+            f"发现一个完整的高画质 {source_type}：{candidate.get('size')} | {episode_count} 集 | "
+            f"{candidate.get('seeders')} 做种。",
+            "是否改用高画质？",
         ]
     )
 
@@ -1299,6 +1338,20 @@ def resolve_work_identity(
     )
     if manual_search_titles:
         sources.append("web")
+
+    if state_show is None and not args.refresh_cache:
+        for cached_name in unique([args.title, resolver_query, resolved.title]):
+            snapshot = read_schedule_snapshot(
+                args.schedule_cache,
+                f"title:{norm(cached_name)}",
+            )
+            if snapshot:
+                resolved = merge_resolved(
+                    resolved,
+                    resolved_from_snapshot(snapshot, resolved),
+                )
+                sources.append("metadata_cache")
+                break
 
     # A complete tracked record is the fast path. Airing metadata can still be
     # refreshed later for --latest without repeating title resolution here.
@@ -1393,6 +1446,18 @@ def resolve_work_identity(
 
     input_kind = input_kind_for(args.title, nickname_alias, state_show)
     if resolved.search_titles:
+        if any(source in {"bangumi", "anilist"} for source in sources):
+            cache_keys = [
+                schedule_cache_key(resolved),
+                *[
+                    f"title:{norm(name)}"
+                    for name in unique(
+                        [args.title, resolver_query, resolved.title, *resolved.aliases, *resolved.search_titles]
+                    )
+                    if norm(name)
+                ],
+            ]
+            write_schedule_snapshots(args.schedule_cache, cache_keys, resolved)
         resolver = "+".join(unique(sources)) or "resolved"
         return IdentityResolution(
             "resolved", resolved, state_show, tracked, input_kind, unique(sources), failures, resolver
@@ -1501,6 +1566,7 @@ def render_batch_child_status(display_title: str, result: dict[str, Any]) -> str
         "subtitle_unqualified": "已有发布，但没有经详细页确认的简体或繁体中文字幕资源。",
         "subtitle_check_incomplete": "中文字幕详情检查未完成，不能断言没有合格资源。",
         "needs_quality_fallback_confirmation": "轻量观看有中文字幕候选，需要确认是否降级。",
+        "needs_quality_upgrade_confirmation": "存在完整高画质整季包，需要确认是否升级。",
         "needs_web_resolution": "需要网页补全可靠的英文或罗马字检索名。",
         "needs_confirmation": "候选身份存在歧义，需要确认。",
         "latest_unresolved": "无法可靠确认官方最新正篇。",
@@ -1602,6 +1668,7 @@ def status_return_code(status: str) -> int | None:
     return {
         "found": 0,
         "finished_deleted": 0,
+        "needs_quality_upgrade_confirmation": 0,
         "network_error": 1,
         "release_unqualified": 3,
         "subtitle_unqualified": 3,
@@ -1658,6 +1725,16 @@ def main(argv: list[str] | None = None) -> int:
     state_update = "none"
     schedule_cache_status = "not_used"
     season = canonical_season(args.season or resolved.season or (state_show or {}).get("season"))
+    if (
+        season is None
+        and state_show is None
+        and resolved.status == "FINISHED"
+        and resolved.format in MAINLINE_FORMATS
+        and resolved.mainline_scope == "single"
+    ):
+        season = "S01"
+        resolved.season = season
+        schedule_cache_status = "single_mainline_inferred"
     state_aliases = unique([*resolved.aliases, args.title])
     search_names = select_search_names(resolved.title, state_aliases, args.query_limit, resolved.search_titles)
 
@@ -1713,6 +1790,61 @@ def main(argv: list[str] | None = None) -> int:
             print(identity.status)
         return 0
 
+    old_untracked_mainline = bool(
+        state_show is None
+        and resolved.format in MAINLINE_FORMATS
+        and (resolved.status == "FINISHED" or not resolved.trackable)
+    )
+    if (
+        args.episode is None
+        and not args.latest
+        and old_untracked_mainline
+        and season is None
+    ):
+        reply_text = (
+            f"《{args.title}》的目标季数还不能可靠确定。请告诉我要找第几季"
+            "（例如“第一季”或“S02”），确认后我再搜索整季资源。"
+        )
+        report = {
+            "status": "needs_season_confirmation",
+            "intent": SearchIntent.SEASON_BATCH.value,
+            "resolved_title": resolved.title,
+            "aliases": search_names,
+            "season": None,
+            "target_episode": None,
+            "availability": {
+                "target_source": "season_unresolved",
+                "official_target": False,
+            },
+            "quality": {"requested_tier": requested_tier, "fallback": None},
+            "tracked": tracked,
+            "selected": None,
+            "choices": [],
+            "diagnostic": {
+                "search_skipped": "season_unresolved",
+                "mainline_scope": resolved.mainline_scope,
+                "related_titles": resolved.related_titles[:4],
+            },
+            "state_update": "none",
+            "resolver": resolver_status,
+            "cache": {"rss": "not_used", "schedule": "not_used"},
+            "search_return_code": None,
+            "search_stderr": "",
+            "reply_text": reply_text,
+            "output_contract": {
+                "ready": True,
+                "magnet_requested": bool(args.include_magnet),
+                "required_fields": [],
+                "missing_fields": [],
+            },
+            **identity_report_fields(identity, season, search_names),
+        }
+        if args.json:
+            emit_json(report)
+        else:
+            print(reply_text)
+        return 0
+
     target_episode = args.episode
     intent: SearchIntent
     availability: dict[str, Any] = {"target_source": "input", "official_target": False}
@@ -1735,12 +1867,7 @@ def main(argv: list[str] | None = None) -> int:
             "target_episode": target_episode,
         }
         not_aired_yet = target_source == "not_aired_yet"
-    elif args.whole_season or (
-        args.season is not None
-        and state_show is None
-        and resolved.format in MAINLINE_FORMATS
-        and (resolved.status == "FINISHED" or not resolved.trackable)
-    ):
+    elif args.whole_season or old_untracked_mainline:
         intent = SearchIntent.SEASON_BATCH
         availability = {
             "target_source": "whole_season",
@@ -1849,6 +1976,10 @@ def main(argv: list[str] | None = None) -> int:
     quality_fallback: dict[str, Any] | None = None
     fallback_report_for_diagnostic = None
     fallback_confirmation_item = None
+    fallback_report = None
+    quality_upgrade: dict[str, Any] | None = None
+    quality_upgrade_report = None
+    quality_upgrade_item = None
     fallback_tier = {"watch": "browse", "premium": "watch"}.get(requested_tier)
     if (
         fallback_tier is not None
@@ -1879,7 +2010,7 @@ def main(argv: list[str] | None = None) -> int:
             requested_episode=target_episode,
             include_specials=args.include_specials,
             cache_path=args.cache,
-            refresh_cache=args.refresh_cache,
+            refresh_cache=False,
             context=search_context,
         )
         quality_fallback = {
@@ -1899,6 +2030,47 @@ def main(argv: list[str] | None = None) -> int:
             "subtitle_check_incomplete",
         }:
             core_report = fallback_report
+        elif fallback_report.status != "found":
+            core_report = fallback_report
+    if (
+        intent is SearchIntent.SEASON_BATCH
+        and requested_tier == "watch"
+        and args.size_policy_source == "tier"
+        and fallback_report is not None
+        and fallback_report.status
+        in {"release_unqualified", "no_complete_season_release", "subtitle_unqualified"}
+    ):
+        premium_args = argparse.Namespace(**vars(args))
+        premium_args.tier = "premium"
+        premium_args.min_gib_per_episode = DEFAULT_TIER_MIN_GIB["premium"]
+        premium_args.max_gib_per_episode = None
+        premium_args.size_policy_source = "tier"
+        premium_search_args = build_search_args(
+            release_search_names[0],
+            release_search_names[1:],
+            premium_args,
+            season,
+            target_episode,
+            resolved.duration_min,
+        )
+        premium_search_args.episodes = resolved.episodes
+        quality_upgrade_report = search_release_report(
+            premium_search_args,
+            intent=intent,
+            requested_episode=target_episode,
+            include_specials=args.include_specials,
+            cache_path=args.cache,
+            refresh_cache=False,
+            context=search_context,
+        )
+        quality_upgrade = {
+            "from": requested_tier,
+            "to": "premium",
+            "status": quality_upgrade_report.status,
+        }
+        if quality_upgrade_report.status == "found":
+            quality_upgrade_item = quality_upgrade_report.selected[0]
+            quality_upgrade["requires_confirmation"] = True
     selected_item = core_report.selected[0] if core_report.selected else None
     selected = asdict(selected_item.candidate) if selected_item else None
     if selected_item and selected is not None:
@@ -1927,6 +2099,7 @@ def main(argv: list[str] | None = None) -> int:
         identity.resolved = resolved
     status = core_report.status
     fallback_selected = None
+    quality_upgrade_selected = None
     if fallback_confirmation_item is not None:
         fallback_selected = asdict(fallback_confirmation_item.candidate)
         fallback_selected.update(
@@ -1946,6 +2119,22 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_confirmation_item.work_match_evidence.as_dict()
             )
         status = "needs_quality_fallback_confirmation"
+    if quality_upgrade_item is not None:
+        quality_upgrade_selected = asdict(quality_upgrade_item.candidate)
+        quality_upgrade_selected.update(
+            {
+                "effective_season": quality_upgrade_item.effective_season,
+                "season_source": quality_upgrade_item.season_source,
+                "work_match": quality_upgrade_item.work_match,
+                "coverage": (
+                    quality_upgrade_item.coverage.as_dict()
+                    if quality_upgrade_item.coverage
+                    else None
+                ),
+            }
+        )
+        quality_upgrade_selected["source_type"] = premium_source_type(quality_upgrade_selected)
+        status = "needs_quality_upgrade_confirmation"
     needs_title_discovery = bool(
         status == "no_rss_candidates"
         and not args.search_title
@@ -1988,6 +2177,29 @@ def main(argv: list[str] | None = None) -> int:
                 "fallback_candidate.detail_chinese_confirmed",
             ],
             "missing_fields": [] if fallback_ready else ["fallback_candidate"],
+        }
+    if status == "needs_quality_upgrade_confirmation":
+        upgrade_coverage = (quality_upgrade_selected or {}).get("coverage") or {}
+        upgrade_ready = bool(
+            quality_upgrade_selected
+            and quality_upgrade_selected.get("size")
+            and quality_upgrade_selected.get("seeders") is not None
+            and quality_upgrade_selected.get("source_type")
+            and upgrade_coverage.get("complete") is True
+            and upgrade_coverage.get("quality_fit") is True
+        )
+        output_contract = {
+            "ready": upgrade_ready,
+            "magnet_requested": args.include_magnet,
+            "magnet_deferred_until_confirmation": True,
+            "required_fields": [
+                "upgrade_candidate.size",
+                "upgrade_candidate.seeders",
+                "upgrade_candidate.source_type",
+                "upgrade_candidate.coverage.complete",
+                "upgrade_candidate.coverage.quality_fit",
+            ],
+            "missing_fields": [] if upgrade_ready else ["upgrade_candidate"],
         }
     if status in {"found", "latest_unresolved"} and not output_contract["ready"]:
         status = "output_incomplete"
@@ -2033,6 +2245,7 @@ def main(argv: list[str] | None = None) -> int:
             "latest_unresolved",
             "needs_confirmation",
             "needs_quality_fallback_confirmation",
+            "needs_quality_upgrade_confirmation",
             "needs_web_resolution",
         }
         and not args.no_state_update
@@ -2080,11 +2293,17 @@ def main(argv: list[str] | None = None) -> int:
             requested_tier: primary_report.diagnostics,
             str((quality_fallback or {}).get("to") or "fallback"): fallback_report_for_diagnostic.diagnostics,
         }
+    if quality_upgrade is not None and quality_upgrade_report is not None:
+        diagnostic.setdefault("quality_stages", {})["premium"] = quality_upgrade_report.diagnostics
 
     public_selected = selected_view(selected, args.include_page_link, args.require_zh)
     public_fallback_selected = selected_view(fallback_selected, True, True)
     if public_fallback_selected is not None:
         public_fallback_selected.pop("magnet", None)
+    public_quality_upgrade_selected = selected_view(quality_upgrade_selected, False, args.require_zh)
+    if public_quality_upgrade_selected is not None:
+        public_quality_upgrade_selected.pop("magnet", None)
+        public_quality_upgrade_selected["source_type"] = quality_upgrade_selected.get("source_type")
     display_title = str((state_show or {}).get("title") or args.title)
     reply_text = ""
     if status in {"found", "finished_deleted", "latest_unresolved"} and public_selected and output_contract["ready"]:
@@ -2114,6 +2333,16 @@ def main(argv: list[str] | None = None) -> int:
             target_episode,
             public_fallback_selected,
         )
+    elif (
+        status == "needs_quality_upgrade_confirmation"
+        and public_quality_upgrade_selected
+        and output_contract["ready"]
+    ):
+        reply_text = render_quality_upgrade_question(
+            display_title,
+            season,
+            public_quality_upgrade_selected,
+        )
     elif not reply_text:
         effective_tier = str((quality_fallback or {}).get("to") or requested_tier)
         reply_text = render_failure_reply(
@@ -2139,6 +2368,8 @@ def main(argv: list[str] | None = None) -> int:
             "effective_policy": core_report.diagnostics.get("size_policy"),
             "fallback": quality_fallback,
             "fallback_candidate": public_fallback_selected,
+            "upgrade": quality_upgrade,
+            "upgrade_candidate": public_quality_upgrade_selected,
         },
         "tracked": tracked,
         "selected": public_selected,

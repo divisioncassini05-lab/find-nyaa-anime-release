@@ -113,6 +113,31 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertIs(identity.kind, EpisodeKind.REGULAR)
         self.assertFalse(nyaa.looks_batch("[Group] Re:ZERO Season 4 - 12 [1080p]"))
 
+    def test_bit_depth_is_not_an_episode_and_season_only_release_is_a_batch(self) -> None:
+        cases = (
+            "[THM] From the New World Season 1 (BD Remux 1080p x264 8-bit PCM) [Dual Audio]",
+            "[Group] Atlas Chronicle Season 2 [BD 1080p HEVC 10-bit FLAC]",
+        )
+        for title in cases:
+            with self.subTest(title=title):
+                identity = parse_release_identity(title)
+                self.assertIsNone(identity.episode)
+                self.assertIs(identity.kind, EpisodeKind.BATCH)
+
+    def test_technical_numbers_without_a_season_are_not_episodes(self) -> None:
+        identity = parse_release_identity(
+            "[Group] Atlas Chronicle [BD 1080p HEVC 10-bit FLAC 2.0 24fps]"
+        )
+        self.assertIsNone(identity.episode)
+        self.assertIs(identity.kind, EpisodeKind.UNKNOWN)
+
+    def test_explicit_episode_still_wins_when_bit_depth_is_present(self) -> None:
+        identity = parse_release_identity(
+            "[Group] Atlas Chronicle Season 2 - 12 [BD 1080p HEVC 10-bit]"
+        )
+        self.assertEqual(str(identity.episode), "12")
+        self.assertIs(identity.kind, EpisodeKind.REGULAR)
+
     def test_generic_batch_ranges_and_multi_season_forms(self) -> None:
         cases = {
             "[Group] Atlas S1 [01-12] Complete": ((1,), "1", "12"),
@@ -524,7 +549,7 @@ class FailureReplyTests(unittest.TestCase):
             {"above_max_count": 1, "size_policy": {"hard_max_gib": 2.0}},
         )
         self.assertNotIn("有高于该区间的资源可选", reply)
-        self.assertIn("每个正篇文件", reply)
+        self.assertIn("正篇平均体积", reply)
 
 
 class SearchReportTests(unittest.TestCase):
@@ -2084,6 +2109,44 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertEqual(second_status, "hit")
         self.assertEqual(resolve.call_count, 1)
 
+    def test_short_term_authoritative_cache_preserves_single_season_metadata(self) -> None:
+        cached = finder.ResolvedAnime(
+            title="Cached Harbor Signals",
+            aliases=["Harbor Signals"],
+            search_titles=["Cached Harbor Signals"],
+            verified_search_titles=["Cached Harbor Signals"],
+            season="S01",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+            source="anilist",
+            anilist_id=9876,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            schedule_cache = root / "schedule.json"
+            finder.write_schedule_snapshot(
+                schedule_cache,
+                f"title:{finder.norm('Harbor Signals')}",
+                cached,
+            )
+            args = finder.build_parser().parse_args(
+                [
+                    "Harbor Signals",
+                    "--schedule-cache",
+                    str(schedule_cache),
+                    "--state",
+                    str(root / "state.json"),
+                ]
+            )
+            with patch.object(finder, "resolve_title", return_value=("unresolved", None)):
+                identity = finder.resolve_work_identity(args, {"version": 1, "shows": []}, finder.date.today())
+        self.assertEqual(identity.status, "resolved")
+        self.assertIn("metadata_cache", identity.sources)
+        self.assertEqual(identity.resolved.season, "S01")
+        self.assertEqual(identity.resolved.mainline_scope, "single")
+
     def test_latest_before_first_episode_skips_rss(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Future Example",
@@ -2305,6 +2368,70 @@ class SeasonBatchSelectionTests(unittest.TestCase):
         self.assertEqual(report.choices, [])
         self.assertEqual(report.diagnostics["season_quality_rejected_count"], 1)
 
+    def test_named_watch_tier_uses_average_with_one_gib_absolute_floor(self) -> None:
+        args = self.args("watch")
+        args.episodes = 25
+        batch = candidate("[G] Atlas Chronicle S1 [01-25] Complete", "57 GiB", 30)
+        sizes = [
+            2.1, 2.2, 1.8, 2.1, 2.2, 1.9, 2.1, 1.7, 2.1, 2.7,
+            2.1, 3.0, 1.9, 2.1, 2.2, 2.2, 2.0, 2.6, 3.0, 2.3,
+            2.3, 2.8, 2.8, 2.3, 2.4,
+        ]
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            search_titles=("Atlas Chronicle",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=25,
+        )
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+            context=context,
+        )
+        self.assertEqual(report.status, "found")
+        coverage = report.selected[0].coverage
+        self.assertEqual(coverage.quality_basis, "average")
+        self.assertAlmostEqual(coverage.average_gib_per_episode, 2.276, places=3)
+        self.assertEqual(coverage.min_gib_per_episode, 1.7)
+        self.assertEqual(coverage.max_gib_per_episode, 3.0)
+
+    def test_named_watch_tier_rejects_any_episode_below_absolute_floor(self) -> None:
+        args = self.args("watch")
+        batch = candidate("[G] Atlas Chronicle S1 [01-12] Complete", "28 GiB", 30)
+        sizes = [0.9] + [2.45] * 11
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["absolute_floor_rejected_count"], 1)
+        self.assertEqual(
+            report.diagnostics["quality_rejection_samples"][0]["reason"],
+            "per_episode_below_absolute_floor",
+        )
+
+    def test_explicit_minimum_remains_strict_per_file(self) -> None:
+        args = self.args("watch")
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 2.0
+        args.max_gib_per_episode = None
+        batch = candidate("[G] Atlas Chronicle S1 [01-12] Complete", "27 GiB", 30)
+        sizes = [1.9] + [2.3] * 11
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["explicit_per_file_rejected_count"], 1)
+        self.assertEqual(
+            report.diagnostics["quality_rejection_samples"][0]["quality_basis"],
+            "explicit_per_file",
+        )
+
     def test_missing_episode_is_conclusive_no_complete_release(self) -> None:
         partial = candidate("[A] Atlas Chronicle S1 [01-12] Complete", "18 GiB", 20)
         report = self.run_report(
@@ -2339,9 +2466,203 @@ class SeasonBatchSelectionTests(unittest.TestCase):
         self.assertEqual(report.status, "found")
         self.assertTrue(report.selected[0].coverage.source_exempt)
         self.assertTrue(report.selected[0].coverage.complete)
+        self.assertEqual(report.selected[0].coverage.quality_basis, "source_exempt")
+
+    def test_explicit_minimum_disables_remux_source_exemption(self) -> None:
+        args = self.args("premium")
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 6.0
+        args.max_gib_per_episode = None
+        remux = candidate("[G] Foxtrot Archive S1 BD Remux Complete", "80 GiB", 8)
+        context = core.SearchContext(
+            canonical_title="Foxtrot Archive",
+            search_titles=("Foxtrot Archive",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=12,
+        )
+        report = self.run_report(
+            [remux],
+            {remux.url: self.detail_page("Foxtrot Archive", {1: [5.5] * 12})},
+            args=args,
+            context=context,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        sample = report.diagnostics["quality_rejection_samples"][0]
+        self.assertEqual(sample["quality_basis"], "explicit_per_file")
+        self.assertEqual(sample["reason"], "explicit_per_file_size_out_of_range")
+
+    def test_season_only_remux_with_bit_depth_reaches_batch_verification(self) -> None:
+        args = self.args("premium")
+        args.query = "Atlas Chronicle"
+        args.episodes = 25
+        remux = candidate(
+            "[Group] Atlas Chronicle Season 1 (BD Remux 1080p x264 8-bit PCM)",
+            "141.2 GiB",
+            5,
+        )
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            search_titles=("Atlas Chronicle",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=25,
+        )
+        sizes = [5.2] * 24 + [6.1]
+        report = self.run_report(
+            [remux],
+            {remux.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+            context=context,
+        )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.diagnostics["aggregate_floor_rejected_count"], 0)
+        self.assertTrue(report.selected[0].coverage.source_exempt)
+        self.assertEqual(report.selected[0].coverage.main_file_count, 25)
 
 
 class SeasonBatchHighLevelTests(unittest.TestCase):
+    @staticmethod
+    def unavailable_batch_report(season: int = 1) -> core.ReleaseSearchReport:
+        return core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=season,
+            requested_episode=None,
+            status="no_complete_season_release",
+            selected=[],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+
+    def test_old_title_only_defaults_to_complete_season(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(
+                    finder,
+                    "search_release_report",
+                    return_value=self.unavailable_batch_report(),
+                ) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["intent"], "season_batch")
+        self.assertEqual(payload["season"], "S01")
+        self.assertEqual(search.call_args.kwargs["intent"], core.SearchIntent.SEASON_BATCH)
+
+    def test_finished_single_mainline_without_season_defaults_to_s01(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season=None,
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(
+                    finder,
+                    "search_release_report",
+                    return_value=self.unavailable_batch_report(),
+                ) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["intent"], "season_batch")
+        self.assertEqual(payload["season"], "S01")
+        self.assertEqual(search.call_args.args[0].season, "S01")
+
+    def test_old_title_only_asks_before_search_when_season_is_unresolved(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Atlas Chronicle",
+            search_titles=["Atlas Chronicle"],
+            season=None,
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="multi",
+            related_titles=["Atlas Chronicle 2"],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(finder, "search_release_report") as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Atlas Chronicle",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "needs_season_confirmation")
+        self.assertEqual(payload["intent"], "season_batch")
+        self.assertIsNone(payload["season"])
+        self.assertIn("第几季", payload["reply_text"])
+        self.assertNotIn("magnet:?", payload["reply_text"])
+        search.assert_not_called()
+
     def test_premium_falls_back_only_one_level_to_watch(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Harbor Signals",
@@ -2431,6 +2752,105 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
         self.assertEqual(payload["quality"]["effective_tier"], "watch")
         self.assertEqual(payload["quality"]["fallback"]["to"], "watch")
         self.assertEqual(payload["selected"]["coverage"]["scope"], "exact")
+
+    def test_watch_prompts_before_upgrading_to_complete_premium_season(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+        )
+        failed = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=1,
+            requested_episode=None,
+            status="release_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="hit",
+        )
+        release = candidate("[G] Harbor Signals S1 BD Remux Complete", "132 GiB", 16)
+        coverage = core.SeasonCoverage(
+            scope="exact",
+            target_season=1,
+            expected_episodes=12,
+            covered_episodes=tuple(range(1, 13)),
+            covered_seasons=(1,),
+            confidence="verified",
+            main_file_count=12,
+            average_gib_per_episode=11.0,
+            min_gib_per_episode=10.5,
+            max_gib_per_episode=11.5,
+            quality_basis="source_exempt",
+            source_exempt=True,
+            complete=True,
+            quality_fit=True,
+            reason="verified_complete_and_qualified",
+        )
+        premium_item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+            effective_season=1,
+            season_source="title_coverage",
+            work_match="canonical",
+            coverage=coverage,
+        )
+        premium = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=1,
+            requested_episode=None,
+            status="found",
+            selected=[premium_item],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="hit",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(
+                    finder,
+                    "search_release_report",
+                    side_effect=[failed, failed, premium],
+                ) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--tier",
+                        "watch",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(search.call_count, 3)
+        self.assertEqual([call.args[0].tier for call in search.call_args_list], ["watch", "browse", "premium"])
+        self.assertEqual(payload["status"], "needs_quality_upgrade_confirmation")
+        self.assertTrue(payload["output_contract"]["ready"])
+        self.assertEqual(payload["quality"]["upgrade_candidate"]["source_type"], "Remux")
+        self.assertNotIn("magnet", payload["quality"]["upgrade_candidate"])
+        self.assertNotIn("magnet:?", payload["reply_text"])
+        self.assertIn("是否改用高画质", payload["reply_text"])
 
 
 if __name__ == "__main__":

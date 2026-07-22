@@ -95,6 +95,15 @@ _BATCH_PATTERN = re.compile(
     re.I,
 )
 _RANGE_SEPARATOR = r"[-~\u2013\u2014\u301c]"
+_TECHNICAL_NUMBER_PATTERNS = (
+    re.compile(r"(?<![a-z0-9])\d{1,3}(?:\.\d+)?\s*(?:-\s*)?bit\b", re.I),
+    re.compile(r"(?<![a-z0-9])\d{1,3}(?:\.\d+)?\s*(?:fps|hz|khz|kbps|mbps)\b", re.I),
+    re.compile(
+        r"(?<![a-z0-9])(?:aac|flac|opus|pcm|dts(?:-hd)?|ac-?3|e-?ac-?3|ddp|truehd)"
+        r"\s*\d(?:\.\d+)?\b",
+        re.I,
+    ),
+)
 
 
 def _number_from_token(value: str) -> int | None:
@@ -259,11 +268,22 @@ def _episode_from_title(
         if value is not None and value < Decimal("100"):
             return value, Confidence.WEAK
 
+    technical_spans = [
+        technical_match.span()
+        for pattern in _TECHNICAL_NUMBER_PATTERNS
+        for technical_match in pattern.finditer(lower)
+    ]
     for match in re.finditer(
         r"(?:^|[\s_-])0*(?P<episode>\d{1,3}(?:\.\d+)?)(?:v\d+)?(?=$|[.\s_\-\[\]\(\)\u3010\u3011])",
         lower,
     ):
         if season_span and season_span[0] <= match.start("episode") < season_span[1]:
+            continue
+        episode_span = match.span("episode")
+        if any(
+            episode_span[0] < technical_end and technical_start < episode_span[1]
+            for technical_start, technical_end in technical_spans
+        ):
             continue
         value = _decimal(match.group("episode"))
         if value is not None and value < Decimal("100"):
@@ -283,10 +303,17 @@ def parse_release_identity(title: str) -> ReleaseIdentity:
     if episode is not None and episode != episode.to_integral_value():
         special_markers = tuple(dict.fromkeys([*special_markers, "decimal_episode"]))
 
+    season_only_package = bool(
+        season is not None
+        and season_confidence is Confidence.EXPLICIT
+        and episode is None
+        and not special_markers
+    )
     batch_marked = bool(
         episode_start is not None
         or len(covered_seasons) > 1
         or _BATCH_PATTERN.search(title)
+        or season_only_package
     )
     if batch_marked:
         kind = EpisodeKind.BATCH

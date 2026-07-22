@@ -70,8 +70,10 @@ class SeasonCoverage:
     covered_seasons: tuple[int, ...] = ()
     confidence: str = "unknown"
     main_file_count: int = 0
+    average_gib_per_episode: float | None = None
     min_gib_per_episode: float | None = None
     max_gib_per_episode: float | None = None
+    quality_basis: str = "average"
     source_exempt: bool = False
     complete: bool = False
     quality_fit: bool = False
@@ -629,7 +631,11 @@ def _season_batch_scope(item: ClassifiedCandidate, requested_season: int | None)
 
 
 def _is_source_exempt(item: ClassifiedCandidate, args: argparse.Namespace) -> bool:
-    return args.tier == "premium" and bool(_SOURCE_EXEMPT_PATTERN.search(item.candidate.title))
+    return (
+        args.tier == "premium"
+        and getattr(args, "size_policy_source", "tier") != "explicit"
+        and bool(_SOURCE_EXEMPT_PATTERN.search(item.candidate.title))
+    )
 
 
 def _is_main_video(entry: nyaa.NyaaFileEntry) -> bool:
@@ -799,16 +805,44 @@ def _coverage_from_file_entries(
         )
 
     all_sizes_known = bool(mapped) and all(entry.size_bytes is not None for entry in mapped.values())
+    average_gib = sum(size_gib) / len(size_gib) if size_gib else None
+    quality_basis = "source_exempt" if source_exempt else (
+        "explicit_per_file" if policy.source == "explicit" else "average"
+    )
     quality_fit = source_exempt
+    reason = "verified_complete_and_qualified" if source_exempt else "per_episode_size_unavailable"
     if not source_exempt and all_sizes_known:
-        quality_fit = all(
-            (policy.hard_min_gib is None or value >= policy.hard_min_gib)
-            and (policy.hard_max_gib is None or value <= policy.hard_max_gib)
-            for value in size_gib
+        explicit_lower_override = (
+            policy.source == "explicit"
+            and policy.hard_min_gib is not None
+            and policy.hard_min_gib < 1.0
         )
-    reason = "verified_complete_and_qualified" if quality_fit else "per_episode_size_out_of_range"
-    if not source_exempt and not all_sizes_known:
-        reason = "per_episode_size_unavailable"
+        absolute_floor = policy.hard_min_gib if explicit_lower_override else 1.0
+        if any(value < absolute_floor for value in size_gib):
+            quality_fit = False
+            reason = "per_episode_below_absolute_floor"
+        elif policy.source == "explicit":
+            quality_fit = all(
+                (policy.hard_min_gib is None or value >= policy.hard_min_gib)
+                and (policy.hard_max_gib is None or value <= policy.hard_max_gib)
+                for value in size_gib
+            )
+            reason = (
+                "verified_complete_and_qualified"
+                if quality_fit
+                else "explicit_per_file_size_out_of_range"
+            )
+        else:
+            quality_fit = bool(
+                average_gib is not None
+                and (policy.hard_min_gib is None or average_gib >= policy.hard_min_gib)
+                and (policy.hard_max_gib is None or average_gib <= policy.hard_max_gib)
+            )
+            reason = (
+                "verified_complete_and_qualified"
+                if quality_fit
+                else "average_size_out_of_range"
+            )
     return SeasonCoverage(
         scope=scope,
         target_season=requested_season,
@@ -817,8 +851,10 @@ def _coverage_from_file_entries(
         covered_seasons=mapped_seasons or covered_seasons,
         confidence="verified",
         main_file_count=len(mapped) or len(videos),
+        average_gib_per_episode=round(average_gib, 3) if average_gib is not None else None,
         min_gib_per_episode=round(min(size_gib), 3) if size_gib else None,
         max_gib_per_episode=round(max(size_gib), 3) if size_gib else None,
+        quality_basis=quality_basis,
         source_exempt=source_exempt,
         complete=True,
         quality_fit=quality_fit,
@@ -863,6 +899,10 @@ def _season_batch_report(
             "season_detail_failed_count": 0,
             "season_detail_unchecked_count": 0,
             "season_quality_rejected_count": 0,
+            "absolute_floor_rejected_count": 0,
+            "average_range_rejected_count": 0,
+            "explicit_per_file_rejected_count": 0,
+            "quality_rejection_samples": [],
         }
     )
     if not batches:
@@ -966,6 +1006,23 @@ def _season_batch_report(
                 continue
             if not coverage.quality_fit:
                 diagnostics["season_quality_rejected_count"] += 1
+                reason_counter = {
+                    "per_episode_below_absolute_floor": "absolute_floor_rejected_count",
+                    "average_size_out_of_range": "average_range_rejected_count",
+                    "explicit_per_file_size_out_of_range": "explicit_per_file_rejected_count",
+                }.get(coverage.reason)
+                if reason_counter:
+                    diagnostics[reason_counter] += 1
+                if len(diagnostics["quality_rejection_samples"]) < 3:
+                    diagnostics["quality_rejection_samples"].append(
+                        {
+                            "average_gib_per_episode": coverage.average_gib_per_episode,
+                            "min_gib_per_episode": coverage.min_gib_per_episode,
+                            "max_gib_per_episode": coverage.max_gib_per_episode,
+                            "quality_basis": coverage.quality_basis,
+                            "reason": coverage.reason,
+                        }
+                    )
                 continue
             quality_complete_count += 1
             detail_text = nyaa.extract_nyaa_description(page_html)

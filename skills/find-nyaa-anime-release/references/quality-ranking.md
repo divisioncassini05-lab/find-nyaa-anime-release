@@ -23,11 +23,12 @@ Use this reference only for unusual quality disputes, batch math, downgrade deci
 
 - Explicit size constraints override tier hard bounds. `--min-gib-per-episode 1` means `>=1 GiB` with no upper limit; add `--max-gib-per-episode` only when the user states a range.
 - Do not reduce a tier floor for a short runtime. A 12-minute episode at 514 MiB is below both `watch` and `browse` for this user.
-- For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras; every regular video file must pass the active range. Total size may prove a package is impossible, but cannot prove it is qualified.
+- For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras. Named tiers classify the remaining regular files by average size while enforcing a `1 GiB` absolute floor on every ordinary regular file. Explicit min/max constraints remain strict per file. Total size may prove a package is impossible, but cannot prove it is qualified.
 - A below-floor Chinese-subtitle release must not beat a qualified unsubtitled or multi-subtitle release unless Chinese subtitles are an explicit hard requirement and the user has separately approved a tier downgrade.
 - For an ordinary or soft-Chinese **普通观看** (`watch`) request with no `2-4 GiB` candidate and no user-supplied custom floor, the high-level script automatically retries the same target as **轻量观看** (`browse`, `1-2 GiB`). Label it **轻量观看降级结果**. A valid `2-4 GiB` candidate is never displaced merely because a smaller release has Chinese subtitles.
 - For a hard-Chinese **普通观看** request, a verified-Chinese **轻量观看** fallback produces `needs_quality_fallback_confirmation`: show its metadata without a magnet and ask first. After approval, rerun at `browse`; never go below `1 GiB`.
 - A high-quality request may retry exactly once at normal-watching quality. A direct normal-watching request may retry exactly once at lightweight quality. Never chain high -> normal -> lightweight in one request.
+- When a complete-season normal request and its lightweight fallback both fail but a verified premium package exists, return `needs_quality_upgrade_confirmation`. Show source type, total size, episode count, and seeders without a page or magnet; rerun at `premium` only after approval.
 
 ## Ranking
 
@@ -36,7 +37,7 @@ Hard filters happen before ranking:
 1. Work, effective season, and exact regular episode.
 2. Explicit size bounds or the requested tier range.
 3. Any requested audio/source restriction.
-4. For a complete-season request: verified regular-episode coverage and per-file size. Prefer exact-season packages before qualified multi-season collections.
+4. For a complete-season request: verified regular-episode coverage, the per-file absolute floor, then named-tier average or explicit per-file bounds. Prefer exact-season packages before qualified multi-season collections.
 
 Rank qualified candidates by requested quality, then swarm strength, original audio, an explicit current-request group hint, and finally Chinese/mixed-subtitle signals. In ordinary or soft-Chinese mode, subtitle signals are tie-breakers within the same quality class and never a reason to cross a hard filter. In hard-Chinese mode, verified Simplified or Traditional Chinese is an additional hard filter after work, episode, and size.
 
@@ -49,5 +50,6 @@ Rank qualified candidates by requested quality, then swarm strength, original au
 - `subtitle_unqualified` means every size-qualified candidate was checked successfully and none had verified Chinese subtitles.
 - `subtitle_check_incomplete` means the detail budget expired, a request failed, a URL was unavailable, or candidates remain unchecked. Do not state that no Chinese release exists.
 - `needs_quality_fallback_confirmation` means a hard-Chinese request can only be met by dropping from **普通观看** to **轻量观看**. Do not expose the fallback magnet before approval.
+- `needs_quality_upgrade_confirmation` means normal and lightweight complete-season checks failed but a verified premium package exists. Do not expose its page or magnet before approval.
 - `needs_confirmation` means special/batch/unknown parsing makes a definitive choice unsafe. Present at most two choices and their parsed identity.
 - `latest_unresolved` means an official airing target was unavailable; do not phrase the observed candidate as official latest.
