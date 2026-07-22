@@ -19,7 +19,7 @@ import search_nyaa_releases as nyaa
 from release_identity import EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
 
 
-RAW_CACHE_VERSION = 2
+RAW_CACHE_VERSION = 3
 RAW_CACHE_SECONDS = 5 * 60
 MAX_RAW_CACHE_ENTRIES = 120
 TIER_SIZE_BOUNDS: dict[str, tuple[float, float | None]] = {
@@ -363,9 +363,14 @@ def collect_raw_candidates(
                 {"query": query, "xml": nyaa.ET.tostring(item, encoding="unicode")}
             )
     candidates = _score_rss_items(rss_items, args)
-    if cache_path is not None and rss_items:
+    # A multi-query result is only reusable when every query completed. Caching a
+    # partial result can turn a transient alias failure into a false hard miss.
+    if cache_path is not None and rss_items and not failures:
         _write_cached_rss_items(cache_path, key, rss_items)
-    return candidates, failures, "refresh" if refresh_cache else "miss"
+    cache_state = "refresh" if refresh_cache else "miss"
+    if failures:
+        cache_state += "-partial"
+    return candidates, failures, cache_state
 
 
 def _compact_title(value: str, flexible: bool = False) -> str:
@@ -1214,6 +1219,7 @@ def search_release_report(
     requested_episode = requested_episode if requested_episode is not None else args.episode
     size_policy = size_policy_from_args(args)
     raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    rss_failure_count = len(failures)
     if not raw:
         return ReleaseSearchReport(
             intent=intent,
@@ -1249,6 +1255,7 @@ def search_release_report(
             item.season_match == "other" for item in classified
         ),
         "quality_rejected_count": 0,
+        "rss_failure_count": rss_failure_count,
         "fallback_query_used": False,
         "observed_target_max_gib": _observed_target_max_gib(
             classified, requested_episode, args.episodes
@@ -1285,6 +1292,7 @@ def search_release_report(
             fallback_args, cache_path, refresh_cache
         )
         failures.extend(fallback_failures)
+        rss_failure_count += len(fallback_failures)
         raw = _merge_candidates(raw, fallback_raw)
         classified = _classify(raw, requested_season, context)
         in_season = [item for item in classified if _in_requested_season(item)]
@@ -1312,6 +1320,7 @@ def search_release_report(
                 ),
                 "fallback_query_used": True,
                 "fallback_cache": fallback_cache,
+                "rss_failure_count": rss_failure_count,
                 "observed_target_max_gib": _observed_target_max_gib(
                     classified, requested_episode, args.episodes
                 ),
@@ -1410,13 +1419,43 @@ def search_release_report(
             }
         )
         if not verified:
+            if cache_state == "hit" and not refresh_cache and cache_path is not None:
+                refresh_args = argparse.Namespace(**vars(args))
+                elapsed_seconds = detail_inspection.elapsed_ms / 1000.0
+                refresh_args.detail_budget_seconds = max(
+                    0.0,
+                    float(getattr(args, "detail_budget_seconds", 30.0)) - elapsed_seconds,
+                )
+                refreshed = search_release_report(
+                    refresh_args,
+                    intent=intent,
+                    requested_episode=requested_episode,
+                    include_specials=include_specials,
+                    cache_path=cache_path,
+                    refresh_cache=True,
+                    context=context,
+                )
+                refreshed.diagnostics.update(
+                    {
+                        "strict_cache_refresh_used": True,
+                        "strict_cache_initial_raw_count": diagnostics["raw_count"],
+                        "strict_cache_initial_detail_elapsed_ms": detail_inspection.elapsed_ms,
+                    }
+                )
+                if refreshed.status in {
+                    "network_error",
+                    "no_rss_candidates",
+                    "no_nyaa_release_for_target",
+                }:
+                    refreshed.status = "subtitle_check_incomplete"
+                return refreshed
             return ReleaseSearchReport(
                 intent=intent,
                 requested_season=requested_season,
                 requested_episode=requested_episode,
                 status=(
                     "subtitle_unqualified"
-                    if detail_inspection.complete
+                    if detail_inspection.complete and rss_failure_count == 0
                     else "subtitle_check_incomplete"
                 ),
                 selected=[],

@@ -690,6 +690,51 @@ class SearchReportTests(unittest.TestCase):
         self.assertEqual(report.status, "subtitle_check_incomplete")
         self.assertEqual(report.diagnostics["detail_failed_count"], 1)
 
+    def test_strict_zh_query_failure_is_incomplete_not_unqualified(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        release = candidate("[G] Re:ZERO S04E12 [1080p]", "1.5 GiB", 10)
+        self.mock_collect.return_value = ([release], ["alias query timed out"], "miss-partial")
+        with patch.object(nyaa, "fetch_nyaa_detail_text", return_value="Subtitle: English"):
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "subtitle_check_incomplete")
+        self.assertEqual(report.diagnostics["rss_failure_count"], 1)
+
+    def test_strict_zh_cached_negative_refreshes_before_concluding(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        plain = candidate("[G] Re:ZERO S04E12 [1080p]", "1.5 GiB", 500)
+        chinese = candidate("[ZH] Re:ZERO S04E12 [CHT]", "1.5 GiB", 10)
+        chinese.subtitle_signal = "CHT"
+        self.mock_collect.side_effect = [
+            ([plain], [], "hit"),
+            ([plain, chinese], [], "refresh"),
+        ]
+
+        def detail_for(url: str, _timeout: float) -> str:
+            if url == chinese.url:
+                return "[CHT]\nSubtitle:\nHardSub\nEpisode [CHT].mp4"
+            return "Subtitle: English"
+
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(nyaa, "fetch_nyaa_detail_text", side_effect=detail_for),
+        ):
+            report = core.search_release_report(
+                self.args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=12,
+                cache_path=Path(temp_dir) / "raw.json",
+            )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.url, chinese.url)
+        self.assertTrue(report.diagnostics["strict_cache_refresh_used"])
+        self.assertEqual(self.mock_collect.call_count, 2)
+
     def test_strict_zh_never_auto_selects_unknown_work_from_broad_query(self) -> None:
         self.args.require_zh = True
         self.args.want_zh = True
@@ -1056,6 +1101,20 @@ class SearchReportTests(unittest.TestCase):
         self.assertEqual((browse_cache, watch_cache), ("hit", "hit"))
         self.assertEqual(browse[0].tier_fit, "in-tier")
         self.assertEqual(watch[0].tier_fit, "below")
+
+    def test_partial_multi_query_result_is_not_cached(self) -> None:
+        item = rss_item("[B] Example S01E01 [1080p]", "1.5 GiB", 10)
+        feed = f"<rss><channel>{item['xml']}</channel></rss>"
+        self.args.query = "Example"
+        self.args.alias = ["Example Alias"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "raw.json"
+            with patch.object(nyaa, "fetch_rss", side_effect=[feed, TimeoutError("slow")]):
+                _, failures, cache_state = self.real_collect(self.args, cache)
+            cached = core._read_cached_rss_items(cache, core._raw_cache_key(self.args))
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(cache_state, "miss-partial")
+        self.assertIsNone(cached)
 
 
 class HighLevelStateTests(unittest.TestCase):
