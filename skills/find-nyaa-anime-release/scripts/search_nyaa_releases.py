@@ -98,6 +98,32 @@ DETAIL_CHINESE_LITERALS = (
     "\u7b80\u7e41",
     "\u7c21\u7e41",
 )
+DETAIL_STRONG_CHINESE_MARKERS = frozenset(
+    {
+        "Simplified Chinese",
+        "Traditional Chinese",
+        "zh-cn",
+        "zh-tw",
+        "zh-Hans",
+        "zh-Hant",
+        "CHS",
+        "CHT",
+        "BIG5",
+        "\u7b80\u4f53",
+        "\u7c21\u9ad4",
+        "\u7e41\u4f53",
+        "\u7e41\u9ad4",
+        "\u7b80\u4e2d",
+        "\u7e41\u4e2d",
+        "\u7b80\u65e5",
+        "\u7e41\u65e5",
+        "\u7b80\u7e41",
+        "\u7c21\u7e41",
+    }
+)
+DETAIL_GENERIC_CHINESE_VALUE_PATTERN = (
+    r"^(?:(?:language|lang)\s*[:=]\s*)?(?:chinese|\u4e2d\u6587)\s*$"
+)
 ORIGINAL_AUDIO_PATTERNS = {
     "Japanese": r"(?<![a-z0-9])(?:japanese|jpn|jap|jp|ja)(?![a-z0-9])",
     "JPN audio": r"(?<![a-z0-9])(?:jpn|jap|jp|ja)[-_ ]?audio(?![a-z0-9])",
@@ -342,6 +368,7 @@ def extract_nyaa_file_entries(page_html: str) -> list[NyaaFileEntry]:
 
 def detect_chinese_in_detail(detail_text: str) -> tuple[bool, str]:
     lines = [line.strip() for line in detail_text.splitlines() if line.strip()]
+    page_has_subtitle_mode = bool(re.search(DETAIL_SUBTITLE_MODE_PATTERN, detail_text, re.I))
     hits: list[str] = []
     for index, line in enumerate(lines):
         line_hits = [name for name, pattern in DETAIL_CHINESE_PATTERNS.items() if re.search(pattern, line, re.I)]
@@ -349,33 +376,28 @@ def detect_chinese_in_detail(detail_text: str) -> tuple[bool, str]:
         if not line_hits:
             continue
         prior_window = " | ".join(lines[max(0, index - 3) : index + 1])
-        surrounding_window = " | ".join(lines[max(0, index - 3) : min(len(lines), index + 4)])
         if re.search(DETAIL_CHINESE_NEGATION_PATTERN, line, re.I):
             continue
+        strong_hits = [hit for hit in line_hits if hit in DETAIL_STRONG_CHINESE_MARKERS]
         line_has_context = any(
             re.search(pattern, line, re.I) for pattern in DETAIL_SUBTITLE_CONTEXT_PATTERNS
         )
         prior_has_context = any(
             re.search(pattern, prior_window, re.I) for pattern in DETAIL_SUBTITLE_CONTEXT_PATTERNS
         )
-        surrounding_has_context = any(
-            re.search(pattern, surrounding_window, re.I)
-            for pattern in DETAIL_SUBTITLE_CONTEXT_PATTERNS
-        )
-        surrounding_has_mode = bool(
-            re.search(DETAIL_SUBTITLE_MODE_PATTERN, surrounding_window, re.I)
-        )
         direct_subtitle_file = bool(re.search(DETAIL_SUBTITLE_FILE_PATTERN, line, re.I))
         audio_only_line = bool(re.search(DETAIL_AUDIO_CONTEXT_PATTERN, line, re.I)) and not line_has_context
         if audio_only_line:
             continue
-        if (
-            line_has_context
-            or direct_subtitle_file
-            or prior_has_context
-            or (surrounding_has_context and surrounding_has_mode)
-        ):
+        contextual_language_value = bool(
+            re.search(DETAIL_GENERIC_CHINESE_VALUE_PATTERN, line, re.I)
+        )
+        if line_has_context or direct_subtitle_file:
             hits.extend(line_hits)
+        elif prior_has_context and (strong_hits or contextual_language_value):
+            hits.extend(line_hits)
+        elif page_has_subtitle_mode and strong_hits:
+            hits.extend(strong_hits)
     if hits:
         return True, "detail-page: " + ", ".join(dict.fromkeys(hits))
     return False, "detail-page: not confirmed"

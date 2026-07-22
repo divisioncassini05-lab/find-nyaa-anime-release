@@ -436,6 +436,30 @@ class SubtitleDetailTests(unittest.TestCase):
         self.assertTrue(confirmed)
         self.assertIn("CHT", signal)
 
+    def test_cht_hardsub_evidence_can_be_separated_across_the_detail_page(self) -> None:
+        page = """
+        <h3 class="panel-title">[FixtureGroup] Atlas Chronicle - 04 [CHT][MP4]</h3>
+        <div id="torrent-description">
+          Torrent Info<br>Source: Baha<br>Video: AVC<br>Audio: AAC<br>
+          Container: MP4<br>Generated automatically<br>Subtitle:<br>HardSub
+        </div>
+        <div class="torrent-file-list panel-body"><ul>
+          <li>[FixtureGroup] Atlas Chronicle - 04 [1080P][CHT].mp4</li>
+        </ul></div>
+        """
+        confirmed, signal = nyaa.detect_chinese_in_detail(nyaa.extract_nyaa_description(page))
+        self.assertTrue(confirmed)
+        self.assertIn("CHT", signal)
+
+    def test_generic_chinese_title_does_not_pair_with_page_level_hardsub(self) -> None:
+        page = """
+        <h3 class="panel-title">Chinese Example - 04</h3>
+        <div id="torrent-description">Subtitle:<br>HardSub</div>
+        <div class="torrent-file-list panel-body"><ul><li>Chinese Example - 04.mp4</li></ul></div>
+        """
+        confirmed, _ = nyaa.detect_chinese_in_detail(nyaa.extract_nyaa_description(page))
+        self.assertFalse(confirmed)
+
     def test_cht_title_without_matching_subtitle_context_is_not_proof(self) -> None:
         page = """
         <h3 class="panel-title">Example - 03 [CHT]</h3>
