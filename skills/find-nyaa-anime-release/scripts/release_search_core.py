@@ -117,6 +117,7 @@ class ClassifiedCandidate:
         include_work_evidence: bool = False,
     ) -> dict[str, Any]:
         payload = {
+            "nyaa_id": nyaa.nyaa_id_from_url(self.candidate.url),
             "title": self.candidate.title,
             "size": self.candidate.size,
             "seeders": self.candidate.seeders,
@@ -125,6 +126,10 @@ class ClassifiedCandidate:
             "magnet": self.candidate.magnet,
             "published": self.candidate.published,
             "score": self.candidate.score,
+            "matched_queries": self.candidate.matched_queries,
+            "detail_checked": self.candidate.detail_checked,
+            "detail_chinese_confirmed": self.candidate.detail_chinese_confirmed,
+            "detail_subtitle_signal": self.candidate.detail_subtitle_signal,
             "identity": self.identity.as_dict(),
             "season_match": self.season_match,
             "effective_season": self.effective_season,
@@ -152,13 +157,18 @@ class ReleaseSearchReport:
     cache: str
 
     def as_dict(self, explain: bool = False) -> dict[str, Any]:
+        selected = [item.as_dict(explain, explain) for item in self.selected]
+        choices = [item.as_dict(True, explain) for item in self.choices[:2]]
+        if self.status != "found":
+            for item in [*selected, *choices]:
+                item.pop("magnet", None)
         return {
             "status": self.status,
             "intent": self.intent.value,
             "requested_season": self.requested_season,
             "requested_episode": self.requested_episode,
-            "selected": [item.as_dict(explain, explain) for item in self.selected],
-            "choices": [item.as_dict(True, explain) for item in self.choices[:2]],
+            "selected": selected,
+            "choices": choices,
             "diagnostic": self.diagnostics,
             "failures": self.failures[:2],
             "cache": self.cache,
@@ -351,17 +361,41 @@ def collect_raw_candidates(
 
     rss_items: list[dict[str, str]] = []
     failures: list[str] = []
-    for query in dict.fromkeys([args.query, *args.alias]):
-        try:
-            rss = nyaa.fetch_rss(query, args.category, args.filter, args.timeout)
-            root = nyaa.ET.fromstring(rss)
-        except Exception as exc:  # noqa: BLE001 - reports keep network failures separate from empty results.
-            failures.append(f"{query}: {exc}")
-            continue
-        for item in root.findall("./channel/item"):
-            rss_items.append(
-                {"query": query, "xml": nyaa.ET.tostring(item, encoding="unicode")}
-            )
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+
+    def fetch_query(query: str) -> list[dict[str, str]]:
+        rss = nyaa.fetch_rss(query, args.category, args.filter, args.timeout)
+        root = nyaa.ET.fromstring(rss)
+        return [
+            {"query": query, "xml": nyaa.ET.tostring(item, encoding="unicode")}
+            for item in root.findall("./channel/item")
+        ]
+
+    # Discovery is the latency-sensitive path and queries at most a few Agent-picked
+    # names. Keep the legacy path sequential so existing callers retain deterministic
+    # request order.
+    if getattr(args, "discover", False) and len(queries) > 1:
+        query_results: dict[str, list[dict[str, str]]] = {}
+        query_failures: dict[str, Exception] = {}
+        with ThreadPoolExecutor(max_workers=min(4, len(queries))) as executor:
+            future_queries = {executor.submit(fetch_query, query): query for query in queries}
+            for future in as_completed(future_queries):
+                query = future_queries[future]
+                try:
+                    query_results[query] = future.result()
+                except Exception as exc:  # noqa: BLE001 - preserve per-query network failures.
+                    query_failures[query] = exc
+        for query in queries:
+            if query in query_failures:
+                failures.append(f"{query}: {query_failures[query]}")
+            else:
+                rss_items.extend(query_results.get(query, []))
+    else:
+        for query in queries:
+            try:
+                rss_items.extend(fetch_query(query))
+            except Exception as exc:  # noqa: BLE001 - reports keep network failures separate from empty results.
+                failures.append(f"{query}: {exc}")
     candidates = _score_rss_items(rss_items, args)
     # A multi-query result is only reusable when every query completed. Caching a
     # partial result can turn a transient alias failure into a false hard miss.
@@ -371,6 +405,72 @@ def collect_raw_candidates(
     if failures:
         cache_state += "-partial"
     return candidates, failures, cache_state
+
+
+def _discovery_sort_key(item: ClassifiedCandidate) -> tuple[str, int, int, int, float]:
+    identity = item.identity
+    nyaa_id = nyaa.nyaa_id_from_url(item.candidate.url) or "0"
+    return (
+        item.candidate.published or "",
+        identity.season or 0,
+        int(identity.episode or identity.episode_end or 0),
+        int(nyaa_id) if nyaa_id.isdigit() else 0,
+        item.candidate.score,
+    )
+
+
+def discover_release_candidates(
+    args: argparse.Namespace,
+    cache_path: Path | None = None,
+    refresh_cache: bool = False,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Collect a compact, unqualified candidate set for Agent-side decisions."""
+    raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    requested_season = normalize_season_number(getattr(args, "season", None))
+    classified = sorted(
+        _classify(raw, requested_season),
+        key=_discovery_sort_key,
+        reverse=True,
+    )[: max(1, limit)]
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+    latin_queries = [query for query in queries if re.search(r"[A-Za-z]", query)]
+    if classified:
+        status = "found"
+    elif failures and len(failures) >= len(queries):
+        status = "network_error"
+    else:
+        status = "no_rss_candidates"
+    candidates = []
+    for item in classified:
+        candidate = item.candidate
+        candidates.append(
+            {
+                "nyaa_id": nyaa.nyaa_id_from_url(candidate.url),
+                "title": candidate.title,
+                "identity": item.identity.as_dict(),
+                "size_gib": (
+                    round(nyaa.bytes_to_gib(candidate.size_bytes), 3)
+                    if candidate.size_bytes is not None
+                    else None
+                ),
+                "seeders": candidate.seeders,
+                "published": candidate.published,
+                "matched_queries": candidate.matched_queries,
+                "url": candidate.url,
+            }
+        )
+    return {
+        "status": status,
+        "queries": queries,
+        "query_coverage": (
+            "includes_latin_alias" if latin_queries else "cjk_only_provisional"
+        ),
+        "ordering": "published_desc_only_not_quality_rank",
+        "candidates": candidates,
+        "failures": failures,
+        "cache": cache_state,
+    }
 
 
 def _compact_title(value: str, flexible: bool = False) -> str:
@@ -1220,6 +1320,7 @@ def search_release_report(
     size_policy = size_policy_from_args(args)
     raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
     rss_failure_count = len(failures)
+    queries = list(dict.fromkeys([args.query, *args.alias]))
     if not raw:
         return ReleaseSearchReport(
             intent=intent,
@@ -1228,10 +1329,47 @@ def search_release_report(
             status="network_error" if failures else "no_rss_candidates",
             selected=[],
             choices=[],
-            diagnostics={"raw_count": 0, "network_failures": len(failures)},
+            diagnostics={
+                "raw_count": 0,
+                "network_failures": len(failures),
+                "queries": queries,
+            },
             failures=failures,
             cache=cache_state,
         )
+
+    candidate_id_values = list(getattr(args, "candidate_id", []) or [])
+    requested_candidate_ids = {
+        candidate_id
+        for candidate_id in (
+            nyaa.nyaa_id_from_url(str(value)) for value in candidate_id_values
+        )
+        if candidate_id is not None
+    }
+    if candidate_id_values:
+        unfiltered_count = len(raw)
+        raw = [
+            candidate
+            for candidate in raw
+            if nyaa.nyaa_id_from_url(candidate.url) in requested_candidate_ids
+        ]
+        if not raw:
+            return ReleaseSearchReport(
+                intent=intent,
+                requested_season=requested_season,
+                requested_episode=requested_episode,
+                status="candidate_not_found",
+                selected=[],
+                choices=[],
+                diagnostics={
+                    "raw_count": unfiltered_count,
+                    "candidate_id_filter": sorted(requested_candidate_ids),
+                    "candidate_id_matched_count": 0,
+                    "queries": queries,
+                },
+                failures=failures,
+                cache=cache_state,
+            )
 
     classified = _classify(raw, requested_season, context)
     in_season = [item for item in classified if _in_requested_season(item)]
@@ -1244,6 +1382,9 @@ def search_release_report(
     ]
     diagnostics: dict[str, Any] = {
         "raw_count": len(classified),
+        "queries": queries,
+        "candidate_id_filter": sorted(requested_candidate_ids),
+        "candidate_id_matched_count": len(raw) if candidate_id_values else None,
         "season_matched_count": len(in_season),
         "season_unknown_count": len(unknown_season),
         "context_season_count": sum(item.season_source == "single_mainline" for item in classified),
@@ -1286,6 +1427,7 @@ def search_release_report(
         and not exact_regular
         and parse_is_uncertain
         and intent is not SearchIntent.SEASON_BROWSE
+        and not candidate_id_values
     ):
         fallback_args = _targeted_fallback_args(args, requested_season, requested_episode)
         fallback_raw, fallback_failures, fallback_cache = collect_raw_candidates(

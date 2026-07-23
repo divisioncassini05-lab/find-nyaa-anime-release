@@ -1,4 +1,4 @@
 interface:
   display_name: "Find Nyaa Anime Release"
-  short_description: "Fast anime search with optional verified Chinese subtitles."
-  default_prompt: "Use $find-nyaa-anime-release to find one qualified anime release; only detail-verify Simplified or Traditional Chinese subtitles when I explicitly require Chinese subtitles."
+  short_description: "Agent-led Nyaa discovery and targeted release verification."
+  default_prompt: "Use $find-nyaa-anime-release to read local progress, target the correct next episode, enforce the 1 GiB floor, and verify the best qualified release."

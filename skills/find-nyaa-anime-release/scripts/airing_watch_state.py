@@ -6,11 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from runtime_paths import DEFAULT_STATE
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def now_iso() -> str:
@@ -111,6 +118,24 @@ def print_show(show: dict[str, Any] | None) -> None:
     print(json.dumps(show, ensure_ascii=False, indent=2))
 
 
+def probe_payload(show: dict[str, Any] | None) -> dict[str, Any]:
+    if show is None:
+        return {"status": "not_tracked", "tracked": False}
+    return {
+        "status": "tracked",
+        "tracked": True,
+        "title": show.get("title"),
+        "aliases": show.get("aliases", []),
+        "season": show.get("season"),
+        "latest_known_episode": show.get("latest_known_episode"),
+        "next_episode": show.get("next_episode"),
+        "airing": show.get("airing"),
+        "tracking_status": show.get("status"),
+        "search_titles": show.get("search_titles", []),
+        "verified_search_titles": show.get("verified_search_titles", []),
+    }
+
+
 def delete_show(data: dict[str, Any], query: str) -> dict[str, Any] | None:
     show = find_show(data, query)
     if show is None:
@@ -119,13 +144,19 @@ def delete_show(data: dict[str, Any], query: str) -> dict[str, Any] | None:
     return show
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_get = sub.add_parser("get", help="Find a tracked airing show by title/alias")
     p_get.add_argument("title")
+
+    p_probe = sub.add_parser(
+        "probe",
+        help="Read a compact tracked-show target without modifying state",
+    )
+    p_probe.add_argument("title")
 
     p_list = sub.add_parser("list", help="List tracked airing shows")
 
@@ -143,11 +174,13 @@ def main() -> int:
     p_delete = sub.add_parser("delete", help="Remove a show from airing tracking")
     p_delete.add_argument("title")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     data = load_state(args.state)
 
     if args.cmd == "get":
         print_show(find_show(data, args.title))
+    elif args.cmd == "probe":
+        print(json.dumps(probe_payload(find_show(data, args.title)), ensure_ascii=False))
     elif args.cmd == "list":
         print(json.dumps(data.get("shows", []), ensure_ascii=False, indent=2))
     elif args.cmd == "update":

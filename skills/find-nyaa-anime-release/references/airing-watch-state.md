@@ -13,6 +13,7 @@ Useful commands:
 ```bash
 python scripts/find_anime_release.py "TITLE" --tier browse --include-magnet --legal-ok --json
 python scripts/find_anime_release.py "TITLE" --latest --tier browse --json
+python scripts/airing_watch_state.py probe "TITLE"
 python scripts/airing_watch_state.py get "TITLE"
 python scripts/airing_watch_state.py delete "TITLE"
 ```
@@ -24,6 +25,7 @@ python scripts/airing_watch_state.py delete "TITLE"
 - `search_titles` is an ordered list of English/romaji Nyaa query names. `verified_search_titles` contains names that actually produced a selected release. A Chinese-only tracked record is incomplete and must be enriched through Bangumi before Nyaa is queried.
 - New aliases and stable IDs are learned only when they bridge to an already tracked airing show or when a newly resolved airing show is added. Do not treat short technical cache entries as aliases or watch history.
 - A tracked title-only request targets `next_episode`. An explicit season or episode wins.
+- Run `probe` before an ordinary title search. It is read-only and returns compact progress plus verified Nyaa search titles; a miss does not create state.
 - Persist `mainline_scope` and `related_titles` for current shows when AniList supplies them. A sole mainline season may inherit missing release season labels; side stories and multi-season ambiguity may not.
 - When the user changes or selects only the season of a tracked show, preserve `next_episode`. Normalize the season to `SNN` and search that exact next episode; do not ask the user to repeat an episode number.
 - `--latest` first asks AniList schedule metadata for the latest regular episode. When a future `nextAiringEpisode` exists, the latest aired regular episode is `nextAiringEpisode - 1`.

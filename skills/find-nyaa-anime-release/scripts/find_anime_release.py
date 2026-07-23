@@ -171,6 +171,53 @@ def is_redundant_search_name(candidate: str, selected: list[str]) -> bool:
     return False
 
 
+def is_obviously_damaged_search_name(candidate: str, alternatives: list[str]) -> bool:
+    """Reject metadata names whose leading title token is visibly truncated."""
+    if "\ufffd" in candidate or not candidate.strip():
+        return True
+    candidate_tokens = re.findall(r"[a-z0-9]+", candidate.casefold())
+    if len(candidate_tokens) < 2:
+        return False
+    for alternative in alternatives:
+        if norm(alternative) == norm(candidate):
+            continue
+        alternative_tokens = re.findall(r"[a-z0-9]+", alternative.casefold())
+        if len(alternative_tokens) < 2:
+            continue
+        same_tail_anchor = candidate_tokens[1] == alternative_tokens[1]
+        leading_token_truncated = (
+            len(alternative_tokens[0]) == len(candidate_tokens[0]) + 1
+            and alternative_tokens[0].endswith(candidate_tokens[0])
+        )
+        if same_tail_anchor and leading_token_truncated:
+            return True
+    return False
+
+
+def broad_search_name(name: str) -> str:
+    """Derive a complete franchise/work anchor without a season or subtitle suffix."""
+    original = name.strip()
+    value = re.sub(
+        r"\s+(?:season\s*\d+|\d+(?:st|nd|rd|th)\s+season)\s*$",
+        "",
+        original,
+        flags=re.I,
+    )
+    delimiter = re.search(r"\s(?:-|~|～)\s|:\s+", value)
+    if not delimiter:
+        return original
+    proposals = [value[: delimiter.start()].strip(), value]
+    for proposal in proposals:
+        proposal = re.sub(r"\s+[IVXLCDM]+\s*$", "", proposal, flags=re.I).strip(" -:~～")
+        tokens = re.findall(r"[a-z0-9]+", proposal, re.I)
+        compact_length = sum(len(token) for token in tokens)
+        if len(tokens) >= 2 and compact_length >= 8:
+            return proposal
+        if len(tokens) == 1 and len(tokens[0]) >= 7:
+            return proposal
+    return original
+
+
 def select_search_names(
     title: str,
     aliases: list[str],
@@ -182,6 +229,12 @@ def select_search_names(
     pool = latin_search_titles(names)
     if not pool:
         return []
+    reliable_pool = [
+        name for name in pool if not is_obviously_damaged_search_name(name, pool)
+    ]
+    if reliable_pool:
+        pool = reliable_pool
+        preferred_latin = [name for name in preferred_latin if name in pool]
     ranked = sorted(
         enumerate(pool),
         key=lambda item: (
@@ -190,13 +243,20 @@ def select_search_names(
         ),
         reverse=True,
     )
+    primary_source = ranked[0][1]
+    primary_query = broad_search_name(primary_source)
+    limit = max(1, query_limit)
     selected: list[str] = []
     for _, name in ranked:
+        if len(selected) >= limit:
+            break
         if is_redundant_search_name(name, selected):
             continue
         selected.append(name)
-        if len(selected) >= max(1, query_limit):
-            break
+    # This protected broad query is additive: metadata aliases keep their legacy
+    # ordering/budget, while a subtitle/season suffix cannot consume every slot.
+    if norm(primary_query) not in {norm(name) for name in selected}:
+        selected.append(primary_query)
     return selected
 
 
@@ -1623,7 +1683,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-gib-per-episode", type=float)
     parser.add_argument("--timeout", type=int, default=8)
     parser.add_argument("--limit", type=int, default=1)
-    parser.add_argument("--query-limit", type=int, default=2, help="Maximum high-value Nyaa title queries.")
+    parser.add_argument(
+        "--query-limit",
+        type=int,
+        default=2,
+        help="Maximum metadata title queries; one protected broad query may be added.",
+    )
     parser.add_argument(
         "--search-title",
         action="append",
@@ -2268,6 +2333,7 @@ def main(argv: list[str] | None = None) -> int:
         tracked = True
 
     diagnostic = dict(core_report.diagnostics)
+    diagnostic["queries"] = release_search_names
     if args.require_zh:
         diagnostic["strict_zh"] = {
             "enabled": True,
@@ -2358,6 +2424,7 @@ def main(argv: list[str] | None = None) -> int:
         "intent": intent.value,
         "resolved_title": resolved.title,
         "aliases": search_names,
+        "queries": release_search_names,
         "season": season,
         "target_episode": target_episode,
         "availability": availability,

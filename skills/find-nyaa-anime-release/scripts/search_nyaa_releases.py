@@ -19,11 +19,21 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Iterable
+
+from runtime_paths import DEFAULT_STATE
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 NYAA_RSS = "https://nyaa.si/"
 NYAA_NS = "{https://nyaa.si/xmlns/nyaa}"
+DEFAULT_CACHE = DEFAULT_STATE.parent / ".cache" / "find_nyaa_raw_cache.json"
 
 ASCII_CHINESE_PATTERNS = {
     "CHS": r"(?<![a-z0-9])chs(?![a-z0-9])",
@@ -569,13 +579,23 @@ def magnet_from_hash(info_hash: str, title: str) -> str | None:
     return "magnet:?xt=urn:btih:{}&dn={}".format(info_hash, urllib.parse.quote(title))
 
 
+def nyaa_id_from_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    stripped = value.strip()
+    if stripped.isdigit():
+        return stripped
+    match = re.search(r"nyaa\.si/(?:view|download)/(\d+)(?:\.torrent)?", stripped)
+    return match.group(1) if match else None
+
+
 def normalize_nyaa_url(link: str, guid: str) -> str | None:
     source = guid or link
     if not source:
         return None
-    match = re.search(r"nyaa\.si/(?:view|download)/(\d+)(?:\.torrent)?", source)
-    if match:
-        return f"https://nyaa.si/view/{match.group(1)}"
+    nyaa_id = nyaa_id_from_url(source)
+    if nyaa_id:
+        return f"https://nyaa.si/view/{nyaa_id}"
     return source
 
 
@@ -783,6 +803,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--filter", default="0", help="Nyaa filter: 0 all, 1 no remakes, 2 trusted only.")
     parser.add_argument("--limit", type=int, default=10, help="Number of ranked results to print.")
     parser.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds per query.")
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Return up to 20 recent compact candidates without size or subtitle qualification.",
+    )
+    parser.add_argument(
+        "--candidate-id",
+        action="append",
+        default=[],
+        help="Only validate this Nyaa candidate ID; repeat for up to five candidates.",
+    )
+    parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="Short-term RSS cache path.")
+    parser.add_argument("--refresh-cache", action="store_true", help="Bypass and replace the RSS cache.")
     parser.add_argument("--want-zh", action="store_true", help="Use Chinese or mixed subtitle signals only as a near-tie breaker.")
     parser.add_argument(
         "--require-zh",
@@ -798,6 +831,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, help="Episode count for batch scoring; divides total size by this count.")
     parser.add_argument("--min-gib-per-episode", type=float, help="Hard lower size floor in GiB per 22-minute episode.")
     parser.add_argument("--max-gib-per-episode", type=float, help="Optional hard upper size bound in GiB per episode.")
+    parser.add_argument(
+        "--allow-sub-1g",
+        action="store_true",
+        help="Explicitly allow a hard minimum below 1 GiB per episode.",
+    )
     parser.add_argument("--prefer-group", action="append", default=[], help="Preferred release group; repeatable.")
     parser.add_argument("--avoid-group", action="append", default=[], help="Avoided release group; repeatable.")
     parser.add_argument("--inspect-details", action="store_true", help="Fetch Nyaa detail pages and detect subtitle language signals in descriptions.")
@@ -830,6 +868,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.discover and args.candidate_id:
+        print("--discover and --candidate-id are separate stages and cannot be combined.", file=sys.stderr)
+        return 2
+    if len(args.candidate_id) > 5:
+        print("At most five --candidate-id values may be verified at once.", file=sys.stderr)
+        return 2
+    invalid_candidate_ids = [value for value in args.candidate_id if nyaa_id_from_url(value) is None]
+    if invalid_candidate_ids:
+        print("--candidate-id must be a numeric Nyaa ID or Nyaa view URL.", file=sys.stderr)
+        return 2
+    if args.discover:
+        # Discovery deliberately never exposes magnets or spends requests on detail pages.
+        args.include_magnets = False
+        args.inspect_details = False
     if args.require_zh:
         args.want_zh = True
         args.inspect_details = True
@@ -842,6 +894,12 @@ def main(argv: list[str]) -> int:
         return 2
     explicit_min = args.min_gib_per_episode
     explicit_max = args.max_gib_per_episode
+    if explicit_min is not None and explicit_min < 1.0 and not args.allow_sub_1g:
+        print(
+            "A minimum below 1 GiB requires --allow-sub-1g; the default hard floor is 1 GiB.",
+            file=sys.stderr,
+        )
+        return 2
     if explicit_min is not None and explicit_max is not None and explicit_max < explicit_min:
         print("--max-gib-per-episode must be greater than or equal to --min-gib-per-episode.", file=sys.stderr)
         return 2
@@ -850,7 +908,17 @@ def main(argv: list[str]) -> int:
     )
     if args.size_policy_source == "tier":
         args.min_gib_per_episode = DEFAULT_TIER_MIN_GIB[args.tier]
-    from release_search_core import SearchIntent, search_release_report
+    from release_search_core import SearchIntent, discover_release_candidates, search_release_report
+
+    if args.discover:
+        discovery = discover_release_candidates(
+            args,
+            cache_path=args.cache,
+            refresh_cache=args.refresh_cache,
+            limit=20,
+        )
+        print(json.dumps(discovery, ensure_ascii=False, indent=2))
+        return {"network_error": 1, "no_rss_candidates": 4}.get(discovery["status"], 0)
 
     intent = args.intent or (
         SearchIntent.SPECIFIC_EPISODE.value
@@ -866,6 +934,8 @@ def main(argv: list[str]) -> int:
         intent=intent,
         requested_episode=args.episode,
         include_specials=args.include_specials,
+        cache_path=args.cache,
+        refresh_cache=args.refresh_cache,
     )
     if report.failures:
         print("Search warnings: " + " | ".join(report.failures), file=sys.stderr)
@@ -890,6 +960,7 @@ def main(argv: list[str]) -> int:
         "season_check_incomplete": 3,
         "no_complete_season_release": 4,
         "no_nyaa_release_for_target": 4,
+        "candidate_not_found": 4,
     }.get(report.status, 0)
 
 
