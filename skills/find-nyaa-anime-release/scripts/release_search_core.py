@@ -10,6 +10,7 @@ import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
@@ -22,6 +23,9 @@ from release_identity import EpisodeKind, ReleaseIdentity, normalize_season_numb
 RAW_CACHE_VERSION = 3
 RAW_CACHE_SECONDS = 5 * 60
 MAX_RAW_CACHE_ENTRIES = 120
+MAX_RECENT_CACHE_PAGES = 96
+MAX_RECENT_SCAN_PAGES = 32
+RECENT_SCAN_BATCH_SIZE = 4
 TIER_SIZE_BOUNDS: dict[str, tuple[float, float | None]] = {
     "browse": (1.0, 2.0),
     "watch": (2.0, 4.0),
@@ -211,15 +215,21 @@ class DetailInspectionResult:
         }
 
 
+def _empty_raw_cache() -> dict[str, Any]:
+    return {"version": RAW_CACHE_VERSION, "entries": {}, "recent_pages": {}}
+
+
 def _load_raw_cache(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"version": RAW_CACHE_VERSION, "entries": {}}
+        return _empty_raw_cache()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": RAW_CACHE_VERSION, "entries": {}}
+        return _empty_raw_cache()
     if data.get("version") != RAW_CACHE_VERSION or not isinstance(data.get("entries"), dict):
-        return {"version": RAW_CACHE_VERSION, "entries": {}}
+        return _empty_raw_cache()
+    if not isinstance(data.get("recent_pages"), dict):
+        data["recent_pages"] = {}
     return data
 
 
@@ -293,6 +303,63 @@ def _write_cached_rss_items(path: Path, key: str, items: list[dict[str, str]]) -
         oldest = sorted(entries, key=lambda item_key: float(entries[item_key].get("cached_at", 0)))
         for item_key in oldest[: len(entries) - MAX_RAW_CACHE_ENTRIES]:
             entries.pop(item_key, None)
+    _save_raw_cache(path, cache)
+
+
+def _recent_page_cache_key(category: str, nyaa_filter: str, page: int) -> str:
+    return f"{category}:{nyaa_filter}:{page}"
+
+
+def _read_cached_recent_page(
+    path: Path, category: str, nyaa_filter: str, page: int
+) -> list[nyaa.NyaaListingEntry] | None:
+    cache = _load_raw_cache(path)
+    pages = cache["recent_pages"]
+    now = time.time()
+    expired_keys = []
+    for key, entry in pages.items():
+        try:
+            if not isinstance(entry, dict) or float(entry.get("expires_at", 0)) <= now:
+                expired_keys.append(key)
+        except (TypeError, ValueError):
+            expired_keys.append(key)
+    for key in expired_keys:
+        pages.pop(key, None)
+    if expired_keys:
+        _save_raw_cache(path, cache)
+    entry = pages.get(_recent_page_cache_key(category, nyaa_filter, page))
+    if not isinstance(entry, dict) or not isinstance(entry.get("items"), list):
+        return None
+    restored = []
+    for item in entry["items"]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            restored.append(nyaa.NyaaListingEntry(**item))
+        except TypeError:
+            continue
+    return restored
+
+
+def _write_cached_recent_page(
+    path: Path,
+    category: str,
+    nyaa_filter: str,
+    page: int,
+    items: list[nyaa.NyaaListingEntry],
+) -> None:
+    cache = _load_raw_cache(path)
+    pages = cache["recent_pages"]
+    now = time.time()
+    pages[_recent_page_cache_key(category, nyaa_filter, page)] = {
+        "cached_at": now,
+        "expires_at": now + RAW_CACHE_SECONDS,
+        "items": [asdict(item) for item in items],
+    }
+    if len(pages) > MAX_RECENT_CACHE_PAGES:
+        oldest = sorted(pages, key=lambda key: float(pages[key].get("cached_at", 0)))
+        for key in oldest[: len(pages) - MAX_RECENT_CACHE_PAGES]:
+            pages.pop(key, None)
     _save_raw_cache(path, cache)
 
 
@@ -407,6 +474,159 @@ def collect_raw_candidates(
     return candidates, failures, cache_state
 
 
+def _score_listing_entry(
+    entry: nyaa.NyaaListingEntry,
+    matched_queries: list[str],
+    args: argparse.Namespace,
+) -> nyaa.Candidate:
+    candidate = nyaa.score_item(
+        nyaa.listing_entry_as_item(entry),
+        query=matched_queries[0],
+        want_zh=args.want_zh,
+        airing_priority=args.airing_priority,
+        desired_resolution=args.resolution,
+        tier=args.tier,
+        duration_min=args.duration_min,
+        episodes=args.episodes,
+        prefer_groups=args.prefer_group,
+        avoid_groups=args.avoid_group,
+        include_magnets=False,
+    )
+    candidate.matched_queries = matched_queries
+    return candidate
+
+
+def collect_recent_candidates(
+    args: argparse.Namespace,
+    since: date,
+    until: date | None = None,
+    cache_path: Path | None = None,
+    refresh_cache: bool = False,
+    today: date | None = None,
+) -> tuple[list[nyaa.Candidate], dict[str, Any], list[str]]:
+    today = today or date.today()
+    until = min(until or today, today)
+    category = "1_3" if bool(getattr(args, "require_zh", False)) else args.category
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+    requested_season = normalize_season_number(getattr(args, "season", None))
+    requested_episode = getattr(args, "episode", None)
+    failures: list[str] = []
+    candidates: list[nyaa.Candidate] = []
+    seen_ids: set[str] = set()
+    pages_examined: list[int] = []
+    cache_hits = 0
+    cutoff_reached = False
+    oldest_seen: date | None = None
+
+    def fetch_page(page: int) -> tuple[int, list[nyaa.NyaaListingEntry]]:
+        page_html = nyaa.fetch_listing_page(category, args.filter, page, args.timeout)
+        parsed = nyaa.parse_nyaa_listing(page_html)
+        if not parsed:
+            raise ValueError("Nyaa listing page contained no parseable release rows")
+        return page, parsed
+
+    for batch_start in range(1, MAX_RECENT_SCAN_PAGES + 1, RECENT_SCAN_BATCH_SIZE):
+        batch_pages = list(
+            range(
+                batch_start,
+                min(batch_start + RECENT_SCAN_BATCH_SIZE, MAX_RECENT_SCAN_PAGES + 1),
+            )
+        )
+        page_results: dict[int, list[nyaa.NyaaListingEntry]] = {}
+        missing_pages: list[int] = []
+        for page in batch_pages:
+            cached = (
+                _read_cached_recent_page(cache_path, category, args.filter, page)
+                if cache_path is not None and not refresh_cache
+                else None
+            )
+            if cached is None:
+                missing_pages.append(page)
+            else:
+                page_results[page] = cached
+                cache_hits += 1
+        if missing_pages:
+            with ThreadPoolExecutor(max_workers=min(RECENT_SCAN_BATCH_SIZE, len(missing_pages))) as executor:
+                future_pages = {executor.submit(fetch_page, page): page for page in missing_pages}
+                for future in as_completed(future_pages):
+                    page = future_pages[future]
+                    try:
+                        _, parsed = future.result()
+                        page_results[page] = parsed
+                        if cache_path is not None:
+                            _write_cached_recent_page(
+                                cache_path, category, args.filter, page, parsed
+                            )
+                    except Exception as exc:  # noqa: BLE001 - preserve page-level diagnostics.
+                        failures.append(f"listing page {page}: {exc}")
+
+        for page in batch_pages:
+            entries = page_results.get(page)
+            if entries is None:
+                continue
+            pages_examined.append(page)
+            for entry in entries:
+                if entry.published_at is None:
+                    continue
+                published_date = datetime.fromtimestamp(entry.published_at).date()
+                oldest_seen = (
+                    published_date
+                    if oldest_seen is None or published_date < oldest_seen
+                    else oldest_seen
+                )
+                if published_date < since:
+                    cutoff_reached = True
+                    continue
+                if published_date > until or entry.nyaa_id in seen_ids:
+                    continue
+                matched_queries = [
+                    query
+                    for query in queries
+                    if _contains_title(entry.title, query, flexible=True)
+                ]
+                if not matched_queries:
+                    continue
+                identity = parse_release_identity(entry.title)
+                if (
+                    requested_episode is not None
+                    and (
+                        identity.kind is not EpisodeKind.REGULAR
+                        or identity.episode != requested_episode
+                    )
+                ):
+                    continue
+                if (
+                    requested_season is not None
+                    and identity.season is not None
+                    and identity.season != requested_season
+                ):
+                    continue
+                seen_ids.add(entry.nyaa_id)
+                candidates.append(_score_listing_entry(entry, matched_queries, args))
+        if cutoff_reached:
+            break
+
+    complete = cutoff_reached and not failures
+    diagnostics = {
+        "status": "complete" if complete else "incomplete",
+        "since": since.isoformat(),
+        "until": until.isoformat(),
+        "window_days": (until - since).days,
+        "window_mode": (
+            "recent_to_today" if until == today else "post_airing_7_day"
+        ),
+        "current_new_anime": bool(getattr(args, "current_new_anime", False)),
+        "category": category,
+        "pages_fetched": len(pages_examined),
+        "cache_hits": cache_hits,
+        "cutoff_reached": cutoff_reached,
+        "matched_count": len(candidates),
+        "oldest_seen": oldest_seen.isoformat() if oldest_seen else None,
+        "errors": failures[:4],
+    }
+    return candidates, diagnostics, failures
+
+
 def _discovery_sort_key(item: ClassifiedCandidate) -> tuple[str, int, int, int, float]:
     identity = item.identity
     nyaa_id = nyaa.nyaa_id_from_url(item.candidate.url) or "0"
@@ -419,6 +639,125 @@ def _discovery_sort_key(item: ClassifiedCandidate) -> tuple[str, int, int, int, 
     )
 
 
+_FAST_PATH_LANGUAGE_VARIANT = re.compile(
+    r"(?i)(?:"
+    r"\bVOSTFR\b|"
+    r"\b(?:english|eng|french|german|spanish|latino|russian|rus)"
+    r"[\s._-]*(?:dub|dubbed)\b|"
+    r"\b(?:dub|dubbed)[\s._-]*(?:english|eng|french|german|spanish|latino|russian|rus)\b"
+    r")"
+)
+
+
+def _fast_path_hint(
+    items: list[ClassifiedCandidate],
+    args: argparse.Namespace,
+    requested_season: int | None,
+    requested_episode: int | None,
+) -> dict[str, Any] | None:
+    """Recommend one low-risk candidate without hiding the discovery set."""
+    if (
+        getattr(args, "require_zh", False)
+        or getattr(args, "whole_season", False)
+        or getattr(args, "include_specials", False)
+    ):
+        return None
+
+    target_episode = requested_episode
+    if target_episode is None:
+        intent = getattr(args, "intent", None)
+        intent_value = intent.value if isinstance(intent, SearchIntent) else intent
+        if intent_value != SearchIntent.LATEST_REGULAR.value:
+            return None
+        observed = [
+            int(item.identity.episode)
+            for item in items
+            if item.identity.kind is EpisodeKind.REGULAR
+            and item.identity.episode is not None
+            and item.identity.episode == item.identity.episode.to_integral_value()
+            and item.season_match not in {"other", "other_work"}
+            and item.work_match != "related_work"
+        ]
+        if not observed:
+            return None
+        target_episode = max(observed)
+
+    eligible = [
+        item
+        for item in items
+        if item.identity.kind is EpisodeKind.REGULAR
+        and item.identity.episode == target_episode
+        and item.season_match not in {"other", "other_work"}
+        and item.work_match != "related_work"
+    ]
+    if not eligible:
+        return None
+
+    policy = size_policy_from_args(args)
+    size_qualified: list[ClassifiedCandidate] = []
+    for item in eligible:
+        comparable = nyaa.comparable_gib_per_episode(
+            item.candidate,
+            getattr(args, "episodes", None),
+        )
+        if comparable is None:
+            continue
+        if policy.hard_min_gib is not None and comparable < policy.hard_min_gib:
+            continue
+        if policy.hard_max_gib is not None and comparable > policy.hard_max_gib:
+            continue
+        size_qualified.append(item)
+    if not size_qualified:
+        return None
+
+    if requested_season is not None:
+        explicit_season = [
+            item for item in size_qualified if item.season_match == "match"
+        ]
+        if explicit_season:
+            size_qualified = explicit_season
+
+    desired_resolution = getattr(args, "resolution", None)
+    if desired_resolution:
+        matching_resolution = [
+            item
+            for item in size_qualified
+            if item.candidate.resolution
+            and item.candidate.resolution.casefold() == desired_resolution.casefold()
+        ]
+        if matching_resolution:
+            size_qualified = matching_resolution
+
+    ordinary_language = [
+        item
+        for item in size_qualified
+        if not _FAST_PATH_LANGUAGE_VARIANT.search(item.candidate.title)
+    ]
+    if ordinary_language:
+        size_qualified = ordinary_language
+
+    selected = max(
+        size_qualified,
+        key=lambda item: (
+            item.candidate.tier_fit == "in-tier",
+            item.candidate.score,
+            item.candidate.seeders,
+            item.candidate.downloads,
+            item.candidate.published or "",
+        ),
+    )
+    selected_id = nyaa.nyaa_id_from_url(selected.candidate.url)
+    if selected_id is None:
+        return None
+    return {
+        "status": "ready",
+        "candidate_id": selected_id,
+        "target_episode": target_episode,
+        "selection_basis": "exact_regular_episode_hard_size_quality_stability",
+        "considered_count": len(size_qualified),
+    }
+
+
 def discover_release_candidates(
     args: argparse.Namespace,
     cache_path: Path | None = None,
@@ -427,9 +766,37 @@ def discover_release_candidates(
 ) -> dict[str, Any]:
     """Collect a compact, unqualified candidate set for Agent-side decisions."""
     raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    recent_scan: dict[str, Any] | None = None
+    recent_since = getattr(args, "recent_since", None)
+    if recent_since is not None:
+        if isinstance(recent_since, str):
+            recent_since = date.fromisoformat(recent_since)
+        recent_until = getattr(args, "recent_until", None)
+        if isinstance(recent_until, str):
+            recent_until = date.fromisoformat(recent_until)
+        recent, recent_scan, recent_failures = collect_recent_candidates(
+            args,
+            recent_since,
+            until=recent_until,
+            cache_path=cache_path,
+            refresh_cache=refresh_cache,
+        )
+        raw = _merge_candidates(raw, recent)
+        failures = [*failures, *recent_failures]
+        cache_state = f"{cache_state}+recent:{recent_scan['status']}"
     requested_season = normalize_season_number(getattr(args, "season", None))
+    requested_episode = getattr(args, "episode", None)
+    classified_source = _classify(raw, requested_season)
+    if requested_episode is not None:
+        classified_source = [
+            item
+            for item in classified_source
+            if item.identity.kind is EpisodeKind.REGULAR
+            and item.identity.episode == requested_episode
+            and item.season_match not in {"other", "other_work"}
+        ]
     classified = sorted(
-        _classify(raw, requested_season),
+        classified_source,
         key=_discovery_sort_key,
         reverse=True,
     )[: max(1, limit)]
@@ -437,6 +804,8 @@ def discover_release_candidates(
     latin_queries = [query for query in queries if re.search(r"[A-Za-z]", query)]
     if classified:
         status = "found"
+    elif recent_scan is not None and recent_scan["status"] == "incomplete":
+        status = "incomplete"
     elif failures and len(failures) >= len(queries):
         status = "network_error"
     else:
@@ -460,7 +829,7 @@ def discover_release_candidates(
                 "url": candidate.url,
             }
         )
-    return {
+    payload = {
         "status": status,
         "queries": queries,
         "query_coverage": (
@@ -471,6 +840,17 @@ def discover_release_candidates(
         "failures": failures,
         "cache": cache_state,
     }
+    fast_path = _fast_path_hint(
+        classified_source,
+        args,
+        requested_season,
+        requested_episode,
+    )
+    if fast_path is not None:
+        payload["fast_path"] = fast_path
+    if recent_scan is not None:
+        payload["recent_scan"] = recent_scan
+    return payload
 
 
 def _compact_title(value: str, flexible: bool = False) -> str:
@@ -1264,6 +1644,16 @@ def _inspect_details(
                 stop = True
                 break
             processed_count += 1
+            if item.candidate.detail_checked:
+                result.checked_count += 1
+                if item.candidate.detail_chinese_confirmed:
+                    result.verified_count += 1
+                    if strict:
+                        stop = True
+                        break
+                else:
+                    result.rejected_count += 1
+                continue
             if not item.candidate.url:
                 result.missing_url_count += 1
                 item.candidate.reasons.append("Nyaa detail URL is unavailable")
@@ -1305,6 +1695,46 @@ def _inspect_details(
     return result
 
 
+def _direct_candidate_from_page(
+    args: argparse.Namespace,
+    nyaa_id: str,
+    queries: list[str],
+) -> tuple[nyaa.Candidate | None, str | None]:
+    url = f"https://nyaa.si/view/{nyaa_id}"
+    page_html = nyaa.fetch_nyaa_detail_page(url, args.timeout)
+    item = nyaa.detail_page_as_item(nyaa_id, page_html)
+    title = nyaa.text_of(item, "title")
+    if not title:
+        raise ValueError("Nyaa detail page did not contain a release title")
+    matched_queries = [
+        query for query in queries if _contains_title(title, query, flexible=True)
+    ]
+    if not matched_queries:
+        return None, title
+    candidate = nyaa.score_item(
+        item,
+        query=matched_queries[0],
+        want_zh=args.want_zh,
+        airing_priority=args.airing_priority,
+        desired_resolution=args.resolution,
+        tier=args.tier,
+        duration_min=args.duration_min,
+        episodes=args.episodes,
+        prefer_groups=args.prefer_group,
+        avoid_groups=args.avoid_group,
+        include_magnets=args.include_magnets,
+    )
+    candidate.matched_queries = matched_queries
+    if args.inspect_details or bool(getattr(args, "require_zh", False)):
+        nyaa.apply_detail_subtitle_signal(
+            candidate,
+            nyaa.extract_nyaa_description(page_html),
+            args.want_zh,
+            args.airing_priority,
+        )
+    return candidate, None
+
+
 def search_release_report(
     args: argparse.Namespace,
     intent: SearchIntent | str = SearchIntent.SEASON_BROWSE,
@@ -1321,7 +1751,15 @@ def search_release_report(
     raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
     rss_failure_count = len(failures)
     queries = list(dict.fromkeys([args.query, *args.alias]))
-    if not raw:
+    candidate_id_values = list(getattr(args, "candidate_id", []) or [])
+    requested_candidate_ids = {
+        candidate_id
+        for candidate_id in (
+            nyaa.nyaa_id_from_url(str(value)) for value in candidate_id_values
+        )
+        if candidate_id is not None
+    }
+    if not raw and not candidate_id_values:
         return ReleaseSearchReport(
             intent=intent,
             requested_season=requested_season,
@@ -1338,38 +1776,73 @@ def search_release_report(
             cache=cache_state,
         )
 
-    candidate_id_values = list(getattr(args, "candidate_id", []) or [])
-    requested_candidate_ids = {
-        candidate_id
-        for candidate_id in (
-            nyaa.nyaa_id_from_url(str(value)) for value in candidate_id_values
-        )
-        if candidate_id is not None
-    }
+    direct_fetched_ids: list[str] = []
+    direct_mismatches: dict[str, str] = {}
+    direct_not_found: list[str] = []
+    direct_failures: list[str] = []
     if candidate_id_values:
         unfiltered_count = len(raw)
-        raw = [
+        rss_matches = [
             candidate
             for candidate in raw
             if nyaa.nyaa_id_from_url(candidate.url) in requested_candidate_ids
         ]
+        rss_ids = {
+            candidate_id
+            for candidate in rss_matches
+            if (candidate_id := nyaa.nyaa_id_from_url(candidate.url)) is not None
+        }
+        missing_ids = sorted(requested_candidate_ids - rss_ids)
+        direct_candidates: list[nyaa.Candidate] = []
+        if missing_ids:
+            with ThreadPoolExecutor(max_workers=min(5, len(missing_ids))) as executor:
+                future_ids = {
+                    executor.submit(_direct_candidate_from_page, args, candidate_id, queries): candidate_id
+                    for candidate_id in missing_ids
+                }
+                for future in as_completed(future_ids):
+                    candidate_id = future_ids[future]
+                    try:
+                        candidate, mismatched_title = future.result()
+                        if candidate is not None:
+                            direct_candidates.append(candidate)
+                            direct_fetched_ids.append(candidate_id)
+                        elif mismatched_title is not None:
+                            direct_mismatches[candidate_id] = mismatched_title
+                    except Exception as exc:  # noqa: BLE001 - preserve direct-ID failure details.
+                        if getattr(exc, "code", None) == 404:
+                            direct_not_found.append(candidate_id)
+                        else:
+                            direct_failures.append(f"{candidate_id}: {exc}")
+        raw = _merge_candidates(rss_matches, direct_candidates)
         if not raw:
+            if direct_mismatches and not direct_failures:
+                status = "candidate_id_title_mismatch"
+            elif direct_failures:
+                status = "network_error"
+            else:
+                status = "candidate_not_found"
             return ReleaseSearchReport(
                 intent=intent,
                 requested_season=requested_season,
                 requested_episode=requested_episode,
-                status="candidate_not_found",
+                status=status,
                 selected=[],
                 choices=[],
                 diagnostics={
                     "raw_count": unfiltered_count,
                     "candidate_id_filter": sorted(requested_candidate_ids),
                     "candidate_id_matched_count": 0,
+                    "candidate_id_direct_fetched": direct_fetched_ids,
+                    "candidate_id_title_mismatches": direct_mismatches,
+                    "candidate_id_not_found": direct_not_found,
+                    "candidate_id_direct_failures": direct_failures,
                     "queries": queries,
                 },
-                failures=failures,
+                failures=[*failures, *direct_failures],
                 cache=cache_state,
             )
+        failures = [*failures, *direct_failures]
 
     classified = _classify(raw, requested_season, context)
     in_season = [item for item in classified if _in_requested_season(item)]
@@ -1385,6 +1858,10 @@ def search_release_report(
         "queries": queries,
         "candidate_id_filter": sorted(requested_candidate_ids),
         "candidate_id_matched_count": len(raw) if candidate_id_values else None,
+        "candidate_id_direct_fetched": direct_fetched_ids,
+        "candidate_id_title_mismatches": direct_mismatches,
+        "candidate_id_not_found": direct_not_found,
+        "candidate_id_direct_failures": direct_failures,
         "season_matched_count": len(in_season),
         "season_unknown_count": len(unknown_season),
         "context_season_count": sum(item.season_source == "single_mainline" for item in classified),

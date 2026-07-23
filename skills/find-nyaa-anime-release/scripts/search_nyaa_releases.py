@@ -17,7 +17,8 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
-from email.utils import parsedate_to_datetime
+from datetime import date, datetime, timezone
+from email.utils import format_datetime, parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
@@ -212,6 +213,18 @@ class NyaaFileEntry:
     size_bytes: int | None
 
 
+@dataclass(frozen=True)
+class NyaaListingEntry:
+    nyaa_id: str
+    title: str
+    category: str | None
+    size: str | None
+    published_at: int | None
+    seeders: int
+    leechers: int
+    downloads: int
+
+
 def text_of(parent: ET.Element, tag: str, default: str = "") -> str:
     node = parent.find(tag)
     return (node.text or "").strip() if node is not None else default
@@ -374,6 +387,142 @@ def extract_nyaa_file_entries(page_html: str) -> list[NyaaFileEntry]:
     parser.feed(page_html)
     parser.close()
     return parser.entries
+
+
+class _NyaaListingParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.in_row = False
+        self.current_td: dict[str, object] | None = None
+        self.tds: list[dict[str, object]] = []
+        self.nyaa_id: str | None = None
+        self.title: str | None = None
+        self.entries: list[NyaaListingEntry] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        lowered = tag.casefold()
+        attributes = {name.casefold(): value or "" for name, value in attrs}
+        if lowered == "tr":
+            self.in_row = True
+            self.current_td = None
+            self.tds = []
+            self.nyaa_id = None
+            self.title = None
+            return
+        if not self.in_row:
+            return
+        if lowered == "td":
+            self.current_td = {
+                "text": [],
+                "timestamp": attributes.get("data-timestamp"),
+                "category": None,
+            }
+            return
+        if lowered != "a" or self.current_td is None:
+            return
+        href = attributes.get("href", "")
+        match = re.fullmatch(r"/view/(\d+)", href)
+        if match:
+            self.nyaa_id = match.group(1)
+            self.title = html.unescape(attributes.get("title", "")).strip() or None
+        elif href.startswith("/?c=") and not self.current_td.get("category"):
+            self.current_td["category"] = html.unescape(attributes.get("title", "")).strip() or None
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.casefold()
+        if lowered == "td" and self.in_row and self.current_td is not None:
+            self.tds.append(self.current_td)
+            self.current_td = None
+            return
+        if lowered != "tr" or not self.in_row:
+            return
+        self.in_row = False
+        if not self.nyaa_id or not self.title or len(self.tds) < 8:
+            return
+
+        def cell_text(index: int) -> str:
+            values = self.tds[index].get("text", [])
+            return " ".join(values).strip() if isinstance(values, list) else ""
+
+        timestamp = self.tds[4].get("timestamp")
+        try:
+            published_at = int(timestamp) if timestamp else None
+        except (TypeError, ValueError):
+            published_at = None
+
+        def cell_int(index: int) -> int:
+            return as_int(cell_text(index).replace(",", ""))
+
+        self.entries.append(
+            NyaaListingEntry(
+                nyaa_id=self.nyaa_id,
+                title=self.title,
+                category=self.tds[0].get("category") if isinstance(self.tds[0].get("category"), str) else None,
+                size=cell_text(3) or None,
+                published_at=published_at,
+                seeders=cell_int(5),
+                leechers=cell_int(6),
+                downloads=cell_int(7),
+            )
+        )
+
+    def handle_data(self, data: str) -> None:
+        if self.in_row and self.current_td is not None and data.strip():
+            values = self.current_td.get("text")
+            if isinstance(values, list):
+                values.append(data.strip())
+
+
+def parse_nyaa_listing(page_html: str) -> list[NyaaListingEntry]:
+    parser = _NyaaListingParser()
+    parser.feed(page_html)
+    parser.close()
+    return parser.entries
+
+
+def build_listing_url(category: str, nyaa_filter: str, page: int) -> str:
+    params = {"c": category, "f": nyaa_filter, "p": page, "s": "id", "o": "desc"}
+    return NYAA_RSS + "?" + urllib.parse.urlencode(params)
+
+
+def fetch_listing_page(category: str, nyaa_filter: str, page: int, timeout: int) -> str:
+    request = urllib.request.Request(
+        build_listing_url(category, nyaa_filter, page),
+        headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", "replace")
+
+
+def _detail_label_value(page_html: str, label: str) -> str | None:
+    match = re.search(
+        rf"<div[^>]*>\s*{re.escape(label)}\s*</div>\s*<div[^>]*>(.*?)</div>",
+        page_html,
+        re.I | re.S,
+    )
+    return strip_html_to_text(match.group(1)).strip() if match else None
+
+
+def extract_nyaa_detail_metadata(page_html: str, nyaa_id: str) -> dict[str, object]:
+    title_match = re.search(
+        r"<h3[^>]*class=[\"'][^\"']*panel-title[^\"']*[\"'][^>]*>(.*?)</h3>",
+        page_html,
+        re.I | re.S,
+    )
+    title = strip_html_to_text(title_match.group(1)).strip() if title_match else ""
+    timestamp_match = re.search(r"data-timestamp=[\"'](\d+)[\"']", page_html, re.I)
+    hash_match = re.search(r"<kbd>\s*([0-9a-f]{40})\s*</kbd>", page_html, re.I)
+    return {
+        "nyaa_id": nyaa_id,
+        "title": title,
+        "category": _detail_label_value(page_html, "Category:"),
+        "size": _detail_label_value(page_html, "File size:"),
+        "seeders": as_int((_detail_label_value(page_html, "Seeders:") or "").replace(",", "")),
+        "leechers": as_int((_detail_label_value(page_html, "Leechers:") or "").replace(",", "")),
+        "downloads": as_int((_detail_label_value(page_html, "Completed:") or "").replace(",", "")),
+        "published_at": int(timestamp_match.group(1)) if timestamp_match else None,
+        "info_hash": hash_match.group(1).lower() if hash_match else None,
+    }
 
 
 def detect_chinese_in_detail(detail_text: str) -> tuple[bool, str]:
@@ -749,6 +898,52 @@ def score_item(
     )
 
 
+def _metadata_item(metadata: dict[str, object]) -> ET.Element:
+    item = ET.Element("item")
+    nyaa_id = str(metadata.get("nyaa_id") or "")
+    title = str(metadata.get("title") or "")
+    url = f"https://nyaa.si/view/{nyaa_id}" if nyaa_id else ""
+    ET.SubElement(item, "title").text = title
+    ET.SubElement(item, "link").text = url
+    ET.SubElement(item, "guid").text = url
+    published_at = metadata.get("published_at")
+    if isinstance(published_at, int):
+        ET.SubElement(item, "pubDate").text = format_datetime(
+            datetime.fromtimestamp(published_at, timezone.utc)
+        )
+    fields = {
+        "size": metadata.get("size"),
+        "seeders": metadata.get("seeders"),
+        "leechers": metadata.get("leechers"),
+        "downloads": metadata.get("downloads"),
+        "category": metadata.get("category"),
+        "infoHash": metadata.get("info_hash"),
+    }
+    for name, value in fields.items():
+        if value is not None and value != "":
+            ET.SubElement(item, f"{NYAA_NS}{name}").text = str(value)
+    return item
+
+
+def listing_entry_as_item(entry: NyaaListingEntry) -> ET.Element:
+    return _metadata_item(
+        {
+            "nyaa_id": entry.nyaa_id,
+            "title": entry.title,
+            "category": entry.category,
+            "size": entry.size,
+            "published_at": entry.published_at,
+            "seeders": entry.seeders,
+            "leechers": entry.leechers,
+            "downloads": entry.downloads,
+        }
+    )
+
+
+def detail_page_as_item(nyaa_id: str, page_html: str) -> ET.Element:
+    return _metadata_item(extract_nyaa_detail_metadata(page_html, nyaa_id))
+
+
 def merge_candidate(existing: Candidate, incoming: Candidate) -> Candidate:
     existing.matched_queries.extend(q for q in incoming.matched_queries if q not in existing.matched_queries)
     if incoming.score > existing.score:
@@ -807,6 +1002,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--discover",
         action="store_true",
         help="Return up to 20 recent compact candidates without size or subtitle qualification.",
+    )
+    parser.add_argument(
+        "--fast-verify",
+        action="store_true",
+        help="For one simple exact episode, discover and verify the recommended candidate in one process.",
+    )
+    parser.add_argument(
+        "--recent-since",
+        type=date.fromisoformat,
+        help="Discovery-only fallback: scan Nyaa listings from this official episode air date.",
+    )
+    parser.add_argument(
+        "--recent-until",
+        type=date.fromisoformat,
+        help="Optional inclusive end date for an official post-airing window; span may not exceed seven days.",
+    )
+    parser.add_argument(
+        "--current-new-anime",
+        action="store_true",
+        help="Confirm the official resolver identified a currently releasing new TV/TV_SHORT/ONA; required for historical air windows.",
     )
     parser.add_argument(
         "--candidate-id",
@@ -868,9 +1083,65 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.discover and args.fast_verify:
+        print("--discover and --fast-verify are separate paths.", file=sys.stderr)
+        return 2
     if args.discover and args.candidate_id:
         print("--discover and --candidate-id are separate stages and cannot be combined.", file=sys.stderr)
         return 2
+    if args.fast_verify:
+        if args.episode is None:
+            print("--fast-verify requires an exact --episode.", file=sys.stderr)
+            return 2
+        if args.candidate_id:
+            print("--fast-verify chooses its own candidate ID.", file=sys.stderr)
+            return 2
+        if args.require_zh or args.whole_season or args.include_specials:
+            print(
+                "--fast-verify is only for a simple regular episode without strict Chinese, "
+                "whole-season, or special-release checks.",
+                file=sys.stderr,
+            )
+            return 2
+        if not args.include_magnets or not args.legal_ok:
+            print(
+                "--fast-verify requires --include-magnets and --legal-ok.",
+                file=sys.stderr,
+            )
+            return 2
+    if args.recent_until is not None and args.recent_since is None:
+        print("--recent-until requires --recent-since.", file=sys.stderr)
+        return 2
+    if args.recent_since is not None:
+        if not args.discover:
+            print("--recent-since requires --discover.", file=sys.stderr)
+            return 2
+        if args.episode is None:
+            print("--recent-since requires an exact --episode.", file=sys.stderr)
+            return 2
+        age_days = (date.today() - args.recent_since).days
+        if age_days < 0:
+            print("--recent-since cannot be in the future.", file=sys.stderr)
+            return 2
+        scan_until = args.recent_until or date.today()
+        if scan_until > date.today():
+            print("--recent-until cannot be in the future.", file=sys.stderr)
+            return 2
+        if scan_until < args.recent_since:
+            print("--recent-until cannot be earlier than --recent-since.", file=sys.stderr)
+            return 2
+        if (scan_until - args.recent_since).days > 7:
+            print("The official Nyaa scan window cannot exceed seven days.", file=sys.stderr)
+            return 2
+        if age_days > 7 and (
+            args.recent_until is None or not args.current_new_anime
+        ):
+            print(
+                "A historical air window requires --recent-until and "
+                "--current-new-anime from a successful official-air-date result.",
+                file=sys.stderr,
+            )
+            return 2
     if len(args.candidate_id) > 5:
         print("At most five --candidate-id values may be verified at once.", file=sys.stderr)
         return 2
@@ -918,7 +1189,75 @@ def main(argv: list[str]) -> int:
             limit=20,
         )
         print(json.dumps(discovery, ensure_ascii=False, indent=2))
-        return {"network_error": 1, "no_rss_candidates": 4}.get(discovery["status"], 0)
+        return {
+            "network_error": 1,
+            "incomplete": 1,
+            "no_rss_candidates": 4,
+        }.get(discovery["status"], 0)
+
+    if args.fast_verify:
+        discovery = discover_release_candidates(
+            args,
+            cache_path=args.cache,
+            refresh_cache=args.refresh_cache,
+            limit=20,
+        )
+        fast_path = discovery.get("fast_path")
+        if not fast_path:
+            print(
+                json.dumps(
+                    {
+                        "status": "fast_path_unavailable",
+                        "discovery_status": discovery["status"],
+                        "queries": discovery["queries"],
+                        "failures": discovery["failures"],
+                        "cache": discovery["cache"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 4
+        args.candidate_id = [fast_path["candidate_id"]]
+        args.limit = 1
+        report = search_release_report(
+            args,
+            intent=SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=args.episode,
+            include_specials=False,
+            cache_path=args.cache,
+            refresh_cache=False,
+        )
+        report.diagnostics["fast_path"] = fast_path
+        if args.report:
+            print(json.dumps(report.as_dict(explain=True), ensure_ascii=False, indent=2))
+        else:
+            candidates = [item.candidate for item in report.selected]
+            if args.magnet_only:
+                for candidate in candidates:
+                    candidate.url = None
+            if args.json:
+                print(
+                    json.dumps(
+                        [asdict(candidate) for candidate in candidates],
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print(
+                    render_markdown(
+                        candidates,
+                        include_magnets=True,
+                        magnet_only=args.magnet_only,
+                    )
+                )
+        return {
+            "network_error": 1,
+            "release_unqualified": 3,
+            "no_nyaa_release_for_target": 4,
+            "candidate_not_found": 4,
+        }.get(report.status, 0)
 
     intent = args.intent or (
         SearchIntent.SPECIFIC_EPISODE.value

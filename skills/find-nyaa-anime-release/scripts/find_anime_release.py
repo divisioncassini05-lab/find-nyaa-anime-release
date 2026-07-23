@@ -14,7 +14,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +30,11 @@ DEFAULT_SCHEDULE_CACHE = DEFAULT_STATE.parent / ".cache" / "airing_schedule_cach
 DEFAULT_NICKNAME_ALIASES = HERE.parent / "references" / "anime_nickname_aliases.json"
 ANILIST_API = "https://graphql.anilist.co"
 BANGUMI_SEARCH_API = "https://api.bgm.tv/v0/search/subjects"
-SCHEDULE_CACHE_VERSION = 4
+SCHEDULE_CACHE_VERSION = 5
 SCHEDULE_CACHE_SECONDS = 30 * 60
 MAINLINE_FORMATS = {"TV", "TV_SHORT", "ONA"}
 MAINLINE_RELATION_TYPES = {"PREQUEL", "SEQUEL"}
+CURRENT_NEW_ANIME_MAX_AGE_DAYS = 366
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -598,6 +599,7 @@ def anilist_media_request(media_id: int, timeout: int) -> dict[str, Any]:
         status
         season
         seasonYear
+        startDate { year month day }
         episodes
         duration
         nextAiringEpisode { episode airingAt }
@@ -620,6 +622,40 @@ def anilist_media_request(media_id: int, timeout: int) -> dict[str, Any]:
     }
     """
     payload = json.dumps({"query": gql, "variables": {"id": media_id}}).encode("utf-8")
+    request = urllib.request.Request(
+        ANILIST_API,
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "CodexAnimeFinder/1.0"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", "replace"))
+
+
+def anilist_air_date_request(media_id: int, episode: int, timeout: int) -> dict[str, Any]:
+    gql = """
+    query ($mediaId: Int, $episode: Int) {
+      Media(id: $mediaId, type: ANIME) {
+        id
+        format
+        status
+        startDate { year month day }
+        title { romaji english native }
+        synonyms
+      }
+      AiringSchedule(mediaId: $mediaId, episode: $episode) {
+        mediaId
+        episode
+        airingAt
+      }
+    }
+    """
+    payload = json.dumps(
+        {
+            "query": gql,
+            "variables": {"mediaId": media_id, "episode": episode},
+        }
+    ).encode("utf-8")
     request = urllib.request.Request(
         ANILIST_API,
         data=payload,
@@ -1013,6 +1049,37 @@ def write_schedule_snapshots(path: Path, keys: list[str], resolved: ResolvedAnim
         write_schedule_snapshot(path, key, resolved)
 
 
+def official_air_date_cache_key(media_id: int, episode: int) -> str:
+    return f"airing:{media_id}:{episode}"
+
+
+def read_official_air_date_cache(
+    path: Path, media_id: int, episode: int
+) -> dict[str, Any] | None:
+    cache = load_schedule_cache(path)
+    entry = cache["entries"].get(official_air_date_cache_key(media_id, episode))
+    if not isinstance(entry, dict):
+        return None
+    try:
+        if float(entry.get("expires_at", 0)) <= time.time():
+            return None
+    except (TypeError, ValueError):
+        return None
+    payload = entry.get("official_air_date")
+    return payload if isinstance(payload, dict) else None
+
+
+def write_official_air_date_cache(
+    path: Path, media_id: int, episode: int, payload: dict[str, Any]
+) -> None:
+    cache = load_schedule_cache(path)
+    cache["entries"][official_air_date_cache_key(media_id, episode)] = {
+        "expires_at": time.time() + SCHEDULE_CACHE_SECONDS,
+        "official_air_date": payload,
+    }
+    save_schedule_cache(path, cache)
+
+
 def merge_resolved(base: ResolvedAnime, fresh: ResolvedAnime) -> ResolvedAnime:
     fresh.aliases = unique([*base.aliases, *fresh.aliases])
     fresh.search_titles = unique([*base.search_titles, *fresh.search_titles])
@@ -1065,6 +1132,282 @@ def hydrate_airing_metadata(
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         pass
     return resolved, "unavailable"
+
+
+def ensure_official_air_identity(
+    identity: IdentityResolution,
+    cache_path: Path,
+    timeout: int,
+    refresh_cache: bool,
+    today: date,
+) -> IdentityResolution:
+    """Resolve an AniList ID only when the official-air-date path still lacks one."""
+    if identity.status == "ambiguous" or identity.resolved.anilist_id:
+        return identity
+
+    resolved = identity.resolved
+    if not refresh_cache:
+        for cached_name in unique([resolved.title, *resolved.search_titles, *resolved.aliases]):
+            snapshot = read_schedule_snapshot(
+                cache_path,
+                f"title:{norm(cached_name)}",
+            )
+            if snapshot:
+                cached = resolved_from_snapshot(snapshot, resolved)
+                if cached.anilist_id:
+                    return IdentityResolution(
+                        "resolved",
+                        merge_resolved(resolved, cached),
+                        identity.state_show,
+                        identity.tracked,
+                        identity.input_kind,
+                        unique([*identity.sources, "metadata_cache"]),
+                        identity.failures,
+                        "official_air_date_cache",
+                    )
+
+    ambiguous: ResolvedAnime | None = None
+    failures = list(identity.failures)
+    for query in unique([*resolved.search_titles, resolved.title, *resolved.aliases])[:3]:
+        status, fresh = resolve_title(query, timeout, today)
+        if status == "resolved" and fresh and fresh.anilist_id:
+            merged = merge_resolved(resolved, fresh)
+            write_schedule_snapshots(
+                cache_path,
+                [schedule_cache_key(merged), f"title:{norm(resolved.title)}"],
+                merged,
+            )
+            return IdentityResolution(
+                "resolved",
+                merged,
+                identity.state_show,
+                identity.tracked,
+                identity.input_kind,
+                unique([*identity.sources, "anilist"]),
+                failures,
+                "official_air_date_anilist",
+            )
+        if status == "ambiguous" and fresh:
+            ambiguous = ambiguous or fresh
+        else:
+            failures.append(resolver_failure("anilist", fresh))
+
+    if ambiguous is not None:
+        return IdentityResolution(
+            "ambiguous",
+            merge_resolved(resolved, ambiguous),
+            identity.state_show,
+            identity.tracked,
+            identity.input_kind,
+            unique([*identity.sources, "anilist"]),
+            failures,
+            "official_air_date_ambiguous",
+        )
+    return IdentityResolution(
+        identity.status,
+        resolved,
+        identity.state_show,
+        identity.tracked,
+        identity.input_kind,
+        identity.sources,
+        failures,
+        "official_air_date_unavailable",
+    )
+
+
+def official_air_date_report(
+    identity: IdentityResolution,
+    episode: int,
+    cache_path: Path,
+    timeout: int,
+    refresh_cache: bool,
+    today: date,
+) -> dict[str, Any]:
+    resolved = identity.resolved
+    base = {
+        "title": resolved.title,
+        "anilist_id": resolved.anilist_id,
+        "episode": episode,
+        "airing_at": None,
+        "airing_date": None,
+        "age_days": None,
+        "is_current_airing": False,
+        "is_current_new_anime": False,
+        "series_start_date": None,
+        "series_age_days": None,
+        "scan_since": None,
+        "scan_until": None,
+        "window_mode": None,
+        "recent_scan_eligible": False,
+        "aliases": unique(
+            [resolved.title, *resolved.search_titles, *resolved.aliases]
+        ),
+        "cache": "not_used",
+        "failures": identity.failures[:2],
+    }
+    if identity.status == "ambiguous":
+        return {
+            **base,
+            "status": "ambiguous",
+            "choices": resolved.choices[:4],
+        }
+    if not resolved.anilist_id:
+        return {**base, "status": "schedule_unavailable"}
+
+    cache_payload = (
+        None
+        if refresh_cache
+        else read_official_air_date_cache(cache_path, resolved.anilist_id, episode)
+    )
+    cache_status = "hit" if cache_payload is not None else "miss"
+    if cache_payload is None:
+        try:
+            data = anilist_air_date_request(resolved.anilist_id, episode, timeout)
+            cache_payload = data.get("data") or {}
+            if not isinstance(cache_payload, dict):
+                cache_payload = {}
+            if cache_payload:
+                write_official_air_date_cache(
+                    cache_path, resolved.anilist_id, episode, cache_payload
+                )
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if exc.code != 404:
+                return {
+                    **base,
+                    "status": "schedule_unavailable",
+                    "cache": "unavailable",
+                    "failures": [*base["failures"], str(exc)][:2],
+                }
+            try:
+                media_data = anilist_media_request(
+                    resolved.anilist_id,
+                    timeout,
+                )
+                media_only = media_data.get("data", {}).get("Media")
+                cache_payload = {
+                    "Media": media_only,
+                    "AiringSchedule": None,
+                }
+                if isinstance(media_only, dict):
+                    write_official_air_date_cache(
+                        cache_path,
+                        resolved.anilist_id,
+                        episode,
+                        cache_payload,
+                    )
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                json.JSONDecodeError,
+                OSError,
+            ) as media_exc:
+                return {
+                    **base,
+                    "status": "schedule_unavailable",
+                    "cache": "unavailable",
+                    "failures": [*base["failures"], str(media_exc)][:2],
+                }
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            return {
+                **base,
+                "status": "schedule_unavailable",
+                "cache": "unavailable",
+                "failures": [*base["failures"], str(exc)][:2],
+            }
+
+    media = cache_payload.get("Media") if isinstance(cache_payload, dict) else None
+    schedule = (
+        cache_payload.get("AiringSchedule")
+        if isinstance(cache_payload, dict)
+        else None
+    )
+    if not isinstance(media, dict):
+        return {**base, "status": "schedule_unavailable", "cache": cache_status}
+
+    title_data = media.get("title") or {}
+    aliases = unique(
+        [
+            resolved.title,
+            title_data.get("english"),
+            title_data.get("romaji"),
+            title_data.get("native"),
+            *(media.get("synonyms") or []),
+            *resolved.search_titles,
+            *resolved.aliases,
+        ]
+    )
+    media_format = media.get("format")
+    media_status = media.get("status")
+    is_current_airing = (
+        media_status == "RELEASING" and media_format in MAINLINE_FORMATS
+    )
+    start_data = media.get("startDate") or {}
+    try:
+        series_start_date = date(
+            int(start_data["year"]),
+            int(start_data["month"]),
+            int(start_data["day"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        series_start_date = None
+    series_age_days = (
+        (today - series_start_date).days if series_start_date is not None else None
+    )
+    is_current_new_anime = bool(
+        is_current_airing
+        and series_age_days is not None
+        and 0 <= series_age_days <= CURRENT_NEW_ANIME_MAX_AGE_DAYS
+    )
+    report = {
+        **base,
+        "anilist_id": media.get("id") or resolved.anilist_id,
+        "format": media_format,
+        "media_status": media_status,
+        "is_current_airing": is_current_airing,
+        "is_current_new_anime": is_current_new_anime,
+        "series_start_date": (
+            series_start_date.isoformat() if series_start_date is not None else None
+        ),
+        "series_age_days": series_age_days,
+        "aliases": aliases,
+        "cache": cache_status,
+    }
+    if not is_current_airing:
+        return {**report, "status": "not_current_airing"}
+    if not is_current_new_anime:
+        return {**report, "status": "not_current_new_anime"}
+    if (
+        not isinstance(schedule, dict)
+        or schedule.get("mediaId") != (media.get("id") or resolved.anilist_id)
+        or schedule.get("episode") != episode
+        or not isinstance(schedule.get("airingAt"), int)
+    ):
+        return {**report, "status": "schedule_unavailable"}
+
+    airing_at = schedule["airingAt"]
+    airing_date = datetime.fromtimestamp(airing_at).date()
+    age_days = (today - airing_date).days
+    report.update(
+        {
+            "airing_at": airing_at,
+            "airing_date": airing_date.isoformat(),
+            "age_days": age_days,
+        }
+    )
+    if airing_at > int(time.time()) or age_days < 0:
+        return {**report, "status": "not_aired_yet"}
+    scan_until = min(today, airing_date + timedelta(days=7))
+    return {
+        **report,
+        "status": "found",
+        "scan_since": airing_date.isoformat(),
+        "scan_until": scan_until.isoformat(),
+        "window_mode": (
+            "recent_to_today" if age_days <= 7 else "post_airing_7_day"
+        ),
+        "recent_scan_eligible": True,
+    }
 
 
 def latest_regular_target(
@@ -1706,6 +2049,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mark-finished", action="store_true")
     parser.add_argument("--latest", action="store_true", help="Find the latest regular episode using airing metadata.")
     parser.add_argument(
+        "--official-air-date",
+        action="store_true",
+        help="Return the read-only official AniList airing date for --episode and skip Nyaa search.",
+    )
+    parser.add_argument(
         "--whole-season",
         action="store_true",
         help="Find one verified package covering the complete target season.",
@@ -1747,6 +2095,12 @@ def status_return_code(status: str) -> int | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.official_air_date:
+        if args.episode is None:
+            print("--official-air-date requires --episode.", file=sys.stderr)
+            return 2
+        args.no_state_update = True
+        args.no_auto_batch = True
     if args.require_zh:
         args.want_zh = True
         args.include_page_link = True
@@ -1787,6 +2141,39 @@ def main(argv: list[str] | None = None) -> int:
     state_show = identity.state_show
     resolver_status = identity.resolver
     tracked = identity.tracked
+    if args.official_air_date:
+        identity = ensure_official_air_identity(
+            identity,
+            args.schedule_cache,
+            args.timeout,
+            args.refresh_cache,
+            date.today(),
+        )
+        tracked = identity.tracked
+        resolver_status = identity.resolver
+        report = official_air_date_report(
+            identity,
+            args.episode,
+            args.schedule_cache,
+            args.timeout,
+            args.refresh_cache,
+            date.today(),
+        )
+        report["tracked"] = tracked
+        report["state_update"] = "none"
+        report["resolver"] = resolver_status
+        if args.json:
+            emit_json(report)
+        else:
+            print(report["status"])
+        return {
+            "found": 0,
+            "not_current_airing": 0,
+            "not_current_new_anime": 0,
+            "not_aired_yet": 0,
+            "schedule_unavailable": 1,
+            "ambiguous": 4,
+        }.get(report["status"], 1)
     state_update = "none"
     schedule_cache_status = "not_used"
     season = canonical_season(args.season or resolved.season or (state_show or {}).get("season"))
