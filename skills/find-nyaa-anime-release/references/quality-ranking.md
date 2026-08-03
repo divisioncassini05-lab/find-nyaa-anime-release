@@ -4,8 +4,9 @@ Use this reference only for unusual quality disputes, batch math, downgrade deci
 
 ## Search Budget
 
-- The high-level path resolves at most two non-redundant, Nyaa-friendly titles, then fetches RSS with the configured short timeout.
-- Raw RSS items are cached briefly and rescored/reclassified under every new season, episode, and size policy. Final "no result" conclusions are not cached as facts.
+- The high-level path resolves at most two non-redundant, Nyaa-friendly titles. Unconstrained/latest discovery uses RSS recency; a known episode, complete season, premium tier, explicit size range, or trusted Chinese-title lane uses Nyaa's native HTML `s=size&o=desc` search.
+- A size-driven search reads a bounded descending window of at most three pages per query and normally stops on the first page containing an in-range target. It never downloads every result and sorts the full history locally. Local work, season, episode, subtitle, and hard-size checks remain mandatory.
+- Raw RSS or size-sorted listing items are cached briefly and rescored/reclassified under every new season, episode, and size policy. Final "no result" conclusions are not cached as facts.
 - Schedule metadata is cached briefly for latest/next checks. Use `--refresh-cache` only when the user explicitly asks for a fresh check or supplies current Nyaa evidence that contradicts the report.
 - A single exact fallback query is allowed only when raw candidates are present but their season/episode parsing is uncertain. Never broaden blindly across aliases or browse manually after a conclusive report.
 
@@ -17,13 +18,14 @@ Use this reference only for unusual quality disputes, batch math, downgrade deci
 高画质 (premium):  at least 6 GiB per episode, BDMV, remux, or comparable lossless source
 ```
 
-- `随便看看` and `随便看` map to **轻量观看**. `一般画质`, `普通画质`, and `中等画质` map to **普通观看**. `极致画质`, `极致`, `最高画质`, and `顶级画质` map to **高画质**.
+- `随便看看` and `随便看` map to **轻量观看**. `一般画质`, `普通画质`, and `中等画质` map to **普通观看**. `高画质`, `极致画质`, `极致`, `最高画质`, and `顶级画质` map to **高画质**.
 - No quality wording defaults to **轻量观看**. Relative wording such as “画质高一点” needs an explicit size floor or one clarification before searching.
 - `4-6 GiB` is intentionally outside the three defaults. Apply that range only when the user explicitly requests it.
 
 - Explicit size constraints override tier hard bounds. `--min-gib-per-episode 1` means `>=1 GiB` with no upper limit; add `--max-gib-per-episode` only when the user states a range.
 - Do not reduce a tier floor for a short runtime. A 12-minute episode at 514 MiB is below both `watch` and `browse` for this user.
-- For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras. Named tiers classify the remaining regular files by average size while enforcing a `1 GiB` absolute floor on every ordinary regular file. Explicit min/max constraints remain strict per file. Total size may prove a package is impossible, but cannot prove it is qualified.
+- For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras. Browse/watch tiers classify the remaining regular files by average size while enforcing a `1 GiB` absolute floor on every ordinary regular file. Premium requires every regular file to meet its `6 GiB` floor unless the package qualifies for the BDMV/remux source exemption. Explicit min/max constraints remain strict per file. Total size may prove a package is impossible, but cannot prove it is qualified.
+- In discovery output, treat `size_scope: batch_total` as an explicit warning: `size_gib` is the whole package, `per_episode_size_gib` is unavailable, and `requires_whole_season_verification` must remain true until file-list coverage and quality checks succeed.
 - A below-floor Chinese-subtitle release must not beat a qualified unsubtitled or multi-subtitle release unless Chinese subtitles are an explicit hard requirement and the user has separately approved a tier downgrade.
 - For an ordinary or soft-Chinese **普通观看** (`watch`) request with no `2-4 GiB` candidate and no user-supplied custom floor, the high-level script automatically retries the same target as **轻量观看** (`browse`, `1-2 GiB`). Label it **轻量观看降级结果**. A valid `2-4 GiB` candidate is never displaced merely because a smaller release has Chinese subtitles.
 - For a hard-Chinese **普通观看** request, a verified-Chinese **轻量观看** fallback produces `needs_quality_fallback_confirmation`: show its metadata without a magnet and ask first. After approval, rerun at `browse`; never go below `1 GiB`.

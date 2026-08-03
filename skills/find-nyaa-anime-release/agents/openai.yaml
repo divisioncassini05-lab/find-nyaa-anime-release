@@ -1,4 +1,4 @@
 interface:
   display_name: "Find Nyaa Anime Release"
-  short_description: "Fast Agent-led Nyaa discovery with verified magnets."
-  default_prompt: "Use $find-nyaa-anime-release to read local progress, distinguish the latest already-available episode from the next tracked episode, enforce the 1 GiB floor, use one-command fast verification for a simple exact episode, reserve discovery shortlists for latest, strict, or ambiguous cases, reuse the default RSS cache, always return the verified magnet, and use the bounded official post-airing window only after a currently releasing new-anime search fails."
+  short_description: "Find, track, and optionally enqueue anime releases."
+  default_prompt: "Use $find-nyaa-anime-release to find a qualified anime episode or movie, auto-track confirmed current anime, and enqueue the final magnet during scheduled runs."

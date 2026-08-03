@@ -20,17 +20,20 @@ import search_nyaa_releases as nyaa
 from release_identity import EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
 
 
-RAW_CACHE_VERSION = 3
+RAW_CACHE_VERSION = 4
 RAW_CACHE_SECONDS = 5 * 60
 MAX_RAW_CACHE_ENTRIES = 120
 MAX_RECENT_CACHE_PAGES = 96
 MAX_RECENT_SCAN_PAGES = 32
 RECENT_SCAN_BATCH_SIZE = 4
+MAX_SIZE_SORT_PAGES = 3
+NYAA_LISTING_PAGE_SIZE = 75
 TIER_SIZE_BOUNDS: dict[str, tuple[float, float | None]] = {
     "browse": (1.0, 2.0),
     "watch": (2.0, 4.0),
     "premium": (6.0, None),
 }
+DEFAULT_MOVIE_MIN_TOTAL_GIB = 10.0
 
 
 class SearchIntent(str, Enum):
@@ -39,6 +42,7 @@ class SearchIntent(str, Enum):
     LATEST_REGULAR = "latest_regular"
     SEASON_BROWSE = "season_browse"
     SEASON_BATCH = "season_batch"
+    MOVIE = "movie"
 
 
 @dataclass(frozen=True)
@@ -60,9 +64,13 @@ class SizePolicy:
     hard_max_gib: float | None
     preferred_min_gib: float
     preferred_max_gib: float | None
+    scope: str = "per_episode"
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if self.scope == "per_episode":
+            payload.pop("scope")
+        return payload
 
 
 @dataclass(frozen=True)
@@ -131,6 +139,7 @@ class ClassifiedCandidate:
             "published": self.candidate.published,
             "score": self.candidate.score,
             "matched_queries": self.candidate.matched_queries,
+            "subtitle_signal": self.candidate.subtitle_signal,
             "detail_checked": self.candidate.detail_checked,
             "detail_chinese_confirmed": self.candidate.detail_chinese_confirmed,
             "detail_subtitle_signal": self.candidate.detail_subtitle_signal,
@@ -249,6 +258,7 @@ def _raw_cache_key(args: argparse.Namespace) -> str:
         "aliases": args.alias,
         "category": args.category,
         "filter": args.filter,
+        "candidate_source": _raw_candidate_source(args),
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -415,6 +425,109 @@ def _targeted_fallback_args(
     return argparse.Namespace(**payload)
 
 
+def _uses_server_size_sort(args: argparse.Namespace) -> bool:
+    """Choose Nyaa's native size ordering for bounded, size-driven searches."""
+    if bool(getattr(args, "movie", False)):
+        return True
+    if bool(getattr(args, "server_sort_size_desc", False)):
+        return True
+    if bool(getattr(args, "trust_cjk_title_for_zh", False)):
+        return True
+    if bool(getattr(args, "whole_season", False)):
+        return True
+    if getattr(args, "episodes", None) is not None:
+        return True
+    if getattr(args, "episode", None) is not None:
+        return True
+
+    intent = getattr(args, "intent", None)
+    intent_value = getattr(intent, "value", intent)
+    if intent_value == SearchIntent.LATEST_REGULAR.value:
+        return False
+    return (
+        getattr(args, "size_policy_source", "tier") == "explicit"
+        or getattr(args, "tier", "browse") == "premium"
+    )
+
+
+def _raw_candidate_source(args: argparse.Namespace) -> str:
+    return "nyaa_html_size_desc" if _uses_server_size_sort(args) else "nyaa_rss_recent"
+
+
+def _entry_matches_size_sorted_target(
+    entry: nyaa.NyaaListingEntry,
+    query: str,
+    args: argparse.Namespace,
+) -> bool:
+    if bool(getattr(args, "trust_cjk_title_for_zh", False)) and not _contains_title(
+        entry.title, query
+    ):
+        return False
+
+    identity = parse_release_identity(entry.title)
+    requested_episode = getattr(args, "episode", None)
+    requested_season = normalize_season_number(getattr(args, "season", None))
+    if requested_episode is not None and (
+        identity.kind is not EpisodeKind.REGULAR
+        or identity.episode != requested_episode
+    ):
+        return False
+    if (
+        requested_season is not None
+        and identity.season is not None
+        and identity.season != requested_season
+    ):
+        return False
+    if getattr(args, "episodes", None) is not None and requested_episode is None:
+        if identity.kind is not EpisodeKind.BATCH:
+            return False
+
+    size_bytes = nyaa.parse_size(entry.size or "")
+    if size_bytes is None:
+        return False
+    multiplier = (
+        int(args.episodes)
+        if getattr(args, "episodes", None) is not None and requested_episode is None
+        else 1
+    )
+    size_gib = nyaa.bytes_to_gib(size_bytes)
+    if bool(getattr(args, "movie", False)):
+        hard_min = getattr(args, "min_total_gib", DEFAULT_MOVIE_MIN_TOTAL_GIB)
+        hard_max = getattr(args, "max_total_gib", None)
+        multiplier = 1
+    else:
+        hard_min = getattr(args, "min_gib_per_episode", None)
+        hard_max = getattr(args, "max_gib_per_episode", None)
+    if hard_min is not None and size_gib < float(hard_min) * multiplier:
+        return False
+    if hard_max is not None and size_gib > float(hard_max) * multiplier:
+        return False
+    return True
+
+
+def _size_sorted_page_is_below_floor(
+    entries: list[nyaa.NyaaListingEntry],
+    args: argparse.Namespace,
+) -> bool:
+    # Batch source exemptions are verified from the file list, so a package-total
+    # floor must not prematurely stop the server-sorted listing scan.
+    if getattr(args, "episodes", None) is not None:
+        return False
+    hard_min = (
+        getattr(args, "min_total_gib", DEFAULT_MOVIE_MIN_TOTAL_GIB)
+        if bool(getattr(args, "movie", False))
+        else getattr(args, "min_gib_per_episode", None)
+    )
+    if hard_min is None:
+        return False
+    sizes = [
+        size_bytes
+        for entry in entries
+        if (size_bytes := nyaa.parse_size(entry.size or "")) is not None
+    ]
+    return bool(sizes) and min(sizes) < float(hard_min) * (1024**3)
+
+
 def collect_raw_candidates(
     args: argparse.Namespace,
     cache_path: Path | None = None,
@@ -426,11 +539,52 @@ def collect_raw_candidates(
         if cached is not None:
             return _score_rss_items(cached, args), [], "hit"
 
-    rss_items: list[dict[str, str]] = []
+    raw_items: list[dict[str, str]] = []
     failures: list[str] = []
     queries = list(dict.fromkeys([args.query, *args.alias]))
+    use_size_sorted_listing = _uses_server_size_sort(args)
 
     def fetch_query(query: str) -> list[dict[str, str]]:
+        if use_size_sorted_listing:
+            collected: list[dict[str, str]] = []
+            for page in range(1, MAX_SIZE_SORT_PAGES + 1):
+                page_html = nyaa.fetch_search_listing_page(
+                    query,
+                    args.category,
+                    args.filter,
+                    page,
+                    args.timeout,
+                    sort="size",
+                    order="desc",
+                )
+                entries = nyaa.parse_nyaa_listing(page_html)
+                if not entries:
+                    if page == 1 and "torrent-list" not in page_html:
+                        raise ValueError(
+                            "Nyaa size-sorted search contained no parseable release rows"
+                        )
+                    break
+                collected.extend(
+                    {
+                        "query": query,
+                        "xml": nyaa.ET.tostring(
+                            nyaa.listing_entry_as_item(entry),
+                            encoding="unicode",
+                        ),
+                    }
+                    for entry in entries
+                )
+                if any(
+                    _entry_matches_size_sorted_target(entry, query, args)
+                    for entry in entries
+                ):
+                    break
+                if (
+                    len(entries) < NYAA_LISTING_PAGE_SIZE
+                    or _size_sorted_page_is_below_floor(entries, args)
+                ):
+                    break
+            return collected
         rss = nyaa.fetch_rss(query, args.category, args.filter, args.timeout)
         root = nyaa.ET.fromstring(rss)
         return [
@@ -441,7 +595,9 @@ def collect_raw_candidates(
     # Discovery is the latency-sensitive path and queries at most a few Agent-picked
     # names. Keep the legacy path sequential so existing callers retain deterministic
     # request order.
-    if getattr(args, "discover", False) and len(queries) > 1:
+    if (
+        getattr(args, "discover", False) or use_size_sorted_listing
+    ) and len(queries) > 1:
         query_results: dict[str, list[dict[str, str]]] = {}
         query_failures: dict[str, Exception] = {}
         with ThreadPoolExecutor(max_workers=min(4, len(queries))) as executor:
@@ -456,18 +612,18 @@ def collect_raw_candidates(
             if query in query_failures:
                 failures.append(f"{query}: {query_failures[query]}")
             else:
-                rss_items.extend(query_results.get(query, []))
+                raw_items.extend(query_results.get(query, []))
     else:
         for query in queries:
             try:
-                rss_items.extend(fetch_query(query))
+                raw_items.extend(fetch_query(query))
             except Exception as exc:  # noqa: BLE001 - reports keep network failures separate from empty results.
                 failures.append(f"{query}: {exc}")
-    candidates = _score_rss_items(rss_items, args)
+    candidates = _score_rss_items(raw_items, args)
     # A multi-query result is only reusable when every query completed. Caching a
     # partial result can turn a transient alias failure into a false hard miss.
-    if cache_path is not None and rss_items and not failures:
-        _write_cached_rss_items(cache_path, key, rss_items)
+    if cache_path is not None and raw_items and not failures:
+        _write_cached_rss_items(cache_path, key, raw_items)
     cache_state = "refresh" if refresh_cache else "miss"
     if failures:
         cache_state += "-partial"
@@ -647,6 +803,123 @@ _FAST_PATH_LANGUAGE_VARIANT = re.compile(
     r"\b(?:dub|dubbed)[\s._-]*(?:english|eng|french|german|spanish|latino|russian|rus)\b"
     r")"
 )
+_CJK_CHARACTER = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_LATIN_ALIAS_TECHNICAL = re.compile(
+    r"(?i)\b(?:web(?:rip|-dl)?|bluray|bd(?:rip|mv)?|1080p?|720p?|2160p?|"
+    r"hevc|avc|h\.?26[45]|aac|flac|mkv|mp4|multisubs?|dual[- ]audio|"
+    r"subtitle|season|episode)\b"
+)
+_LATIN_ALIAS_CUT = re.compile(
+    r"(?i)(?:"
+    r"\s+[-\u2013\u2014]\s+(?=\d{1,3}(?:\.\d+)?(?:\D|$))|"
+    r"\s+S\d{1,2}E\d{1,3}\b|"
+    r"\s*\[(?:\d{1,3}(?:\.\d+)?|(?:web|bd|1080|720|2160|hevc|avc|h\.?26)[^\]]*)\]"
+    r").*$"
+)
+
+
+def _compact_cjk(value: str) -> str:
+    return "".join(_CJK_CHARACTER.findall(value))
+
+
+def _query_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _configured_latin_query_matched(
+    items: list[ClassifiedCandidate], queries: list[str]
+) -> bool:
+    latin_keys = {
+        _query_key(query) for query in queries if re.search(r"[A-Za-z]", query)
+    }
+    if not latin_keys:
+        return False
+    return any(
+        _query_key(matched_query) in latin_keys
+        for item in items
+        for matched_query in item.candidate.matched_queries
+    )
+
+
+def _clean_recovered_latin_alias(segment: str) -> str | None:
+    segment = re.sub(r"^\[[^\]]+\]\s*", "", segment).strip()
+    segment = _LATIN_ALIAS_CUT.sub("", segment).strip(" .,:;_-\u2013\u2014")
+    if not re.search(r"[A-Za-z]", segment) or _CJK_CHARACTER.search(segment):
+        return None
+    if len(segment) < 3 or len(segment) > 80:
+        return None
+    if _LATIN_ALIAS_TECHNICAL.search(segment):
+        return None
+    if not re.search(r"[A-Za-z]{2}", segment):
+        return None
+    return re.sub(r"\s+", " ", segment)
+
+
+def _recover_latin_aliases_from_cjk_matches(
+    items: list[ClassifiedCandidate],
+    queries: list[str],
+    limit: int = 2,
+) -> list[str]:
+    """Recover bounded Latin work aliases from exact CJK/Latin release titles."""
+    cjk_queries = [
+        query for query in queries if len(_compact_cjk(query)) >= 2
+    ]
+    existing_keys = {_query_key(query) for query in queries}
+    support: dict[str, tuple[str, int]] = {}
+    for item in items:
+        title = item.candidate.title
+        matched_keys = {_query_key(query) for query in item.candidate.matched_queries}
+        matching_cjk = [
+            query
+            for query in cjk_queries
+            if _query_key(query) in matched_keys
+            and _compact_cjk(query) in _compact_cjk(title)
+        ]
+        if not matching_cjk:
+            continue
+        segments = re.split(r"\s*(?:/|\uff0f|\|)\s*", title)
+        if len(segments) < 2:
+            continue
+        for segment in segments:
+            alias = _clean_recovered_latin_alias(segment)
+            if alias is None:
+                continue
+            key = _query_key(alias)
+            if not key or key in existing_keys:
+                continue
+            previous = support.get(key)
+            support[key] = (alias, (previous[1] if previous else 0) + 1)
+    ranked = sorted(
+        support.values(),
+        key=lambda value: (value[1], len(value[0])),
+        reverse=True,
+    )
+    return [alias for alias, _count in ranked[: max(1, limit)]]
+
+
+def _trusted_cjk_title_query(
+    item: ClassifiedCandidate,
+    args: argparse.Namespace,
+) -> str | None:
+    if not getattr(args, "trust_cjk_title_for_zh", False):
+        return None
+    title_cjk = _compact_cjk(item.candidate.title)
+    if not title_cjk:
+        return None
+    queries = item.candidate.matched_queries or [args.query, *args.alias]
+    for query in queries:
+        query_cjk = _compact_cjk(query)
+        if len(query_cjk) >= 2 and query_cjk in title_cjk:
+            return query
+    return None
+
+
+def _mark_cjk_title_trusted(item: ClassifiedCandidate, query: str) -> None:
+    signal = f"trusted Chinese release title matched query: {query}"
+    item.candidate.subtitle_signal = signal
+    if signal not in item.candidate.reasons:
+        item.candidate.reasons.append(signal)
 
 
 def _fast_path_hint(
@@ -657,9 +930,13 @@ def _fast_path_hint(
 ) -> dict[str, Any] | None:
     """Recommend one low-risk candidate without hiding the discovery set."""
     if (
-        getattr(args, "require_zh", False)
+        (
+            getattr(args, "require_zh", False)
+            and not getattr(args, "trust_cjk_title_for_zh", False)
+        )
         or getattr(args, "whole_season", False)
         or getattr(args, "include_specials", False)
+        or getattr(args, "movie", False)
     ):
         return None
 
@@ -692,6 +969,14 @@ def _fast_path_hint(
     ]
     if not eligible:
         return None
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        eligible = [
+            item
+            for item in eligible
+            if _trusted_cjk_title_query(item, args) is not None
+        ]
+        if not eligible:
+            return None
 
     policy = size_policy_from_args(args)
     size_qualified: list[ClassifiedCandidate] = []
@@ -736,16 +1021,29 @@ def _fast_path_hint(
     if ordinary_language:
         size_qualified = ordinary_language
 
-    selected = max(
-        size_qualified,
-        key=lambda item: (
-            item.candidate.tier_fit == "in-tier",
-            item.candidate.score,
-            item.candidate.seeders,
-            item.candidate.downloads,
-            item.candidate.published or "",
-        ),
-    )
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        selected = max(
+            size_qualified,
+            key=lambda item: (
+                item.candidate.size_bytes or -1,
+                item.candidate.seeders,
+                item.candidate.downloads,
+                item.candidate.published or "",
+            ),
+        )
+        selection_basis = "trusted_cjk_title_largest_size_qualified_exact_episode"
+    else:
+        selected = max(
+            size_qualified,
+            key=lambda item: (
+                item.candidate.tier_fit == "in-tier",
+                item.candidate.score,
+                item.candidate.seeders,
+                item.candidate.downloads,
+                item.candidate.published or "",
+            ),
+        )
+        selection_basis = "exact_regular_episode_hard_size_quality_stability"
     selected_id = nyaa.nyaa_id_from_url(selected.candidate.url)
     if selected_id is None:
         return None
@@ -753,7 +1051,7 @@ def _fast_path_hint(
         "status": "ready",
         "candidate_id": selected_id,
         "target_episode": target_episode,
-        "selection_basis": "exact_regular_episode_hard_size_quality_stability",
+        "selection_basis": selection_basis,
         "considered_count": len(size_qualified),
     }
 
@@ -766,6 +1064,7 @@ def discover_release_candidates(
 ) -> dict[str, Any]:
     """Collect a compact, unqualified candidate set for Agent-side decisions."""
     raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    candidate_source = _raw_candidate_source(args)
     recent_scan: dict[str, Any] | None = None
     recent_since = getattr(args, "recent_since", None)
     if recent_since is not None:
@@ -786,21 +1085,91 @@ def discover_release_candidates(
         cache_state = f"{cache_state}+recent:{recent_scan['status']}"
     requested_season = normalize_season_number(getattr(args, "season", None))
     requested_episode = getattr(args, "episode", None)
-    classified_source = _classify(raw, requested_season)
-    if requested_episode is not None:
-        classified_source = [
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+
+    def classify_discovery_source() -> list[ClassifiedCandidate]:
+        items = _classify(raw, requested_season)
+        if bool(getattr(args, "movie", False)):
+            return [
+                item
+                for item in items
+                if item.identity.kind is EpisodeKind.UNKNOWN
+                and item.season_match not in {"other", "other_work"}
+            ]
+        if requested_episode is None:
+            return items
+        return [
             item
-            for item in classified_source
+            for item in items
             if item.identity.kind is EpisodeKind.REGULAR
             and item.identity.episode == requested_episode
             and item.season_match not in {"other", "other_work"}
         ]
+
+    classified_source = classify_discovery_source()
+    alias_recovery: dict[str, Any] | None = None
+    if (
+        requested_episode is not None
+        and any(len(_compact_cjk(query)) >= 2 for query in queries)
+        and not _configured_latin_query_matched(classified_source, queries)
+    ):
+        recovered_aliases = _recover_latin_aliases_from_cjk_matches(
+            classified_source, queries
+        )
+        if recovered_aliases:
+            recovery_payload = vars(args).copy()
+            recovery_payload["query"] = recovered_aliases[0]
+            recovery_payload["alias"] = recovered_aliases[1:]
+            recovery_args = argparse.Namespace(**recovery_payload)
+            recovered_raw, recovery_failures, recovery_cache = collect_raw_candidates(
+                recovery_args, cache_path, refresh_cache
+            )
+            raw = _merge_candidates(raw, recovered_raw)
+            failures = [*failures, *recovery_failures]
+            cache_state = f"{cache_state}+alias-recovery:{recovery_cache}"
+            queries.extend(
+                alias for alias in recovered_aliases if alias not in queries
+            )
+            classified_source = classify_discovery_source()
+            alias_recovery = {
+                "status": "used",
+                "reason": "no_initial_latin_query_match",
+                "aliases": recovered_aliases,
+                "latin_query_match_after_retry": _configured_latin_query_matched(
+                    classified_source, queries
+                ),
+                "failures": recovery_failures,
+            }
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        classified_source = [
+            item
+            for item in classified_source
+            if _trusted_cjk_title_query(item, args) is not None
+        ]
+        discovery_key = lambda item: (
+            item.candidate.size_bytes or -1,
+            item.candidate.published or "",
+        )
+        ordering = (
+            "nyaa_server_size_desc_then_local_size_desc_and_hard_filters"
+            if candidate_source == "nyaa_html_size_desc"
+            else "size_desc_then_published_desc_not_quality_rank"
+        )
+    else:
+        if candidate_source == "nyaa_html_size_desc":
+            discovery_key = lambda item: (
+                item.candidate.size_bytes or -1,
+                item.candidate.published or "",
+            )
+            ordering = "nyaa_server_size_desc_then_local_size_desc_not_quality_rank"
+        else:
+            discovery_key = _discovery_sort_key
+            ordering = "published_desc_only_not_quality_rank"
     classified = sorted(
         classified_source,
-        key=_discovery_sort_key,
+        key=discovery_key,
         reverse=True,
     )[: max(1, limit)]
-    queries = list(dict.fromkeys([args.query, *args.alias]))
     latin_queries = [query for query in queries if re.search(r"[A-Za-z]", query)]
     if classified:
         status = "found"
@@ -813,16 +1182,30 @@ def discover_release_candidates(
     candidates = []
     for item in classified:
         candidate = item.candidate
+        total_size_gib = (
+            round(nyaa.bytes_to_gib(candidate.size_bytes), 3)
+            if candidate.size_bytes is not None
+            else None
+        )
+        is_regular_episode = item.identity.kind is EpisodeKind.REGULAR
+        is_batch = item.identity.kind is EpisodeKind.BATCH
         candidates.append(
             {
                 "nyaa_id": nyaa.nyaa_id_from_url(candidate.url),
                 "title": candidate.title,
                 "identity": item.identity.as_dict(),
-                "size_gib": (
-                    round(nyaa.bytes_to_gib(candidate.size_bytes), 3)
-                    if candidate.size_bytes is not None
-                    else None
+                "size_gib": total_size_gib,
+                "size_scope": (
+                    "single_regular_episode"
+                    if is_regular_episode
+                    else "batch_total"
+                    if is_batch
+                    else "movie_total"
+                    if bool(getattr(args, "movie", False))
+                    else "release_total_not_per_episode"
                 ),
+                "per_episode_size_gib": total_size_gib if is_regular_episode else None,
+                "requires_whole_season_verification": is_batch,
                 "seeders": candidate.seeders,
                 "published": candidate.published,
                 "matched_queries": candidate.matched_queries,
@@ -835,7 +1218,11 @@ def discover_release_candidates(
         "query_coverage": (
             "includes_latin_alias" if latin_queries else "cjk_only_provisional"
         ),
-        "ordering": "published_desc_only_not_quality_rank",
+        "latin_query_match": _configured_latin_query_matched(
+            classified_source, queries
+        ),
+        "candidate_source": candidate_source,
+        "ordering": ordering,
         "candidates": candidates,
         "failures": failures,
         "cache": cache_state,
@@ -848,6 +1235,8 @@ def discover_release_candidates(
     )
     if fast_path is not None:
         payload["fast_path"] = fast_path
+    if alias_recovery is not None:
+        payload["alias_recovery"] = alias_recovery
     if recent_scan is not None:
         payload["recent_scan"] = recent_scan
     return payload
@@ -1038,6 +1427,17 @@ def _is_exact_regular_episode(
 def size_policy_from_args(args: argparse.Namespace) -> SizePolicy:
     preferred_min, preferred_max = TIER_SIZE_BOUNDS[args.tier]
     source = getattr(args, "size_policy_source", "tier")
+    if bool(getattr(args, "movie", False)):
+        return SizePolicy(
+            source=source,
+            hard_min_gib=getattr(
+                args, "min_total_gib", DEFAULT_MOVIE_MIN_TOTAL_GIB
+            ),
+            hard_max_gib=getattr(args, "max_total_gib", None),
+            preferred_min_gib=DEFAULT_MOVIE_MIN_TOTAL_GIB,
+            preferred_max_gib=None,
+            scope="movie_total",
+        )
     if source == "explicit":
         return SizePolicy(
             source="explicit",
@@ -1060,26 +1460,36 @@ def _quality_filter(
 ) -> tuple[list[ClassifiedCandidate], dict[str, int]]:
     kept: list[ClassifiedCandidate] = []
     counts = {"below_min_count": 0, "above_max_count": 0, "size_unknown_count": 0}
+    movie_mode = bool(getattr(args, "movie", False))
+    unit_label = "GiB total" if movie_mode else "GiB/episode"
     for item in candidates:
-        comparable = nyaa.comparable_gib_per_episode(item.candidate, args.episodes)
+        comparable = (
+            nyaa.bytes_to_gib(item.candidate.size_bytes)
+            if movie_mode and item.candidate.size_bytes is not None
+            else nyaa.comparable_gib_per_episode(item.candidate, args.episodes)
+        )
         if comparable is None:
             counts["size_unknown_count"] += 1
-            item.candidate.reasons.append("actual single-episode size is unavailable")
+            item.candidate.reasons.append(
+                "actual movie total size is unavailable"
+                if movie_mode
+                else "actual single-episode size is unavailable"
+            )
             continue
         if policy.hard_min_gib is not None and comparable < policy.hard_min_gib:
             counts["below_min_count"] += 1
             item.candidate.reasons.append(
-                f"below hard size minimum: {comparable:.2f} < {policy.hard_min_gib:.2f} GiB/episode"
+                f"below hard size minimum: {comparable:.2f} < {policy.hard_min_gib:.2f} {unit_label}"
             )
             continue
         if policy.hard_max_gib is not None and comparable > policy.hard_max_gib:
             counts["above_max_count"] += 1
             item.candidate.reasons.append(
-                f"above hard size maximum: {comparable:.2f} > {policy.hard_max_gib:.2f} GiB/episode"
+                f"above hard size maximum: {comparable:.2f} > {policy.hard_max_gib:.2f} {unit_label}"
             )
             continue
         item.candidate.reasons.append(
-            f"meets {policy.source} size policy at {comparable:.2f} GiB/episode"
+            f"meets {policy.source} size policy at {comparable:.2f} {unit_label}"
         )
         kept.append(item)
     return kept, counts
@@ -1291,8 +1701,14 @@ def _coverage_from_file_entries(
 
     all_sizes_known = bool(mapped) and all(entry.size_bytes is not None for entry in mapped.values())
     average_gib = sum(size_gib) / len(size_gib) if size_gib else None
-    quality_basis = "source_exempt" if source_exempt else (
-        "explicit_per_file" if policy.source == "explicit" else "average"
+    quality_basis = (
+        "source_exempt"
+        if source_exempt
+        else "explicit_per_file"
+        if policy.source == "explicit"
+        else "tier_per_file"
+        if args.tier == "premium"
+        else "average"
     )
     quality_fit = source_exempt
     reason = "verified_complete_and_qualified" if source_exempt else "per_episode_size_unavailable"
@@ -1316,6 +1732,17 @@ def _coverage_from_file_entries(
                 "verified_complete_and_qualified"
                 if quality_fit
                 else "explicit_per_file_size_out_of_range"
+            )
+        elif args.tier == "premium":
+            quality_fit = all(
+                (policy.hard_min_gib is None or value >= policy.hard_min_gib)
+                and (policy.hard_max_gib is None or value <= policy.hard_max_gib)
+                for value in size_gib
+            )
+            reason = (
+                "verified_complete_and_qualified"
+                if quality_fit
+                else "tier_per_file_size_out_of_range"
             )
         else:
             quality_fit = bool(
@@ -1387,6 +1814,7 @@ def _season_batch_report(
             "absolute_floor_rejected_count": 0,
             "average_range_rejected_count": 0,
             "explicit_per_file_rejected_count": 0,
+            "tier_per_file_rejected_count": 0,
             "quality_rejection_samples": [],
         }
     )
@@ -1495,6 +1923,7 @@ def _season_batch_report(
                     "per_episode_below_absolute_floor": "absolute_floor_rejected_count",
                     "average_size_out_of_range": "average_range_rejected_count",
                     "explicit_per_file_size_out_of_range": "explicit_per_file_rejected_count",
+                    "tier_per_file_size_out_of_range": "tier_per_file_rejected_count",
                 }.get(coverage.reason)
                 if reason_counter:
                     diagnostics[reason_counter] += 1
@@ -1510,13 +1939,24 @@ def _season_batch_report(
                     )
                 continue
             quality_complete_count += 1
-            detail_text = nyaa.extract_nyaa_description(page_html)
-            nyaa.apply_detail_subtitle_signal(
-                item.candidate, detail_text, args.want_zh, args.airing_priority
-            )
-            if getattr(args, "require_zh", False) and not item.candidate.detail_chinese_confirmed:
+            trusted_query = _trusted_cjk_title_query(item, args)
+            if trusted_query is not None:
+                _mark_cjk_title_trusted(item, trusted_query)
+                subtitle_qualified_count += 1
+            elif getattr(args, "trust_cjk_title_for_zh", False):
                 continue
-            if item.candidate.detail_chinese_confirmed:
+            else:
+                detail_text = nyaa.extract_nyaa_description(page_html)
+                nyaa.apply_detail_subtitle_signal(
+                    item.candidate, detail_text, args.want_zh, args.airing_priority
+                )
+            if (
+                getattr(args, "require_zh", False)
+                and trusted_query is None
+                and not item.candidate.detail_chinese_confirmed
+            ):
+                continue
+            if trusted_query is None and item.candidate.detail_chinese_confirmed:
                 subtitle_qualified_count += 1
             effective_scope = coverage.scope if coverage.scope in {"exact", "multi"} else scope
             if effective_scope in qualified_by_scope:
@@ -1612,6 +2052,9 @@ def _inspect_details(
     selected: list[ClassifiedCandidate], args: argparse.Namespace
 ) -> DetailInspectionResult:
     result = DetailInspectionResult()
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        result.unchecked_count = len(selected)
+        return result
     strict = bool(getattr(args, "require_zh", False))
     if not args.inspect_details or (not strict and args.detail_limit <= 0):
         result.unchecked_count = len(selected)
@@ -1725,7 +2168,10 @@ def _direct_candidate_from_page(
         include_magnets=args.include_magnets,
     )
     candidate.matched_queries = matched_queries
-    if args.inspect_details or bool(getattr(args, "require_zh", False)):
+    if args.inspect_details or (
+        bool(getattr(args, "require_zh", False))
+        and not getattr(args, "trust_cjk_title_for_zh", False)
+    ):
         nyaa.apply_detail_subtitle_signal(
             candidate,
             nyaa.extract_nyaa_description(page_html),
@@ -1749,6 +2195,7 @@ def search_release_report(
     requested_episode = requested_episode if requested_episode is not None else args.episode
     size_policy = size_policy_from_args(args)
     raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    candidate_source = _raw_candidate_source(args)
     rss_failure_count = len(failures)
     queries = list(dict.fromkeys([args.query, *args.alias]))
     candidate_id_values = list(getattr(args, "candidate_id", []) or [])
@@ -1771,6 +2218,7 @@ def search_release_report(
                 "raw_count": 0,
                 "network_failures": len(failures),
                 "queries": queries,
+                "candidate_source": candidate_source,
             },
             failures=failures,
             cache=cache_state,
@@ -1838,6 +2286,7 @@ def search_release_report(
                     "candidate_id_not_found": direct_not_found,
                     "candidate_id_direct_failures": direct_failures,
                     "queries": queries,
+                    "candidate_source": candidate_source,
                 },
                 failures=[*failures, *direct_failures],
                 cache=cache_state,
@@ -1853,9 +2302,13 @@ def search_release_report(
     unknown_identity = [
         item for item in in_season if item.identity.kind in {EpisodeKind.UNKNOWN, EpisodeKind.BATCH}
     ]
+    movie_candidates = [
+        item for item in in_season if item.identity.kind is EpisodeKind.UNKNOWN
+    ]
     diagnostics: dict[str, Any] = {
         "raw_count": len(classified),
         "queries": queries,
+        "candidate_source": candidate_source,
         "candidate_id_filter": sorted(requested_candidate_ids),
         "candidate_id_matched_count": len(raw) if candidate_id_values else None,
         "candidate_id_direct_fetched": direct_fetched_ids,
@@ -1869,6 +2322,7 @@ def search_release_report(
         "regular_count": len(regular),
         "special_count": len(specials),
         "unknown_count": len(unknown_identity),
+        "movie_count": len(movie_candidates),
         "wrong_season_count": sum(
             item.season_match == "other" for item in classified
         ),
@@ -1922,6 +2376,9 @@ def search_release_report(
         unknown_identity = [
             item for item in in_season if item.identity.kind in {EpisodeKind.UNKNOWN, EpisodeKind.BATCH}
         ]
+        movie_candidates = [
+            item for item in in_season if item.identity.kind is EpisodeKind.UNKNOWN
+        ]
         diagnostics.update(
             {
                 "raw_count": len(classified),
@@ -1934,6 +2391,7 @@ def search_release_report(
                 "regular_count": len(regular),
                 "special_count": len(specials),
                 "unknown_count": len(unknown_identity),
+                "movie_count": len(movie_candidates),
                 "wrong_season_count": sum(
                     item.season_match == "other" for item in classified
                 ),
@@ -1949,7 +2407,9 @@ def search_release_report(
 
     choices: list[ClassifiedCandidate] = []
     target_candidates: list[ClassifiedCandidate]
-    if intent in {SearchIntent.SPECIFIC_EPISODE, SearchIntent.NEXT_TRACKED} or requested_episode is not None:
+    if intent is SearchIntent.MOVIE:
+        target_candidates = movie_candidates
+    elif intent in {SearchIntent.SPECIFIC_EPISODE, SearchIntent.NEXT_TRACKED} or requested_episode is not None:
         target_candidates = [
             item
             for item in regular
@@ -2031,14 +2491,36 @@ def search_release_report(
     diagnostics.update(detail_inspection.as_diagnostics())
     failures.extend(detail_inspection.failures[:2])
     if getattr(args, "require_zh", False):
-        verified = [item for item in selected if item.candidate.detail_chinese_confirmed]
-        diagnostics.update(
-            {
-                "required_subtitle": "simplified_or_traditional_chinese",
-            }
-        )
+        if getattr(args, "trust_cjk_title_for_zh", False):
+            trusted = [
+                (item, query)
+                for item in selected
+                if (query := _trusted_cjk_title_query(item, args)) is not None
+            ]
+            for item, query in trusted:
+                _mark_cjk_title_trusted(item, query)
+            verified = [item for item, _query in trusted]
+            diagnostics.update(
+                {
+                    "required_subtitle": "trusted_chinese_release_title",
+                    "cjk_title_trust_used": True,
+                    "cjk_title_trusted_count": len(verified),
+                }
+            )
+        else:
+            verified = [item for item in selected if item.candidate.detail_chinese_confirmed]
+            diagnostics.update(
+                {
+                    "required_subtitle": "simplified_or_traditional_chinese",
+                }
+            )
         if not verified:
-            if cache_state == "hit" and not refresh_cache and cache_path is not None:
+            if (
+                not getattr(args, "trust_cjk_title_for_zh", False)
+                and cache_state == "hit"
+                and not refresh_cache
+                and cache_path is not None
+            ):
                 refresh_args = argparse.Namespace(**vars(args))
                 elapsed_seconds = detail_inspection.elapsed_ms / 1000.0
                 refresh_args.detail_budget_seconds = max(

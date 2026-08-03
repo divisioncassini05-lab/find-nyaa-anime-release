@@ -127,12 +127,86 @@ def probe_payload(show: dict[str, Any] | None) -> dict[str, Any]:
         "title": show.get("title"),
         "aliases": show.get("aliases", []),
         "season": show.get("season"),
+        "watched_episode": show.get("watched_episode"),
         "latest_known_episode": show.get("latest_known_episode"),
         "next_episode": show.get("next_episode"),
         "airing": show.get("airing"),
         "tracking_status": show.get("status"),
         "search_titles": show.get("search_titles", []),
         "verified_search_titles": show.get("verified_search_titles", []),
+    }
+
+
+def completed_episode(show: dict[str, Any] | None) -> int | None:
+    if show is None:
+        return None
+    values: list[int] = []
+    watched_episode = show.get("watched_episode")
+    if isinstance(watched_episode, int):
+        values.append(watched_episode)
+    next_episode = show.get("next_episode")
+    if isinstance(next_episode, int) and next_episode > 1:
+        values.append(next_episode - 1)
+    return max(values) if values else None
+
+
+def record_found_episode(
+    data: dict[str, Any],
+    query: str,
+    episode: int,
+) -> dict[str, Any]:
+    show = find_show(data, query)
+    if show is None:
+        return {
+            "status": "not_tracked",
+            "tracked": False,
+            "title": query,
+            "episode": episode,
+        }
+
+    current_completed = completed_episode(show)
+    if current_completed is not None and episode <= current_completed:
+        return {
+            "status": "unchanged",
+            "tracked": True,
+            "title": show.get("title"),
+            "episode": episode,
+            "watched_episode": show.get("watched_episode"),
+            "latest_known_episode": show.get("latest_known_episode"),
+            "next_episode": show.get("next_episode"),
+            "reason": "requested_episode_not_ahead_of_completed_progress",
+        }
+
+    watched_episode = episode
+    current_latest = show.get("latest_known_episode")
+    latest_known_episode = max(
+        episode,
+        current_latest if isinstance(current_latest, int) else 0,
+    )
+    current_next = show.get("next_episode")
+    next_episode = max(
+        watched_episode + 1,
+        current_next if isinstance(current_next, int) else 1,
+    )
+
+    show["watched_episode"] = watched_episode
+    show["latest_known_episode"] = latest_known_episode
+    show["next_episode"] = next_episode
+    show["status"] = "airing"
+    show["airing"] = True
+    show["notes"] = (
+        f"Successfully found regular episode {episode}; "
+        f"treated as watched. Next target is episode {next_episode}."
+    )
+    show["updated_at"] = now_iso()
+    return {
+        "status": "recorded",
+        "tracked": True,
+        "title": show.get("title"),
+        "episode": episode,
+        "watched_episode": watched_episode,
+        "latest_known_episode": latest_known_episode,
+        "next_episode": next_episode,
     }
 
 
@@ -160,6 +234,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p_list = sub.add_parser("list", help="List tracked airing shows")
 
+    p_record_found = sub.add_parser(
+        "record-found",
+        help="Record a successfully returned regular episode as watched",
+    )
+    p_record_found.add_argument("title")
+    p_record_found.add_argument("--episode", type=int, required=True)
+
     p_update = sub.add_parser("update", help="Create or update an airing show")
     p_update.add_argument("title")
     p_update.add_argument("--alias", action="append")
@@ -183,6 +264,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(probe_payload(find_show(data, args.title)), ensure_ascii=False))
     elif args.cmd == "list":
         print(json.dumps(data.get("shows", []), ensure_ascii=False, indent=2))
+    elif args.cmd == "record-found":
+        if args.episode < 1:
+            parser.error("--episode must be a positive integer")
+        result = record_found_episode(data, args.title, args.episode)
+        if result["status"] == "recorded":
+            save_state(args.state, data)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["status"] in {"recorded", "unchanged"} else 1
     elif args.cmd == "update":
         show = upsert_show(data, args)
         save_state(args.state, data)

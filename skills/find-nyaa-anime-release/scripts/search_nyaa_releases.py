@@ -162,6 +162,7 @@ TIER_PROFILES = {
     "premium": {"label": "premium/BD-like", "ideal_gib_per_episode": (6.0, 999.0)},
 }
 DEFAULT_TIER_MIN_GIB = {"browse": 1.0, "watch": 2.0, "premium": 6.0}
+DEFAULT_MOVIE_MIN_TOTAL_GIB = 10.0
 TIER_ALIASES = {
     "casual": "browse",
     "browse": "browse",
@@ -223,6 +224,7 @@ class NyaaListingEntry:
     seeders: int
     leechers: int
     downloads: int
+    info_hash: str | None = None
 
 
 def text_of(parent: ET.Element, tag: str, default: str = "") -> str:
@@ -296,6 +298,10 @@ def detect_chinese(title: str) -> tuple[bool, str]:
     if hits:
         return True, ", ".join(dict.fromkeys(hits))
     return False, "not confirmed"
+
+
+def contains_cjk(value: str) -> bool:
+    return bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", value))
 
 
 def strip_html_to_text(value: str) -> str:
@@ -397,6 +403,7 @@ class _NyaaListingParser(HTMLParser):
         self.tds: list[dict[str, object]] = []
         self.nyaa_id: str | None = None
         self.title: str | None = None
+        self.info_hash: str | None = None
         self.entries: list[NyaaListingEntry] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -408,6 +415,7 @@ class _NyaaListingParser(HTMLParser):
             self.tds = []
             self.nyaa_id = None
             self.title = None
+            self.info_hash = None
             return
         if not self.in_row:
             return
@@ -425,6 +433,15 @@ class _NyaaListingParser(HTMLParser):
         if match:
             self.nyaa_id = match.group(1)
             self.title = html.unescape(attributes.get("title", "")).strip() or None
+        elif href.casefold().startswith("magnet:?"):
+            magnet_query = urllib.parse.parse_qs(
+                urllib.parse.urlsplit(html.unescape(href)).query
+            )
+            for xt_value in magnet_query.get("xt", []):
+                hash_match = re.fullmatch(r"urn:btih:([0-9a-f]{40})", xt_value, re.I)
+                if hash_match:
+                    self.info_hash = hash_match.group(1).lower()
+                    break
         elif href.startswith("/?c=") and not self.current_td.get("category"):
             self.current_td["category"] = html.unescape(attributes.get("title", "")).strip() or None
 
@@ -463,6 +480,7 @@ class _NyaaListingParser(HTMLParser):
                 seeders=cell_int(5),
                 leechers=cell_int(6),
                 downloads=cell_int(7),
+                info_hash=self.info_hash,
             )
         )
 
@@ -485,9 +503,53 @@ def build_listing_url(category: str, nyaa_filter: str, page: int) -> str:
     return NYAA_RSS + "?" + urllib.parse.urlencode(params)
 
 
+def build_search_listing_url(
+    query: str,
+    category: str,
+    nyaa_filter: str,
+    page: int,
+    sort: str = "size",
+    order: str = "desc",
+) -> str:
+    """Build a Nyaa HTML search URL whose ordering is performed by Nyaa."""
+    params = {
+        "q": query,
+        "c": category,
+        "f": nyaa_filter,
+        "p": page,
+        "s": sort,
+        "o": order,
+    }
+    return NYAA_RSS + "?" + urllib.parse.urlencode(params)
+
+
 def fetch_listing_page(category: str, nyaa_filter: str, page: int, timeout: int) -> str:
     request = urllib.request.Request(
         build_listing_url(category, nyaa_filter, page),
+        headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", "replace")
+
+
+def fetch_search_listing_page(
+    query: str,
+    category: str,
+    nyaa_filter: str,
+    page: int,
+    timeout: int,
+    sort: str = "size",
+    order: str = "desc",
+) -> str:
+    request = urllib.request.Request(
+        build_search_listing_url(
+            query,
+            category,
+            nyaa_filter,
+            page,
+            sort=sort,
+            order=order,
+        ),
         headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -571,6 +633,11 @@ def apply_detail_subtitle_signal(candidate: Candidate, detail_text: str, want_zh
         candidate.reasons.append(signal)
         return
 
+    candidate.reasons = [
+        reason
+        for reason in candidate.reasons
+        if reason != "Chinese/mixed subtitles not confirmed"
+    ]
     if candidate.subtitle_signal == "not confirmed":
         candidate.subtitle_signal = signal
     else:
@@ -633,7 +700,7 @@ def bitrate_size_score(
         return -40, "size unavailable; bitrate cannot be judged", "unknown", "unknown"
 
     total_gib = bytes_to_gib(size_bytes)
-    if episodes and episodes > 0:
+    if batch and episodes and episodes > 0:
         comparable_gib = total_gib / episodes
         basis = f"{comparable_gib:.2f} GiB/episode from {episodes}-episode batch"
     elif batch:
@@ -658,10 +725,8 @@ def comparable_gib_per_episode(candidate: Candidate, episodes: int | None) -> fl
     if candidate.size_bytes is None:
         return None
     total_gib = bytes_to_gib(candidate.size_bytes)
-    if episodes and episodes > 0:
-        return total_gib / episodes
     if looks_batch(candidate.title):
-        return None
+        return total_gib / episodes if episodes and episodes > 0 else None
     return total_gib
 
 
@@ -936,6 +1001,7 @@ def listing_entry_as_item(entry: NyaaListingEntry) -> ET.Element:
             "seeders": entry.seeders,
             "leechers": entry.leechers,
             "downloads": entry.downloads,
+            "info_hash": entry.info_hash,
         }
     )
 
@@ -1035,17 +1101,53 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--require-zh",
         action="store_true",
-        help="Require Simplified or Traditional Chinese subtitles confirmed from the Nyaa detail page.",
+        help=(
+            "Require Simplified or Traditional Chinese subtitles confirmed from the Nyaa "
+            "detail page, unless the explicit supplemental CJK-title trust path is used."
+        ),
+    )
+    parser.add_argument(
+        "--trust-cjk-title-for-zh",
+        action="store_true",
+        help=(
+            "Supplemental strict-Chinese fast path: trust a release title that contains the "
+            "matched CJK query, skip subtitle detail inspection, and prefer the largest "
+            "size-qualified exact-episode candidate."
+        ),
+    )
+    parser.add_argument(
+        "--server-sort-size-desc",
+        action="store_true",
+        help=(
+            "Use Nyaa's HTML search with s=size&o=desc before local hard filtering. "
+            "This is automatic for exact episodes, whole-season searches, the CJK-title "
+            "trust lane, premium tier, and explicit size bounds."
+        ),
     )
     parser.add_argument("--airing-priority", action="store_true", help="For current-season/new anime, raise same-quality Chinese subtitle/detail priority without crossing quality tiers.")
     parser.add_argument("--resolution", help="Desired resolution, e.g. 1080p or 2160p.")
     parser.add_argument("--tier", type=normalize_tier, default="browse", help="Need tier: browse, watch, or premium. Default: browse.")
     parser.add_argument("--season", help="Target season such as S02; filters obvious other-season results.")
     parser.add_argument("--episode", type=int, help="Target episode; filters previous/other episodes from noisy RSS results.")
+    parser.add_argument(
+        "--movie",
+        action="store_true",
+        help="Select a movie release and apply a total-file-size policy instead of per-episode bounds.",
+    )
     parser.add_argument("--duration-min", type=float, default=22.0, help="Runtime metadata only; quality tiers use actual file size. Default: 22.")
     parser.add_argument("--episodes", type=int, help="Episode count for batch scoring; divides total size by this count.")
     parser.add_argument("--min-gib-per-episode", type=float, help="Hard lower size floor in GiB per 22-minute episode.")
     parser.add_argument("--max-gib-per-episode", type=float, help="Optional hard upper size bound in GiB per episode.")
+    parser.add_argument(
+        "--min-total-gib",
+        type=float,
+        help="Movie-only hard lower bound in GiB total. Default with --movie: 10 GiB.",
+    )
+    parser.add_argument(
+        "--max-total-gib",
+        type=float,
+        help="Movie-only optional hard upper bound in GiB total.",
+    )
     parser.add_argument(
         "--allow-sub-1g",
         action="store_true",
@@ -1068,7 +1170,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--intent",
-        choices=["specific_episode", "next_tracked", "latest_regular", "season_browse", "season_batch"],
+        choices=["specific_episode", "next_tracked", "latest_regular", "season_browse", "season_batch", "movie"],
         help="Structured selection intent. Defaults to specific_episode when --episode is set.",
     )
     parser.add_argument("--include-specials", action="store_true", help="Select special/OVA candidates after explicit confirmation.")
@@ -1083,6 +1185,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.movie and any(
+        value is not None
+        for value in (args.season, args.episode, args.episodes)
+    ):
+        print("--movie cannot be combined with --season, --episode, or --episodes.", file=sys.stderr)
+        return 2
+    if args.movie and (args.whole_season or args.include_specials):
+        print("--movie cannot be combined with whole-season or special selection.", file=sys.stderr)
+        return 2
+    if args.movie and (
+        args.min_gib_per_episode is not None
+        or args.max_gib_per_episode is not None
+        or args.allow_sub_1g
+    ):
+        print(
+            "Movie searches use --min-total-gib/--max-total-gib, not per-episode bounds.",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.movie and (
+        args.min_total_gib is not None or args.max_total_gib is not None
+    ):
+        print("--min-total-gib/--max-total-gib require --movie.", file=sys.stderr)
+        return 2
+    if args.movie and args.intent not in {None, "movie"}:
+        print("--movie is only compatible with --intent movie.", file=sys.stderr)
+        return 2
     if args.discover and args.fast_verify:
         print("--discover and --fast-verify are separate paths.", file=sys.stderr)
         return 2
@@ -1096,10 +1225,15 @@ def main(argv: list[str]) -> int:
         if args.candidate_id:
             print("--fast-verify chooses its own candidate ID.", file=sys.stderr)
             return 2
-        if args.require_zh or args.whole_season or args.include_specials:
+        if (
+            (args.require_zh and not args.trust_cjk_title_for_zh)
+            or args.whole_season
+            or args.include_specials
+        ):
             print(
-                "--fast-verify is only for a simple regular episode without strict Chinese, "
-                "whole-season, or special-release checks.",
+                "--fast-verify is only for a simple regular episode without detail-verified "
+                "strict Chinese, whole-season, or special-release checks; the explicit "
+                "CJK-title trust path is allowed.",
                 file=sys.stderr,
             )
             return 2
@@ -1109,6 +1243,17 @@ def main(argv: list[str]) -> int:
                 file=sys.stderr,
             )
             return 2
+    if args.trust_cjk_title_for_zh and not args.require_zh:
+        print("--trust-cjk-title-for-zh requires --require-zh.", file=sys.stderr)
+        return 2
+    if args.trust_cjk_title_for_zh and not any(
+        contains_cjk(value) for value in [args.query, *args.alias]
+    ):
+        print(
+            "--trust-cjk-title-for-zh requires a Simplified or Traditional Chinese query.",
+            file=sys.stderr,
+        )
+        return 2
     if args.recent_until is not None and args.recent_since is None:
         print("--recent-until requires --recent-since.", file=sys.stderr)
         return 2
@@ -1155,8 +1300,9 @@ def main(argv: list[str]) -> int:
         args.inspect_details = False
     if args.require_zh:
         args.want_zh = True
-        args.inspect_details = True
-        args.detail_limit = max(args.detail_limit, 5)
+        if not args.trust_cjk_title_for_zh:
+            args.inspect_details = True
+            args.detail_limit = max(args.detail_limit, 5)
     if args.include_magnets and not args.legal_ok:
         print("Refusing to print magnet links without --legal-ok. Re-run without --include-magnets for metadata only.", file=sys.stderr)
         return 2
@@ -1165,6 +1311,22 @@ def main(argv: list[str]) -> int:
         return 2
     explicit_min = args.min_gib_per_episode
     explicit_max = args.max_gib_per_episode
+    explicit_movie_min = args.min_total_gib
+    explicit_movie_max = args.max_total_gib
+    if args.movie:
+        if explicit_movie_min is not None and explicit_movie_min <= 0:
+            print("--min-total-gib must be greater than zero.", file=sys.stderr)
+            return 2
+        if explicit_movie_max is not None and explicit_movie_max <= 0:
+            print("--max-total-gib must be greater than zero.", file=sys.stderr)
+            return 2
+        if (
+            explicit_movie_min is not None
+            and explicit_movie_max is not None
+            and explicit_movie_max < explicit_movie_min
+        ):
+            print("--max-total-gib must be greater than or equal to --min-total-gib.", file=sys.stderr)
+            return 2
     if explicit_min is not None and explicit_min < 1.0 and not args.allow_sub_1g:
         print(
             "A minimum below 1 GiB requires --allow-sub-1g; the default hard floor is 1 GiB.",
@@ -1174,11 +1336,20 @@ def main(argv: list[str]) -> int:
     if explicit_min is not None and explicit_max is not None and explicit_max < explicit_min:
         print("--max-gib-per-episode must be greater than or equal to --min-gib-per-episode.", file=sys.stderr)
         return 2
-    args.size_policy_source = (
-        "explicit" if explicit_min is not None or explicit_max is not None else "tier"
-    )
-    if args.size_policy_source == "tier":
-        args.min_gib_per_episode = DEFAULT_TIER_MIN_GIB[args.tier]
+    if args.movie:
+        args.size_policy_source = (
+            "movie_explicit"
+            if explicit_movie_min is not None or explicit_movie_max is not None
+            else "movie_default"
+        )
+        if args.min_total_gib is None:
+            args.min_total_gib = DEFAULT_MOVIE_MIN_TOTAL_GIB
+    else:
+        args.size_policy_source = (
+            "explicit" if explicit_min is not None or explicit_max is not None else "tier"
+        )
+        if args.size_policy_source == "tier":
+            args.min_gib_per_episode = DEFAULT_TIER_MIN_GIB[args.tier]
     from release_search_core import SearchIntent, discover_release_candidates, search_release_report
 
     if args.discover:
@@ -1260,7 +1431,9 @@ def main(argv: list[str]) -> int:
         }.get(report.status, 0)
 
     intent = args.intent or (
-        SearchIntent.SPECIFIC_EPISODE.value
+        SearchIntent.MOVIE.value
+        if args.movie
+        else SearchIntent.SPECIFIC_EPISODE.value
         if args.episode is not None
         else (
             SearchIntent.SEASON_BATCH.value

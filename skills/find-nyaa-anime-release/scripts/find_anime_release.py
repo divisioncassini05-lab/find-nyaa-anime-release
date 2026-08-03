@@ -18,6 +18,12 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from airing_watch_state import completed_episode
+from qbittorrent_submit import (
+    DEFAULT_SAVE_PATH as DEFAULT_QBITTORRENT_SAVE_PATH,
+    SubmissionError,
+    submit_magnet,
+)
 from release_identity import EpisodeKind, normalize_season_number, parse_release_identity
 from release_search_core import SearchContext, SearchIntent, search_release_report
 from runtime_paths import DEFAULT_STATE
@@ -454,6 +460,7 @@ def upsert_show(
     resolved: ResolvedAnime | None = None,
     status: str = "airing",
     show_hint: dict[str, Any] | None = None,
+    watched_episode: int | None = None,
 ) -> dict[str, Any]:
     show = show_hint if show_hint in data.get("shows", []) else None
     if show is None:
@@ -481,6 +488,12 @@ def upsert_show(
     show["aliases"] = [alias for alias in show["aliases"] if norm(alias) != norm(show["title"])]
     if season:
         show["season"] = season
+    if watched_episode is not None:
+        current_watched = show.get("watched_episode")
+        show["watched_episode"] = max(
+            watched_episode,
+            current_watched if isinstance(current_watched, int) else 0,
+        )
     if latest_episode is not None:
         show["latest_known_episode"] = latest_episode
     if next_episode is not None:
@@ -1936,6 +1949,10 @@ def child_argv_from_args(args: argparse.Namespace, title: str) -> list[str]:
         child.extend(["--search-title", search_title])
     for group_hint in args.release_group_hint or []:
         child.extend(["--release-group-hint", group_hint])
+    if args.enqueue_qbittorrent:
+        child.extend(["--qbittorrent-save-path", str(args.qbittorrent_save_path)])
+        if args.qbittorrent_exe:
+            child.extend(["--qbittorrent-exe", str(args.qbittorrent_exe)])
     flags = (
         ("--refresh-cache", args.refresh_cache),
         ("--include-magnet", args.include_magnet),
@@ -1951,6 +1968,7 @@ def child_argv_from_args(args: argparse.Namespace, title: str) -> list[str]:
         ("--want-zh", args.want_zh),
         ("--require-zh", args.require_zh),
         ("--airing-priority", args.airing_priority),
+        ("--enqueue-qbittorrent", args.enqueue_qbittorrent),
     )
     child.extend(option for option, enabled in flags if enabled)
     return child
@@ -2041,6 +2059,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--schedule-cache", type=Path, default=DEFAULT_SCHEDULE_CACHE)
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--include-magnet", "--include-magnets", dest="include_magnet", action="store_true")
+    parser.add_argument(
+        "--enqueue-qbittorrent",
+        action="store_true",
+        help="Silently submit the final qualified magnet to the local qBittorrent client.",
+    )
+    parser.add_argument("--qbittorrent-exe", type=Path)
+    parser.add_argument(
+        "--qbittorrent-save-path",
+        type=Path,
+        default=DEFAULT_QBITTORRENT_SAVE_PATH,
+    )
     parser.add_argument("--include-page-link", action="store_true")
     parser.add_argument("--legal-ok", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -2090,6 +2119,7 @@ def status_return_code(status: str) -> int | None:
         "no_complete_season_release": 4,
         "no_nyaa_release_for_target": 4,
         "output_incomplete": 5,
+        "download_enqueue_failed": 6,
     }.get(status)
 
 
@@ -2106,6 +2136,12 @@ def main(argv: list[str] | None = None) -> int:
         args.include_page_link = True
     if args.include_magnet and not args.legal_ok:
         print("Refusing to print magnet links without --legal-ok.", file=sys.stderr)
+        return 2
+    if args.enqueue_qbittorrent and (not args.include_magnet or not args.legal_ok):
+        print(
+            "--enqueue-qbittorrent requires --include-magnet and --legal-ok.",
+            file=sys.stderr,
+        )
         return 2
     state = load_state(args.state)
     state_repairs = sanitize_state_aliases(state)
@@ -2656,6 +2692,18 @@ def main(argv: list[str] | None = None) -> int:
     if status in {"found", "latest_unresolved"} and not output_contract["ready"]:
         status = "output_incomplete"
 
+    qbittorrent_report: dict[str, Any] | None = None
+    if args.enqueue_qbittorrent and status == "found" and output_contract["ready"]:
+        try:
+            qbittorrent_report = submit_magnet(
+                str((selected or {}).get("magnet") or ""),
+                executable=args.qbittorrent_exe,
+                save_path=args.qbittorrent_save_path,
+            )
+        except SubmissionError as exc:
+            qbittorrent_report = {"status": "error", "ok": False, "error": str(exc)}
+            status = "download_enqueue_failed"
+
     found_episode: int | None = None
     if (
         selected_item
@@ -2667,10 +2715,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if status == "found" and found_episode is not None:
         if not args.no_state_update and (resolved.trackable or tracked):
-            if is_final_episode(resolved, found_episode):
+            current_completed = completed_episode(state_show)
+            advances_progress = (
+                current_completed is None or found_episode > current_completed
+            )
+            if not advances_progress:
+                state_update = "unchanged_already_watched"
+            elif is_final_episode(resolved, found_episode):
                 delete_show(state, [args.title, resolved.title, *resolved.aliases])
                 state_update = "deleted_final_episode"
                 status = "finished_deleted"
+                save_state(args.state, state)
             else:
                 upsert_show(
                     state,
@@ -2679,14 +2734,18 @@ def main(argv: list[str] | None = None) -> int:
                     season or "S01",
                     found_episode,
                     found_episode + 1,
-                    f"Found regular episode {found_episode}; next default is episode {found_episode + 1}.",
+                    (
+                        f"Successfully found regular episode {found_episode}; "
+                        f"treated as watched. Next target is episode {found_episode + 1}."
+                    ),
                     resolved,
                     "airing",
                     show_hint=state_show,
+                    watched_episode=found_episode,
                 )
                 state_update = "advanced"
                 tracked = True
-            save_state(args.state, state)
+                save_state(args.state, state)
     elif (
         status
         in {
@@ -2838,6 +2897,7 @@ def main(argv: list[str] | None = None) -> int:
         "search_return_code": status_return_code(status),
         "search_stderr": " | ".join(core_report.failures)[:600],
         "output_contract": output_contract,
+        "qbittorrent": qbittorrent_report,
         "reply_text": reply_text,
         "state_repairs": state_repairs,
         **identity_report_fields(
