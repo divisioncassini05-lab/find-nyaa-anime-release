@@ -45,10 +45,10 @@ $skill-installer install https://github.com/divisioncassini05-lab/find-nyaa-anim
 ## 直接这样说
 
 ```text
-$find-nyaa-anime-release 碧蓝之海
+$find-nyaa-anime-release Re0
 $find-nyaa-anime-release 穹庐下的魔女，必须有中文字幕
 $find-nyaa-anime-release 零之使魔第二季，高画质
-$find-nyaa-anime-release 总之就是非常可爱第一季，找整季
+$find-nyaa-anime-release clannd,全系列
 $find-nyaa-anime-release 魔法少女小圆：叛逆的物语，高画质
 $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 ```
@@ -64,12 +64,13 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 | 高画质 / 极致画质 / 最高画质 | ≥6 GiB/集 | 也接受 BDMV、Remux 或同级无损来源 |
 | 电影 | ≥10 GiB 总大小 | 用户明确给出的范围优先 |
 
-默认不会返回低于 `1 GiB/集` 的普通正篇。明确写出的体积范围是硬条件。
+默认不会返回低于 `1 GiB/集` 的普通正篇。明确写出的体积范围是硬条件。如果有其他需求，如找不到1-2G，希望允许自动下调等需求，直接告诉ai就可以。
 
 ## 实际效果
 
 ### 整季与高画质
 
+*注：为便于展示，截图裁去了下方的磁力链接；实际检索成功时会直接返回完整磁力链接。*
 不会把任意单集或番外当成整季结果；整季包会检查覆盖范围和来源等级。
 
 ![整季高画质结果](assets/readme/high-quality-season.png)
