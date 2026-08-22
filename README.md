@@ -1,11 +1,11 @@
 # Find Nyaa Anime Release
 
 <p align="center">
-  <strong>让 Codex 识别动画、筛选画质与字幕、记录新番进度，并返回经过验证的 Nyaa 发布。</strong>
+  <strong>让本地 Agent 识别动画、筛选画质与字幕、记录新番进度，并返回经过验证的 Nyaa 发布。</strong>
 </p>
 
 <p align="center">
-  <img alt="Codex Skill" src="https://img.shields.io/badge/Codex-Skill-111827?style=flat-square">
+  <img alt="Agent Skill" src="https://img.shields.io/badge/Agent-Skill-111827?style=flat-square">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white">
   <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square">
 </p>
@@ -13,6 +13,8 @@
 ![明确要求中文字幕后的筛选结果](assets/readme/strict-chinese.png)
 
 你只需要用自然语言说明动画、季度、集数、画质或字幕要求。Skill 会解析作品身份，比较 Nyaa 候选，检查季集、体积、字幕和磁力，再把合格结果交给你。
+
+本项目以 **Codex 作为设计基准和完整测试环境**，下文也以 Codex 演示安装与使用。核心由 `SKILL.md` 和 Python 标准库脚本组成，不依赖 Codex 私有 API；其他能够读取自定义指令、运行本地命令并访问网络的 Agent 通常可以直接使用，或只需做少量路径与调用方式的兼容调整。
 
 ## 能做什么
 
@@ -22,9 +24,9 @@
 - 默认偏好中文字幕；只有明确提出“必须有中文字幕”时才将其作为硬条件验证。
 - 返回最终推荐前验证磁力，不把失败或不合格候选暴露给用户。
 - 只为当前在播动画维护进度；老番、电影、特典和失败检索不会污染追番记录。
-- 可选将最终结果提交到本机 qBittorrent，也可用于 Codex 定时追番任务。
+- 可选将最终结果提交到本机 qBittorrent，也可用于定时追番任务；下文以 Codex Automations 为例。
 
-## 安装
+## 安装（以 Codex 为例）
 
 在 Codex 中运行：
 
@@ -41,6 +43,16 @@ $skill-installer install https://github.com/divisioncassini05-lab/find-nyaa-anim
    - Windows：`C:\Users\你的用户名\.codex\skills\find-nyaa-anime-release`
    - macOS / Linux：`~/.codex/skills/find-nyaa-anime-release`
 3. 重新打开 Codex，或新建一个任务。
+
+### 其他 Agent
+
+将 `skills/find-nyaa-anime-release` 目录接入 Agent 的自定义指令或 Skill 机制，并确保它能够：
+
+- 读取 `SKILL.md`；
+- 调用目录内的 Python 脚本；
+- 访问本地状态文件和网络。
+
+不同 Agent 的 Skill 目录、命令权限和触发语法并不统一，因此可能需要调整安装路径或脚本调用方式。Codex 是当前完整验证的平台，其他 Agent 的兼容程度以其工具能力为准。
 
 ## 直接这样说
 
@@ -85,7 +97,7 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 定时任务可以确认最新正篇、验证发布、提交 qBittorrent，再按结果更新下一集。
 
-![Codex 自动追番并提交 qBittorrent](assets/readme/automation-submit.png)
+![以 Codex 为例的自动追番与 qBittorrent 提交](assets/readme/automation-submit.png)
 
 ![qBittorrent 中的任务](assets/readme/qbittorrent-task.png)
 
@@ -106,7 +118,7 @@ flowchart LR
     H --> J[可选提交 qBittorrent]
 ```
 
-脚本负责确定性的检索、解析和验证；Codex 负责阅读完整发布标题并判断作品版本、季度、正篇/特典以及最终候选。
+脚本负责确定性的检索、解析和验证；Agent 负责阅读完整发布标题并判断作品版本、季度、正篇/特典以及最终候选。本文截图与操作示例使用 Codex。
 
 ## 追番规则
 
@@ -118,7 +130,7 @@ flowchart LR
 
 ## 运行条件
 
-- Codex
+- 能读取自定义 Markdown 指令、运行本地命令并访问网络的 Agent（设计与完整测试以 Codex 为标准）
 - Python 3.10 或更高版本
 - 能够访问 Nyaa 的网络环境
 - qBittorrent 仅在启用自动提交时需要；该部分主要在 Windows 上测试
@@ -135,7 +147,7 @@ python -m unittest discover -s skills/find-nyaa-anime-release/tests -p "test_*.p
 
 ## 使用边界
 
-本项目与 Nyaa、OpenAI 和 qBittorrent 官方无关。请只检索和访问你依法有权获取的内容；使用者需要自行确认所在地区的法律与站点规则。
+本项目与 Nyaa、OpenAI、qBittorrent 及其他 Agent 平台官方均无关联。请只检索和访问你依法有权获取的内容；使用者需要自行确认所在地区的法律与站点规则。
 
 ## License
 
