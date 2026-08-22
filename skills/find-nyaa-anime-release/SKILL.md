@@ -22,6 +22,7 @@ python scripts/airing_watch_state.py probe "USER TITLE"
 ```
 
 - For a tracked title, use its canonical season and verified search titles; when `verified_search_titles` is non-empty, use those titles as the ordinary Nyaa queries first. The record establishes work identity, not the target episode.
+- Tracking state is not an answer cache. Never add an alias learned only from a selected Nyaa release, a manual successful query, or a prior Agent answer. Persist aliases only from independent work-identity metadata. A regression test must remove any release-specific alias that would reveal the expected answer.
 - Explicit episode, continuation/“下一集”, and latest wording win. A bare tracked title means `next_episode` interactively, but “latest already available” means the latest regular episode in a Codex automation run.
 - Scheduled latest discovery must complete successfully; never fall back to stale `next_episode` after incomplete query coverage, network failure, or unresolved identity.
 - An explicit older/same episode and a latest result not newer than `watched_episode` are retrieval-only and must not rewrite state.
@@ -56,13 +57,21 @@ For an ordinary movie:
 python scripts/search_nyaa_releases.py "MOVIE TITLE" --alias "BROAD ALIAS" --movie --discover --server-sort-size-desc --min-total-gib 10 --want-zh --legal-ok --report
 ```
 
-For strict Chinese only, a trustworthy Chinese title may add this supplemental exact-episode lane:
+For strict Chinese only, if the ordinary Latin/romaji lane does not return a qualified release, the trustworthy Chinese-title supplemental exact-episode lane is mandatory before reporting failure:
 
 ```powershell
 python scripts/search_nyaa_releases.py "简体标题" --alias "繁體標題" --season S01 --episode 3 --fast-verify --server-sort-size-desc --min-gib-per-episode 1 --require-zh --trust-cjk-title-for-zh --include-magnets --legal-ok --report
 ```
 
-Try both Simplified and Traditional variants in the same call. `--trust-cjk-title-for-zh` accepts an exact matched Chinese release title and skips subtitle detail inspection; report that title-based evidence accurately. Keep the ordinary broad lane and its strict detail-verification path: the Chinese lane is a supplement, not a replacement. For latest, let the ordinary broad Latin/romaji discovery determine the latest regular episode before querying the strict Chinese lane for that exact episode.
+For an ordinary tracked strict-Chinese request, use the high-level resolver so metadata titles, diacritic folding, Latin episode anchors, detail verification, and state rules run as one deterministic path:
+
+```powershell
+python scripts/find_anime_release.py "USER TITLE" --require-zh --include-magnet --legal-ok --json
+```
+
+Use `--no-state-update` only for a read-only regression test. Do not manufacture or persist a Traditional alias merely to make a known release discoverable. `strict_zh_title_variants` may be used only when those variants already came from independent metadata. If a genuine Simplified/Traditional pair is independently available, try both in the same supplemental call; a Japanese title containing kana is not a substitute. Otherwise let the high-level resolver use its Latin/romaji episode bridge and inspect the resulting release title/detail for CHS/CHT evidence. `--trust-cjk-title-for-zh` accepts an exact matched Chinese release title and skips subtitle detail inspection; report that title-based evidence accurately. Keep the ordinary broad lane and its strict detail-verification path: the Chinese lane is a supplement, not a replacement. For latest, let the ordinary broad Latin/romaji discovery determine the latest regular episode before querying the strict Chinese lane for that exact episode. Never report `subtitle_unqualified` or no qualified Chinese release until the applicable high-level/mandatory supplemental path has completed.
+
+In the explicit S01 CJK trust lane, a release title may identify the exact regular episode as `- 09` while omitting `S01`. Treat that as first-season evidence only when the full Chinese work title and exact episode both match. Do not extend this inference to S02 or later seasons.
 
 ### 3. Agent judgment
 

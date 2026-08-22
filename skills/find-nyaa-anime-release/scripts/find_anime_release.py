@@ -294,6 +294,9 @@ def strict_zh_search_names(
     """Add bounded release-search bridges only for explicit Chinese-subtitle requests."""
     expanded = list(base_names)
     cjk_names = [name for name in unique([original_title, *(cjk_aliases or [])]) if contains_cjk(name)]
+    cjk_names.sort(
+        key=lambda name: bool(re.search(r"[\u3040-\u30ff]", name))
+    )
     expanded.extend(cjk_names[:2])
 
     for name in base_names:

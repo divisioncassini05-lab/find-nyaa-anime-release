@@ -922,6 +922,40 @@ def _mark_cjk_title_trusted(item: ClassifiedCandidate, query: str) -> None:
         item.candidate.reasons.append(signal)
 
 
+def _apply_trusted_cjk_first_season(
+    items: list[ClassifiedCandidate],
+    args: argparse.Namespace,
+    requested_season: int | None,
+    requested_episode: int | None,
+) -> None:
+    """Accept seasonless exact-episode titles in the explicit S01 CJK trust lane.
+
+    Chinese platform releases commonly format first-season episodes as ``- 09``
+    instead of ``S01E09``.  The supplemental trust lane already requires an exact
+    CJK work-title match and exact regular episode, so retaining an unknown season
+    here only turns a verified first-season result into a false miss.  Later
+    seasons remain ambiguous and are deliberately not inferred.
+    """
+    if (
+        not getattr(args, "trust_cjk_title_for_zh", False)
+        or requested_season != 1
+        or requested_episode is None
+    ):
+        return
+    for item in items:
+        if (
+            item.season_match != "unknown"
+            or item.identity.kind is not EpisodeKind.REGULAR
+            or item.identity.episode != requested_episode
+            or item.work_match == "related_work"
+            or _trusted_cjk_title_query(item, args) is None
+        ):
+            continue
+        item.effective_season = 1
+        item.season_source = "trusted_cjk_first_season"
+        item.season_match = "match"
+
+
 def _fast_path_hint(
     items: list[ClassifiedCandidate],
     args: argparse.Namespace,
@@ -2314,6 +2348,9 @@ def search_release_report(
         failures = [*failures, *direct_failures]
 
     classified = _classify(raw, requested_season, context)
+    _apply_trusted_cjk_first_season(
+        classified, args, requested_season, requested_episode
+    )
     in_season = [item for item in classified if _in_requested_season(item)]
     unknown_season = [item for item in classified if item.season_match == "unknown"]
     related_work = [item for item in classified if item.work_match == "related_work"]
@@ -2388,6 +2425,9 @@ def search_release_report(
         rss_failure_count += len(fallback_failures)
         raw = _merge_candidates(raw, fallback_raw)
         classified = _classify(raw, requested_season, context)
+        _apply_trusted_cjk_first_season(
+            classified, args, requested_season, requested_episode
+        )
         in_season = [item for item in classified if _in_requested_season(item)]
         unknown_season = [item for item in classified if item.season_match == "unknown"]
         related_work = [item for item in classified if item.work_match == "related_work"]

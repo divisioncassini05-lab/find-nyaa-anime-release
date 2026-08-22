@@ -53,6 +53,19 @@ def names_for(show: dict[str, Any]) -> list[str]:
     return [x for x in names if x]
 
 
+def strict_zh_title_variants(show: dict[str, Any]) -> list[str]:
+    """Return Chinese title queries before Japanese titles that contain kana."""
+    variants: list[str] = []
+    for name in names_for(show):
+        if not re.search(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", name):
+            continue
+        if re.search(r"[\u3040-\u30ff]", name):
+            continue
+        if name not in variants:
+            variants.append(name)
+    return variants
+
+
 def find_show(data: dict[str, Any], query: str) -> dict[str, Any] | None:
     q = norm(query)
     if not q:
@@ -134,6 +147,7 @@ def probe_payload(show: dict[str, Any] | None) -> dict[str, Any]:
         "tracking_status": show.get("status"),
         "search_titles": show.get("search_titles", []),
         "verified_search_titles": show.get("verified_search_titles", []),
+        "strict_zh_title_variants": strict_zh_title_variants(show),
         "pending_download": show.get("pending_download"),
     }
 

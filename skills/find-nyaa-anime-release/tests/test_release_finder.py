@@ -344,6 +344,18 @@ class TitleSelectionTests(unittest.TestCase):
         self.assertIn("FixtureGroup Tenmaku 03", strict)
         self.assertIn("Tenmaku 03", strict)
 
+    def test_strict_zh_queries_prefer_chinese_variants_over_japanese_alias(self) -> None:
+        strict = finder.strict_zh_search_names(
+            ["Tenmaku no Jaadugar"],
+            "穹庐下的魔女",
+            9,
+            [],
+            ["天幕のジャードゥーガル", "穹廬下的魔女"],
+        )
+        self.assertIn("穹庐下的魔女", strict)
+        self.assertIn("穹廬下的魔女", strict)
+        self.assertNotIn("天幕のジャードゥーガル", strict)
+
     def test_flexible_strict_match_handles_macron_and_doubled_vowels(self) -> None:
         release = "[FixtureGroup] Tenmaku no Jādūgar - 03 [CHT]"
         self.assertFalse(core._contains_title(release, "Tenmaku no Jaadugar"))
@@ -448,6 +460,19 @@ class TitleSelectionTests(unittest.TestCase):
 
 
 class SubtitleDetailTests(unittest.TestCase):
+    def test_http_payload_decoder_handles_gzip_header_and_magic(self) -> None:
+        payload = "<h3>穹廬下的魔女 [CHT]</h3>".encode()
+        compressed = nyaa.gzip.compress(payload)
+        self.assertEqual(nyaa.decode_http_payload(compressed, "gzip"), payload)
+        self.assertEqual(nyaa.decode_http_payload(compressed), payload)
+
+    def test_http_payload_decoder_handles_deflate(self) -> None:
+        payload = b"<rss><channel /></rss>"
+        self.assertEqual(
+            nyaa.decode_http_payload(nyaa.zlib.compress(payload), "deflate"),
+            payload,
+        )
+
     def test_nested_nyaa_file_list_retains_directory_and_size(self) -> None:
         page = """
         <div class="torrent-file-list panel-body"><ul>
@@ -1713,6 +1738,63 @@ class HybridWorkflowTests(unittest.TestCase):
         self.assertEqual(collect.call_count, 2)
         fetch_detail.assert_not_called()
 
+    def test_cjk_title_fast_path_accepts_seasonless_first_season_episode(self) -> None:
+        release = self.nyaa_candidate(
+            "[ANi] Tenmaku no Jādūgar /  穹廬下的魔女 - 09 "
+            "[1080P][Baha][WEB-DL][AAC AVC][CHT][MP4]",
+            "1.6 GiB",
+            2149867,
+            seeders=699,
+        )
+        release.matched_queries = ["穹廬下的魔女"]
+        output = io.StringIO()
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=([release], [], "fixture"),
+            ) as collect,
+            patch.object(nyaa, "fetch_nyaa_detail_text") as fetch_detail,
+            contextlib.redirect_stdout(output),
+        ):
+            code = nyaa.main(
+                [
+                    "穹庐下的魔女",
+                    "--alias",
+                    "穹廬下的魔女",
+                    "--season",
+                    "S01",
+                    "--episode",
+                    "9",
+                    "--fast-verify",
+                    "--min-gib-per-episode",
+                    "1",
+                    "--require-zh",
+                    "--trust-cjk-title-for-zh",
+                    "--include-magnets",
+                    "--legal-ok",
+                    "--report",
+                ]
+            )
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["selected"][0]["nyaa_id"], "2149867")
+        self.assertEqual(payload["selected"][0]["effective_season"], 1)
+        self.assertEqual(
+            payload["selected"][0]["season_source"],
+            "trusted_cjk_first_season",
+        )
+        self.assertIn(
+            "trusted Chinese release title",
+            payload["selected"][0]["subtitle_signal"],
+        )
+        # Discovery performs one targeted fallback because the release omits S01,
+        # then exact-ID verification runs after the fast-path selection.
+        self.assertEqual(collect.call_count, 3)
+        fetch_detail.assert_not_called()
+
     def test_fast_verify_rejects_strict_chinese_mode(self) -> None:
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
@@ -2405,6 +2487,21 @@ class HybridWorkflowTests(unittest.TestCase):
         self.assertEqual(payload["verified_search_titles"], ["Sparks of Tomorrow"])
         self.assertEqual(before, after)
 
+    def test_probe_exposes_chinese_variants_without_japanese_alias(self) -> None:
+        show = {
+            "title": "穹庐下的魔女",
+            "aliases": [
+                "天幕のジャードゥーガル",
+                "穹廬下的魔女",
+                "Tenmaku no Jaadugar",
+            ],
+        }
+        payload = watch_state.probe_payload(show)
+        self.assertEqual(
+            payload["strict_zh_title_variants"],
+            ["穹庐下的魔女", "穹廬下的魔女"],
+        )
+
     def test_record_found_marks_tracked_episode_watched_and_advances_next(self) -> None:
         state = {
             "version": 1,
@@ -2748,9 +2845,13 @@ class HybridWorkflowTests(unittest.TestCase):
             skill_text,
         )
         self.assertIn(
-            "Try both Simplified and Traditional variants in the same call",
-            skill_text,
+            "if a genuine simplified/traditional pair is independently available, try both in the same supplemental call",
+            skill_text.casefold(),
         )
+        self.assertIn("the trustworthy Chinese-title supplemental exact-episode lane is mandatory", skill_text)
+        self.assertIn("a Japanese title containing kana is not a substitute", skill_text)
+        self.assertIn("Tracking state is not an answer cache", skill_text)
+        self.assertIn("Do not manufacture or persist a Traditional alias", skill_text)
         self.assertIn(
             "skips subtitle detail inspection",
             skill_text,

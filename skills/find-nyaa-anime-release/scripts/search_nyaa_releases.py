@@ -8,6 +8,7 @@ This helper intentionally omits magnet links unless both --include-magnets and
 from __future__ import annotations
 
 import argparse
+import gzip
 import html
 import json
 import math
@@ -16,6 +17,7 @@ import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import zlib
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
@@ -326,10 +328,26 @@ def extract_nyaa_description(page_html: str) -> str:
     return strip_html_to_text("\n".join(fragments) if fragments else page_html)
 
 
+def decode_http_payload(payload: bytes, content_encoding: str | None = None) -> bytes:
+    """Decode HTTP content codings that urllib does not handle automatically."""
+    encoding = (content_encoding or "").casefold().strip()
+    if "gzip" in encoding or payload.startswith(b"\x1f\x8b"):
+        return gzip.decompress(payload)
+    if "deflate" in encoding:
+        try:
+            return zlib.decompress(payload)
+        except zlib.error:
+            return zlib.decompress(payload, -zlib.MAX_WBITS)
+    return payload
+
+
 def fetch_nyaa_detail_page(url: str, timeout: int | float) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", "replace")
+        payload = decode_http_payload(
+            response.read(), response.headers.get("Content-Encoding")
+        )
+        return payload.decode("utf-8", "replace")
 
 
 def fetch_nyaa_detail_text(url: str, timeout: int | float) -> str:
@@ -529,7 +547,10 @@ def fetch_listing_page(category: str, nyaa_filter: str, page: int, timeout: int)
         headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", "replace")
+        payload = decode_http_payload(
+            response.read(), response.headers.get("Content-Encoding")
+        )
+        return payload.decode("utf-8", "replace")
 
 
 def fetch_search_listing_page(
@@ -553,7 +574,10 @@ def fetch_search_listing_page(
         headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", "replace")
+        payload = decode_http_payload(
+            response.read(), response.headers.get("Content-Encoding")
+        )
+        return payload.decode("utf-8", "replace")
 
 
 def _detail_label_value(page_html: str, label: str) -> str | None:
@@ -824,7 +848,9 @@ def fetch_rss(query: str, category: str, nyaa_filter: str, timeout: int) -> byte
         headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+        return decode_http_payload(
+            response.read(), response.headers.get("Content-Encoding")
+        )
 
 
 def score_item(
