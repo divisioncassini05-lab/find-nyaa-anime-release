@@ -134,6 +134,7 @@ def probe_payload(show: dict[str, Any] | None) -> dict[str, Any]:
         "tracking_status": show.get("status"),
         "search_titles": show.get("search_titles", []),
         "verified_search_titles": show.get("verified_search_titles", []),
+        "pending_download": show.get("pending_download"),
     }
 
 
@@ -148,6 +149,119 @@ def completed_episode(show: dict[str, Any] | None) -> int | None:
     if isinstance(next_episode, int) and next_episode > 1:
         values.append(next_episode - 1)
     return max(values) if values else None
+
+
+def pending_download(show: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return a well-formed queued download without treating it as watched progress."""
+    if show is None:
+        return None
+    value = show.get("pending_download")
+    if not isinstance(value, dict):
+        return None
+    episode = value.get("episode")
+    if not isinstance(episode, int) or episode < 1:
+        return None
+    return value
+
+
+def record_pending_download(
+    data: dict[str, Any],
+    query: str,
+    *,
+    episode: int,
+    season: str | None = None,
+    info_hash: str | None = None,
+    magnet: str | None = None,
+    release_title: str | None = None,
+    nyaa_url: str | None = None,
+) -> dict[str, Any]:
+    """Persist a queued qBittorrent target while leaving watched progress unchanged."""
+    show = find_show(data, query)
+    if show is None:
+        return {
+            "status": "not_tracked",
+            "tracked": False,
+            "title": query,
+            "episode": episode,
+        }
+    current = pending_download(show)
+    if current is not None:
+        current_hash = str(current.get("info_hash") or "").casefold()
+        requested_hash = str(info_hash or "").casefold()
+        if current.get("episode") == episode and (
+            not requested_hash or not current_hash or requested_hash == current_hash
+        ):
+            return {
+                "status": "unchanged",
+                "tracked": True,
+                "title": show.get("title"),
+                "episode": episode,
+                "pending_download": current,
+                "reason": "same_download_already_pending",
+            }
+        return {
+            "status": "conflict",
+            "tracked": True,
+            "title": show.get("title"),
+            "episode": episode,
+            "pending_download": current,
+            "reason": "another_download_is_pending",
+        }
+
+    queued: dict[str, Any] = {
+        "episode": episode,
+        "queued_at": now_iso(),
+    }
+    for key, value in (
+        ("season", season),
+        ("info_hash", info_hash),
+        ("magnet", magnet),
+        ("release_title", release_title),
+        ("nyaa_url", nyaa_url),
+    ):
+        if value not in (None, ""):
+            queued[key] = value
+    show["pending_download"] = queued
+    show["status"] = "waiting"
+    show["airing"] = True
+    show["notes"] = (
+        f"Regular episode {episode} was accepted by qBittorrent but is not confirmed complete; "
+        "watched progress remains unchanged until completion is observed."
+    )
+    show["updated_at"] = now_iso()
+    return {
+        "status": "pending",
+        "tracked": True,
+        "title": show.get("title"),
+        "episode": episode,
+        "pending_download": queued,
+        "watched_episode": show.get("watched_episode"),
+        "latest_known_episode": show.get("latest_known_episode"),
+        "next_episode": show.get("next_episode"),
+    }
+
+
+def clear_pending_download(
+    data: dict[str, Any],
+    query: str,
+    *,
+    episode: int | None = None,
+    info_hash: str | None = None,
+) -> dict[str, Any]:
+    """Clear only the matching queued target; stale retry runs cannot clear a newer one."""
+    show = find_show(data, query)
+    if show is None:
+        return {"status": "not_tracked", "tracked": False, "title": query}
+    current = pending_download(show)
+    if current is None:
+        return {"status": "unchanged", "tracked": True, "title": show.get("title"), "reason": "no_pending_download"}
+    if episode is not None and current.get("episode") != episode:
+        return {"status": "unchanged", "tracked": True, "title": show.get("title"), "pending_download": current, "reason": "episode_mismatch"}
+    if info_hash and str(current.get("info_hash") or "").casefold() != info_hash.casefold():
+        return {"status": "unchanged", "tracked": True, "title": show.get("title"), "pending_download": current, "reason": "info_hash_mismatch"}
+    removed = show.pop("pending_download")
+    show["updated_at"] = now_iso()
+    return {"status": "cleared", "tracked": True, "title": show.get("title"), "pending_download": removed}
 
 
 def record_found_episode(
@@ -198,6 +312,9 @@ def record_found_episode(
         f"Successfully found regular episode {episode}; "
         f"treated as watched. Next target is episode {next_episode}."
     )
+    queued = pending_download(show)
+    if queued is not None and queued.get("episode", 0) <= episode:
+        show.pop("pending_download", None)
     show["updated_at"] = now_iso()
     return {
         "status": "recorded",
@@ -241,6 +358,26 @@ def main(argv: list[str] | None = None) -> int:
     p_record_found.add_argument("title")
     p_record_found.add_argument("--episode", type=int, required=True)
 
+    p_record_pending = sub.add_parser(
+        "record-pending",
+        help="Record a qBittorrent-accepted regular episode without advancing watched progress",
+    )
+    p_record_pending.add_argument("title")
+    p_record_pending.add_argument("--episode", type=int, required=True)
+    p_record_pending.add_argument("--season")
+    p_record_pending.add_argument("--info-hash")
+    p_record_pending.add_argument("--magnet")
+    p_record_pending.add_argument("--release-title")
+    p_record_pending.add_argument("--nyaa-url")
+
+    p_clear_pending = sub.add_parser(
+        "clear-pending",
+        help="Clear a matching queued download after qBittorrent confirms completion",
+    )
+    p_clear_pending.add_argument("title")
+    p_clear_pending.add_argument("--episode", type=int)
+    p_clear_pending.add_argument("--info-hash")
+
     p_update = sub.add_parser("update", help="Create or update an airing show")
     p_update.add_argument("title")
     p_update.add_argument("--alias", action="append")
@@ -272,6 +409,34 @@ def main(argv: list[str] | None = None) -> int:
             save_state(args.state, data)
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] in {"recorded", "unchanged"} else 1
+    elif args.cmd == "record-pending":
+        if args.episode < 1:
+            parser.error("--episode must be a positive integer")
+        result = record_pending_download(
+            data,
+            args.title,
+            episode=args.episode,
+            season=args.season,
+            info_hash=args.info_hash,
+            magnet=args.magnet,
+            release_title=args.release_title,
+            nyaa_url=args.nyaa_url,
+        )
+        if result["status"] in {"pending", "unchanged"}:
+            save_state(args.state, data)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["status"] in {"pending", "unchanged"} else 1
+    elif args.cmd == "clear-pending":
+        result = clear_pending_download(
+            data,
+            args.title,
+            episode=args.episode,
+            info_hash=args.info_hash,
+        )
+        if result["status"] == "cleared":
+            save_state(args.state, data)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["status"] in {"cleared", "unchanged"} else 1
     elif args.cmd == "update":
         show = upsert_show(data, args)
         save_state(args.state, data)

@@ -18,10 +18,17 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from airing_watch_state import completed_episode
+from airing_watch_state import (
+    clear_pending_download,
+    completed_episode,
+    pending_download,
+    record_found_episode,
+    record_pending_download,
+)
 from qbittorrent_submit import (
     DEFAULT_SAVE_PATH as DEFAULT_QBITTORRENT_SAVE_PATH,
     SubmissionError,
+    inspect_torrent,
     submit_magnet,
 )
 from release_identity import EpisodeKind, normalize_season_number, parse_release_identity
@@ -1464,6 +1471,7 @@ def build_search_args(
         min_gib_per_episode=args.min_gib_per_episode,
         max_gib_per_episode=args.max_gib_per_episode,
         size_policy_source=args.size_policy_source,
+        allow_upward_compatibility=getattr(args, "allow_upward_compatibility", False),
         prefer_group=args.release_group_hint,
         avoid_group=[],
         inspect_details=args.require_zh,
@@ -1488,6 +1496,7 @@ def selected_view(
         "size": candidate.get("size"),
         "seeders": candidate.get("seeders"),
         "resolution": candidate.get("resolution"),
+        "tier_fit": candidate.get("tier_fit"),
         "magnet": candidate.get("magnet"),
         "subtitle_signal": candidate.get("subtitle_signal"),
         "detail_chinese_confirmed": candidate.get("detail_chinese_confirmed"),
@@ -1532,6 +1541,18 @@ def result_output_contract(
         "required_fields": required,
         "missing_fields": missing,
     }
+
+
+def quality_compatibility(
+    selected: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> str | None:
+    """Describe an accepted release above a named tier's preferred band."""
+    if not selected or not getattr(args, "allow_upward_compatibility", False):
+        return None
+    if getattr(args, "size_policy_source", "tier") != "tier":
+        return None
+    return "upward" if selected.get("tier_fit") == "above" else None
 
 
 def render_result_reply(
@@ -1953,6 +1974,8 @@ def child_argv_from_args(args: argparse.Namespace, title: str) -> list[str]:
         child.extend(["--qbittorrent-save-path", str(args.qbittorrent_save_path)])
         if args.qbittorrent_exe:
             child.extend(["--qbittorrent-exe", str(args.qbittorrent_exe)])
+    if args.defer_state_until_download_complete:
+        child.append("--defer-state-until-download-complete")
     flags = (
         ("--refresh-cache", args.refresh_cache),
         ("--include-magnet", args.include_magnet),
@@ -1968,6 +1991,7 @@ def child_argv_from_args(args: argparse.Namespace, title: str) -> list[str]:
         ("--want-zh", args.want_zh),
         ("--require-zh", args.require_zh),
         ("--airing-priority", args.airing_priority),
+        ("--allow-upward-compatibility", getattr(args, "allow_upward_compatibility", False)),
         ("--enqueue-qbittorrent", args.enqueue_qbittorrent),
     )
     child.extend(option for option, enabled in flags if enabled)
@@ -2042,6 +2066,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--episode", type=int)
     parser.add_argument("--min-gib-per-episode", type=float)
     parser.add_argument("--max-gib-per-episode", type=float)
+    parser.add_argument(
+        "--allow-upward-compatibility",
+        action="store_true",
+        help=(
+            "For named tiers only, treat the tier's upper size target as a "
+            "soft preference and accept a higher tier when the lower floor "
+            "and all other checks pass; explicit max bounds stay hard."
+        ),
+    )
     parser.add_argument("--timeout", type=int, default=8)
     parser.add_argument("--limit", type=int, default=1)
     parser.add_argument(
@@ -2063,6 +2096,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--enqueue-qbittorrent",
         action="store_true",
         help="Silently submit the final qualified magnet to the local qBittorrent client.",
+    )
+    parser.add_argument(
+        "--defer-state-until-download-complete",
+        action="store_true",
+        help=(
+            "For automatic downloads, keep a verified episode pending until qBittorrent's "
+            "fastresume evidence confirms completion."
+        ),
     )
     parser.add_argument("--qbittorrent-exe", type=Path)
     parser.add_argument(
@@ -2109,6 +2150,7 @@ def build_parser() -> argparse.ArgumentParser:
 def status_return_code(status: str) -> int | None:
     return {
         "found": 0,
+        "download_pending": 0,
         "finished_deleted": 0,
         "needs_quality_upgrade_confirmation": 0,
         "network_error": 1,
@@ -2140,6 +2182,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.enqueue_qbittorrent and (not args.include_magnet or not args.legal_ok):
         print(
             "--enqueue-qbittorrent requires --include-magnet and --legal-ok.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.defer_state_until_download_complete and not args.enqueue_qbittorrent:
+        print(
+            "--defer-state-until-download-complete requires --enqueue-qbittorrent.",
             file=sys.stderr,
         )
         return 2
@@ -2213,6 +2261,7 @@ def main(argv: list[str] | None = None) -> int:
     state_update = "none"
     schedule_cache_status = "not_used"
     season = canonical_season(args.season or resolved.season or (state_show or {}).get("season"))
+    queued_download = pending_download(state_show)
     if (
         season is None
         and state_show is None
@@ -2337,7 +2386,24 @@ def main(argv: list[str] | None = None) -> int:
     intent: SearchIntent
     availability: dict[str, Any] = {"target_source": "input", "official_target": False}
     not_aired_yet = False
-    if target_episode is not None:
+    if (
+        args.defer_state_until_download_complete
+        and queued_download is not None
+        and args.episode is None
+        and not args.whole_season
+    ):
+        # A queued-but-unconfirmed episode is a stronger target than a stale
+        # watched/next value or a newly discovered later episode. Reconcile it
+        # first so a delayed download cannot create a progress jump.
+        target_episode = int(queued_download["episode"])
+        intent = SearchIntent.SPECIFIC_EPISODE
+        availability = {
+            "target_source": "pending_download",
+            "official_target": False,
+            "pending_episode": target_episode,
+            "pending_info_hash": queued_download.get("info_hash"),
+        }
+    elif target_episode is not None:
         intent = SearchIntent.SPECIFIC_EPISODE
     elif args.latest:
         intent = SearchIntent.LATEST_REGULAR
@@ -2697,6 +2763,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             qbittorrent_report = submit_magnet(
                 str((selected or {}).get("magnet") or ""),
+                source_url=str((selected or {}).get("url") or "") or None,
                 executable=args.qbittorrent_exe,
                 save_path=args.qbittorrent_save_path,
             )
@@ -2809,6 +2876,9 @@ def main(argv: list[str] | None = None) -> int:
         diagnostic.setdefault("quality_stages", {})["premium"] = quality_upgrade_report.diagnostics
 
     public_selected = selected_view(selected, args.include_page_link, args.require_zh)
+    selected_compatibility = quality_compatibility(selected, args)
+    if public_selected is not None and selected_compatibility is not None:
+        public_selected["quality_compatibility"] = selected_compatibility
     public_fallback_selected = selected_view(fallback_selected, True, True)
     if public_fallback_selected is not None:
         public_fallback_selected.pop("magnet", None)
@@ -2883,6 +2953,7 @@ def main(argv: list[str] | None = None) -> int:
             "fallback_candidate": public_fallback_selected,
             "upgrade": quality_upgrade,
             "upgrade_candidate": public_quality_upgrade_selected,
+            "compatibility": selected_compatibility,
         },
         "tracked": tracked,
         "selected": public_selected,

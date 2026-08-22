@@ -1127,6 +1127,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--airing-priority", action="store_true", help="For current-season/new anime, raise same-quality Chinese subtitle/detail priority without crossing quality tiers.")
     parser.add_argument("--resolution", help="Desired resolution, e.g. 1080p or 2160p.")
     parser.add_argument("--tier", type=normalize_tier, default="browse", help="Need tier: browse, watch, or premium. Default: browse.")
+    parser.add_argument(
+        "--allow-upward-compatibility",
+        action="store_true",
+        help=(
+            "For named tiers only, make the upper size target a soft preference "
+            "and accept a higher tier when the lower floor and other checks pass; "
+            "explicit max bounds remain hard."
+        ),
+    )
     parser.add_argument("--season", help="Target season such as S02; filters obvious other-season results.")
     parser.add_argument("--episode", type=int, help="Target episode; filters previous/other episodes from noisy RSS results.")
     parser.add_argument(

@@ -1446,10 +1446,15 @@ def size_policy_from_args(args: argparse.Namespace) -> SizePolicy:
             preferred_min_gib=preferred_min,
             preferred_max_gib=preferred_max,
         )
+    # Named tiers describe a preferred size band. Their lower bound remains
+    # hard, while the upper bound can be made soft for callers that explicitly
+    # opt into upward compatibility. Explicit min/max policies (including a
+    # user-supplied max) are handled above and remain hard constraints.
+    upward_compatible = bool(getattr(args, "allow_upward_compatibility", False))
     return SizePolicy(
         source="tier",
         hard_min_gib=preferred_min,
-        hard_max_gib=preferred_max,
+        hard_max_gib=None if upward_compatible else preferred_max,
         preferred_min_gib=preferred_min,
         preferred_max_gib=preferred_max,
     )
@@ -1962,7 +1967,10 @@ def _season_batch_report(
             if effective_scope in qualified_by_scope:
                 qualified_by_scope[effective_scope].append(item)
 
-        exact = _rank(qualified_by_scope["exact"])
+        exact = _rank(
+            qualified_by_scope["exact"],
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+        )
         if exact:
             return ReleaseSearchReport(
                 intent=SearchIntent.SEASON_BATCH,
@@ -1976,7 +1984,10 @@ def _season_batch_report(
                 cache=cache_state,
             )
         if scope in {"multi", "unknown"}:
-            multi = _rank(qualified_by_scope["multi"])
+            multi = _rank(
+                qualified_by_scope["multi"],
+                prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+            )
             if multi:
                 return ReleaseSearchReport(
                     intent=SearchIntent.SEASON_BATCH,
@@ -2013,8 +2024,17 @@ def _season_batch_report(
     )
 
 
-def _rank(items: list[ClassifiedCandidate]) -> list[ClassifiedCandidate]:
-    ranked = sorted(items, key=lambda item: item.candidate.score, reverse=True)
+def _rank(
+    items: list[ClassifiedCandidate], *, prefer_in_tier: bool = False
+) -> list[ClassifiedCandidate]:
+    ranked = sorted(
+        items,
+        key=lambda item: (
+            prefer_in_tier and item.candidate.tier_fit == "in-tier",
+            item.candidate.score,
+        ),
+        reverse=True,
+    )
     for index, item in enumerate(ranked, start=1):
         item.candidate.rank = index
     return ranked
@@ -2421,7 +2441,10 @@ def search_release_report(
         target_candidates = regular
 
     if intent is SearchIntent.LATEST_REGULAR and specials and not include_specials:
-        choices = _rank(_latest_regular(regular)[:1] + _latest_regular(specials)[:1])
+        choices = _rank(
+            _latest_regular(regular)[:1] + _latest_regular(specials)[:1],
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+        )
         return ReleaseSearchReport(
             intent=intent,
             requested_season=requested_season,
@@ -2450,7 +2473,8 @@ def search_release_report(
 
     if not target_candidates:
         choices = _rank(
-            (unconfirmed_work_candidates + specials + unknown_identity + unknown_season)[:2]
+            (unconfirmed_work_candidates + specials + unknown_identity + unknown_season)[:2],
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
         )
         if choices:
             status = "needs_confirmation"
@@ -2480,13 +2504,19 @@ def search_release_report(
             requested_episode=requested_episode,
             status="release_unqualified",
             selected=[],
-            choices=_rank(target_candidates)[:2],
+            choices=_rank(
+                target_candidates,
+                prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+            )[:2],
             diagnostics=diagnostics,
             failures=failures,
             cache=cache_state,
         )
 
-    selected = _rank(qualified)
+    selected = _rank(
+        qualified,
+        prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+    )
     detail_inspection = _inspect_details(selected, args)
     diagnostics.update(detail_inspection.as_diagnostics())
     failures.extend(detail_inspection.failures[:2])
@@ -2565,8 +2595,14 @@ def search_release_report(
                 failures=failures,
                 cache=cache_state,
             )
-        selected = _rank(verified)
-    selected = _rank(selected)[: max(1, args.limit)]
+        selected = _rank(
+            verified,
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+        )
+    selected = _rank(
+        selected,
+        prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+    )[: max(1, args.limit)]
     return ReleaseSearchReport(
         intent=intent,
         requested_season=requested_season,

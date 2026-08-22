@@ -23,6 +23,12 @@ Use this reference only for unusual quality disputes, batch math, downgrade deci
 - `4-6 GiB` is intentionally outside the three defaults. Apply that range only when the user explicitly requests it.
 
 - Explicit size constraints override tier hard bounds. `--min-gib-per-episode 1` means `>=1 GiB` with no upper limit; add `--max-gib-per-episode` only when the user states a range.
+- `--allow-upward-compatibility` is an explicit opt-in for a named tier: keep
+  that tier's lower floor hard, treat its upper size as a preference, and
+  accept a higher-tier release only when all identity, subtitle, source, and
+  stability checks pass. Prefer an in-tier release whenever one qualifies.
+  A user-supplied `--max-gib-per-episode` remains a hard cap and disables this
+  relaxation; movie total-size bounds are unaffected.
 - Do not reduce a tier floor for a short runtime. A 12-minute episode at 514 MiB is below both `watch` and `browse` for this user.
 - For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras. Browse/watch tiers classify the remaining regular files by average size while enforcing a `1 GiB` absolute floor on every ordinary regular file. Premium requires every regular file to meet its `6 GiB` floor unless the package qualifies for the BDMV/remux source exemption. Explicit min/max constraints remain strict per file. Total size may prove a package is impossible, but cannot prove it is qualified.
 - In discovery output, treat `size_scope: batch_total` as an explicit warning: `size_gib` is the whole package, `per_episode_size_gib` is unavailable, and `requires_whole_season_verification` must remain true until file-list coverage and quality checks succeed.
@@ -37,7 +43,9 @@ Use this reference only for unusual quality disputes, batch math, downgrade deci
 Hard filters happen before ranking:
 
 1. Work, effective season, and exact regular episode.
-2. Explicit size bounds or the requested tier range.
+2. Explicit size bounds or the requested tier range. With upward compatibility,
+   only the named tier's lower floor is hard; a higher-tier candidate is marked
+   as an upward-compatible result and is considered after in-tier candidates.
 3. Any requested audio/source restriction.
 4. For a complete-season request: verified regular-episode coverage, the per-file absolute floor, then named-tier average or explicit per-file bounds. Prefer exact-season packages before qualified multi-season collections.
 
