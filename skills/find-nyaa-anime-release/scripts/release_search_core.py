@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import Any
 
 import search_nyaa_releases as nyaa
+from nyaa_client import NyaaClient, NyaaRelease, NyaaSearchRequest
 from release_identity import EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
 
 
-RAW_CACHE_VERSION = 4
+RAW_CACHE_VERSION = 5
 RAW_CACHE_SECONDS = 5 * 60
 MAX_RAW_CACHE_ENTRIES = 120
 MAX_RECENT_CACHE_PAGES = 96
@@ -34,6 +35,7 @@ TIER_SIZE_BOUNDS: dict[str, tuple[float, float | None]] = {
     "premium": (6.0, None),
 }
 DEFAULT_MOVIE_MIN_TOTAL_GIB = 10.0
+DEFAULT_NYAA_CLIENT = nyaa.DEFAULT_CLIENT
 
 
 class SearchIntent(str, Enum):
@@ -265,7 +267,31 @@ def _raw_cache_key(args: argparse.Namespace) -> str:
     ).hexdigest()
 
 
-def _read_cached_rss_items(path: Path, key: str) -> list[dict[str, str]] | None:
+def _restore_release(value: Any) -> NyaaRelease | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return NyaaRelease(**value)
+    except TypeError:
+        return None
+
+
+def _cached_item_release(item: Any) -> NyaaRelease | None:
+    if not isinstance(item, dict):
+        return None
+    release = _restore_release(item.get("release"))
+    if release is not None:
+        return release
+    xml = item.get("xml")
+    if not isinstance(xml, str):
+        return None
+    try:
+        return nyaa.client_api.release_from_rss_xml(xml)
+    except nyaa.NyaaParseError:
+        return None
+
+
+def _read_cached_rss_items(path: Path, key: str) -> list[dict[str, Any]] | None:
     cache = _load_raw_cache(path)
     now = time.time()
 
@@ -295,19 +321,26 @@ def _read_cached_rss_items(path: Path, key: str) -> list[dict[str, str]] | None:
         for item in entry["items"]
         if isinstance(item, dict)
         and isinstance(item.get("query"), str)
-        and isinstance(item.get("xml"), str)
+        and _cached_item_release(item) is not None
     ]
     return items
 
 
-def _write_cached_rss_items(path: Path, key: str, items: list[dict[str, str]]) -> None:
+def _write_cached_rss_items(path: Path, key: str, items: list[dict[str, Any]]) -> None:
     cache = _load_raw_cache(path)
     entries = cache["entries"]
     now = time.time()
+    normalized = [
+        {"query": item["query"], "release": asdict(release)}
+        for item in items
+        if isinstance(item, dict)
+        and isinstance(item.get("query"), str)
+        and (release := _cached_item_release(item)) is not None
+    ]
     entries[key] = {
         "cached_at": now,
         "expires_at": now + RAW_CACHE_SECONDS,
-        "items": items,
+        "items": normalized,
     }
     if len(entries) > MAX_RAW_CACHE_ENTRIES:
         oldest = sorted(entries, key=lambda item_key: float(entries[item_key].get("cached_at", 0)))
@@ -322,7 +355,7 @@ def _recent_page_cache_key(category: str, nyaa_filter: str, page: int) -> str:
 
 def _read_cached_recent_page(
     path: Path, category: str, nyaa_filter: str, page: int
-) -> list[nyaa.NyaaListingEntry] | None:
+) -> list[NyaaRelease] | None:
     cache = _load_raw_cache(path)
     pages = cache["recent_pages"]
     now = time.time()
@@ -340,14 +373,11 @@ def _read_cached_recent_page(
     entry = pages.get(_recent_page_cache_key(category, nyaa_filter, page))
     if not isinstance(entry, dict) or not isinstance(entry.get("items"), list):
         return None
-    restored = []
+    restored: list[NyaaRelease] = []
     for item in entry["items"]:
-        if not isinstance(item, dict):
-            continue
-        try:
-            restored.append(nyaa.NyaaListingEntry(**item))
-        except TypeError:
-            continue
+        release = _restore_release(item)
+        if release is not None:
+            restored.append(release)
     return restored
 
 
@@ -356,7 +386,7 @@ def _write_cached_recent_page(
     category: str,
     nyaa_filter: str,
     page: int,
-    items: list[nyaa.NyaaListingEntry],
+    items: list[NyaaRelease],
 ) -> None:
     cache = _load_raw_cache(path)
     pages = cache["recent_pages"]
@@ -382,15 +412,14 @@ def _merge_candidates(*candidate_lists: list[nyaa.Candidate]) -> list[nyaa.Candi
     return list(merged.values())
 
 
-def _score_rss_items(items: list[dict[str, str]], args: argparse.Namespace) -> list[nyaa.Candidate]:
+def _score_rss_items(items: list[dict[str, Any]], args: argparse.Namespace) -> list[nyaa.Candidate]:
     by_key: dict[str, nyaa.Candidate] = {}
     for raw_item in items:
-        try:
-            item = nyaa.ET.fromstring(raw_item["xml"])
-        except nyaa.ET.ParseError:
+        release = _cached_item_release(raw_item)
+        if release is None:
             continue
-        candidate = nyaa.score_item(
-            item,
+        candidate = nyaa.score_release(
+            release,
             query=raw_item["query"],
             want_zh=args.want_zh,
             airing_priority=args.airing_priority,
@@ -455,7 +484,7 @@ def _raw_candidate_source(args: argparse.Namespace) -> str:
 
 
 def _entry_matches_size_sorted_target(
-    entry: nyaa.NyaaListingEntry,
+    entry: NyaaRelease,
     query: str,
     args: argparse.Namespace,
 ) -> bool:
@@ -506,7 +535,7 @@ def _entry_matches_size_sorted_target(
 
 
 def _size_sorted_page_is_below_floor(
-    entries: list[nyaa.NyaaListingEntry],
+    entries: list[NyaaRelease],
     args: argparse.Namespace,
 ) -> bool:
     # Batch source exemptions are verified from the file list, so a package-total
@@ -532,45 +561,42 @@ def collect_raw_candidates(
     args: argparse.Namespace,
     cache_path: Path | None = None,
     refresh_cache: bool = False,
+    client: NyaaClient | None = None,
 ) -> tuple[list[nyaa.Candidate], list[str], str]:
+    client = client or DEFAULT_NYAA_CLIENT
     key = _raw_cache_key(args)
     if cache_path is not None and not refresh_cache:
         cached = _read_cached_rss_items(cache_path, key)
         if cached is not None:
             return _score_rss_items(cached, args), [], "hit"
 
-    raw_items: list[dict[str, str]] = []
+    raw_items: list[dict[str, Any]] = []
     failures: list[str] = []
     queries = list(dict.fromkeys([args.query, *args.alias]))
     use_size_sorted_listing = _uses_server_size_sort(args)
 
-    def fetch_query(query: str) -> list[dict[str, str]]:
+    def fetch_query(query: str) -> list[dict[str, Any]]:
         if use_size_sorted_listing:
-            collected: list[dict[str, str]] = []
+            collected: list[dict[str, Any]] = []
             for page in range(1, MAX_SIZE_SORT_PAGES + 1):
-                page_html = nyaa.fetch_search_listing_page(
-                    query,
-                    args.category,
-                    args.filter,
-                    page,
-                    args.timeout,
-                    sort="size",
-                    order="desc",
+                entries = client.search(
+                    NyaaSearchRequest(
+                        query=query,
+                        category=args.category,
+                        nyaa_filter=args.filter,
+                        page=page,
+                        timeout=args.timeout,
+                        source="listing",
+                        sort="size",
+                        order="desc",
+                    )
                 )
-                entries = nyaa.parse_nyaa_listing(page_html)
                 if not entries:
-                    if page == 1 and "torrent-list" not in page_html:
-                        raise ValueError(
-                            "Nyaa size-sorted search contained no parseable release rows"
-                        )
                     break
                 collected.extend(
                     {
                         "query": query,
-                        "xml": nyaa.ET.tostring(
-                            nyaa.listing_entry_as_item(entry),
-                            encoding="unicode",
-                        ),
+                        "release": asdict(entry),
                     }
                     for entry in entries
                 )
@@ -585,11 +611,18 @@ def collect_raw_candidates(
                 ):
                     break
             return collected
-        rss = nyaa.fetch_rss(query, args.category, args.filter, args.timeout)
-        root = nyaa.ET.fromstring(rss)
+        releases = client.search(
+            NyaaSearchRequest(
+                query=query,
+                category=args.category,
+                nyaa_filter=args.filter,
+                timeout=args.timeout,
+                source="rss",
+            )
+        )
         return [
-            {"query": query, "xml": nyaa.ET.tostring(item, encoding="unicode")}
-            for item in root.findall("./channel/item")
+            {"query": query, "release": asdict(release)}
+            for release in releases
         ]
 
     # Discovery is the latency-sensitive path and queries at most a few Agent-picked
@@ -598,7 +631,7 @@ def collect_raw_candidates(
     if (
         getattr(args, "discover", False) or use_size_sorted_listing
     ) and len(queries) > 1:
-        query_results: dict[str, list[dict[str, str]]] = {}
+        query_results: dict[str, list[dict[str, Any]]] = {}
         query_failures: dict[str, Exception] = {}
         with ThreadPoolExecutor(max_workers=min(4, len(queries))) as executor:
             future_queries = {executor.submit(fetch_query, query): query for query in queries}
@@ -631,12 +664,12 @@ def collect_raw_candidates(
 
 
 def _score_listing_entry(
-    entry: nyaa.NyaaListingEntry,
+    entry: NyaaRelease,
     matched_queries: list[str],
     args: argparse.Namespace,
 ) -> nyaa.Candidate:
-    candidate = nyaa.score_item(
-        nyaa.listing_entry_as_item(entry),
+    candidate = nyaa.score_release(
+        entry,
         query=matched_queries[0],
         want_zh=args.want_zh,
         airing_priority=args.airing_priority,
@@ -659,7 +692,9 @@ def collect_recent_candidates(
     cache_path: Path | None = None,
     refresh_cache: bool = False,
     today: date | None = None,
+    client: NyaaClient | None = None,
 ) -> tuple[list[nyaa.Candidate], dict[str, Any], list[str]]:
+    client = client or DEFAULT_NYAA_CLIENT
     today = today or date.today()
     until = min(until or today, today)
     category = "1_3" if bool(getattr(args, "require_zh", False)) else args.category
@@ -674,9 +709,18 @@ def collect_recent_candidates(
     cutoff_reached = False
     oldest_seen: date | None = None
 
-    def fetch_page(page: int) -> tuple[int, list[nyaa.NyaaListingEntry]]:
-        page_html = nyaa.fetch_listing_page(category, args.filter, page, args.timeout)
-        parsed = nyaa.parse_nyaa_listing(page_html)
+    def fetch_page(page: int) -> tuple[int, list[NyaaRelease]]:
+        parsed = client.search(
+            NyaaSearchRequest(
+                category=category,
+                nyaa_filter=args.filter,
+                page=page,
+                timeout=args.timeout,
+                source="listing",
+                sort="id",
+                order="desc",
+            )
+        )
         if not parsed:
             raise ValueError("Nyaa listing page contained no parseable release rows")
         return page, parsed
@@ -688,7 +732,7 @@ def collect_recent_candidates(
                 min(batch_start + RECENT_SCAN_BATCH_SIZE, MAX_RECENT_SCAN_PAGES + 1),
             )
         )
-        page_results: dict[int, list[nyaa.NyaaListingEntry]] = {}
+        page_results: dict[int, list[NyaaRelease]] = {}
         missing_pages: list[int] = []
         for page in batch_pages:
             cached = (
@@ -1095,9 +1139,13 @@ def discover_release_candidates(
     cache_path: Path | None = None,
     refresh_cache: bool = False,
     limit: int = 20,
+    client: NyaaClient | None = None,
 ) -> dict[str, Any]:
     """Collect a compact, unqualified candidate set for Agent-side decisions."""
-    raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    client = client or DEFAULT_NYAA_CLIENT
+    raw, failures, cache_state = collect_raw_candidates(
+        args, cache_path, refresh_cache, client
+    )
     candidate_source = _raw_candidate_source(args)
     recent_scan: dict[str, Any] | None = None
     recent_since = getattr(args, "recent_since", None)
@@ -1113,6 +1161,7 @@ def discover_release_candidates(
             until=recent_until,
             cache_path=cache_path,
             refresh_cache=refresh_cache,
+            client=client,
         )
         raw = _merge_candidates(raw, recent)
         failures = [*failures, *recent_failures]
@@ -1156,7 +1205,7 @@ def discover_release_candidates(
             recovery_payload["alias"] = recovered_aliases[1:]
             recovery_args = argparse.Namespace(**recovery_payload)
             recovered_raw, recovery_failures, recovery_cache = collect_raw_candidates(
-                recovery_args, cache_path, refresh_cache
+                recovery_args, cache_path, refresh_cache, client
             )
             raw = _merge_candidates(raw, recovered_raw)
             failures = [*failures, *recovery_failures]
@@ -1822,6 +1871,7 @@ def _season_batch_report(
     diagnostics: dict[str, Any],
     failures: list[str],
     cache_state: str,
+    client: NyaaClient,
 ) -> ReleaseSearchReport:
     expected_episodes = (context.expected_episodes if context else None) or args.episodes
     unconfirmed_work_batches = [
@@ -1915,10 +1965,10 @@ def _season_batch_report(
         if not selected_group:
             continue
 
-        pages: dict[int, str] = {}
+        details: dict[int, nyaa.NyaaReleaseDetail] = {}
         with ThreadPoolExecutor(max_workers=min(4, len(selected_group))) as executor:
             future_map = {
-                executor.submit(nyaa.fetch_nyaa_detail_page, item.candidate.url, args.timeout): index
+                executor.submit(client.get, item.candidate.url, timeout=args.timeout): index
                 for index, item in enumerate(selected_group)
                 if item.candidate.url
             }
@@ -1929,20 +1979,19 @@ def _season_batch_report(
             for future in as_completed(future_map):
                 index = future_map[future]
                 try:
-                    pages[index] = future.result()
+                    details[index] = future.result()
                 except Exception as exc:  # noqa: BLE001 - incomplete inspection is not no release.
                     diagnostics["season_detail_failed_count"] += 1
                     incomplete = True
                     failures.append(f"Nyaa season detail inspection failed: {exc}")
 
         for index, item in enumerate(selected_group):
-            page_html = pages.get(index)
-            if page_html is None:
+            detail = details.get(index)
+            if detail is None:
                 continue
             diagnostics["season_detail_checked_count"] += 1
-            entries = nyaa.extract_nyaa_file_entries(page_html)
             coverage = _coverage_from_file_entries(
-                item, entries, args, policy, requested_season, expected_episodes
+                item, list(detail.files), args, policy, requested_season, expected_episodes
             )
             item.coverage = coverage
             if coverage.reason in {
@@ -1985,9 +2034,8 @@ def _season_batch_report(
             elif getattr(args, "trust_cjk_title_for_zh", False):
                 continue
             else:
-                detail_text = nyaa.extract_nyaa_description(page_html)
                 nyaa.apply_detail_subtitle_signal(
-                    item.candidate, detail_text, args.want_zh, args.airing_priority
+                    item.candidate, detail.description, args.want_zh, args.airing_priority
                 )
             if (
                 getattr(args, "require_zh", False)
@@ -2075,7 +2123,7 @@ def _rank(
 
 
 def _latest_regular(items: list[ClassifiedCandidate]) -> list[ClassifiedCandidate]:
-    return sorted(
+    ordered = sorted(
         items,
         key=lambda item: (
             item.identity.episode if item.identity.episode is not None else -1,
@@ -2084,6 +2132,10 @@ def _latest_regular(items: list[ClassifiedCandidate]) -> list[ClassifiedCandidat
         ),
         reverse=True,
     )
+    if not ordered:
+        return []
+    latest_episode = ordered[0].identity.episode
+    return [item for item in ordered if item.identity.episode == latest_episode]
 
 
 def _observed_target_max_gib(
@@ -2103,7 +2155,7 @@ def _observed_target_max_gib(
 
 
 def _inspect_details(
-    selected: list[ClassifiedCandidate], args: argparse.Namespace
+    selected: list[ClassifiedCandidate], args: argparse.Namespace, client: NyaaClient
 ) -> DetailInspectionResult:
     result = DetailInspectionResult()
     if getattr(args, "trust_cjk_title_for_zh", False):
@@ -2164,8 +2216,8 @@ def _inspect_details(
                     if strict:
                         remaining = max(0.1, budget_seconds - elapsed)
                         request_timeout = max(0.1, min(float(args.timeout), remaining))
-                    detail_text = nyaa.fetch_nyaa_detail_text(
-                        item.candidate.url, request_timeout
+                    detail_text = client.get_description(
+                        item.candidate.url, timeout=request_timeout
                     )
                     cache[item.candidate.url] = detail_text
                 nyaa.apply_detail_subtitle_signal(
@@ -2196,20 +2248,17 @@ def _direct_candidate_from_page(
     args: argparse.Namespace,
     nyaa_id: str,
     queries: list[str],
+    client: NyaaClient,
 ) -> tuple[nyaa.Candidate | None, str | None]:
-    url = f"https://nyaa.si/view/{nyaa_id}"
-    page_html = nyaa.fetch_nyaa_detail_page(url, args.timeout)
-    item = nyaa.detail_page_as_item(nyaa_id, page_html)
-    title = nyaa.text_of(item, "title")
-    if not title:
-        raise ValueError("Nyaa detail page did not contain a release title")
+    detail = client.get(nyaa_id, timeout=args.timeout)
+    title = detail.release.title
     matched_queries = [
         query for query in queries if _contains_title(title, query, flexible=True)
     ]
     if not matched_queries:
         return None, title
-    candidate = nyaa.score_item(
-        item,
+    candidate = nyaa.score_release(
+        detail.release,
         query=matched_queries[0],
         want_zh=args.want_zh,
         airing_priority=args.airing_priority,
@@ -2228,7 +2277,7 @@ def _direct_candidate_from_page(
     ):
         nyaa.apply_detail_subtitle_signal(
             candidate,
-            nyaa.extract_nyaa_description(page_html),
+            detail.description,
             args.want_zh,
             args.airing_priority,
         )
@@ -2243,12 +2292,16 @@ def search_release_report(
     cache_path: Path | None = None,
     refresh_cache: bool = False,
     context: SearchContext | None = None,
+    client: NyaaClient | None = None,
 ) -> ReleaseSearchReport:
+    client = client or DEFAULT_NYAA_CLIENT
     intent = SearchIntent(intent)
     requested_season = normalize_season_number(args.season)
     requested_episode = requested_episode if requested_episode is not None else args.episode
     size_policy = size_policy_from_args(args)
-    raw, failures, cache_state = collect_raw_candidates(args, cache_path, refresh_cache)
+    raw, failures, cache_state = collect_raw_candidates(
+        args, cache_path, refresh_cache, client
+    )
     candidate_source = _raw_candidate_source(args)
     rss_failure_count = len(failures)
     queries = list(dict.fromkeys([args.query, *args.alias]))
@@ -2299,7 +2352,9 @@ def search_release_report(
         if missing_ids:
             with ThreadPoolExecutor(max_workers=min(5, len(missing_ids))) as executor:
                 future_ids = {
-                    executor.submit(_direct_candidate_from_page, args, candidate_id, queries): candidate_id
+                    executor.submit(
+                        _direct_candidate_from_page, args, candidate_id, queries, client
+                    ): candidate_id
                     for candidate_id in missing_ids
                 }
                 for future in as_completed(future_ids):
@@ -2312,7 +2367,7 @@ def search_release_report(
                         elif mismatched_title is not None:
                             direct_mismatches[candidate_id] = mismatched_title
                     except Exception as exc:  # noqa: BLE001 - preserve direct-ID failure details.
-                        if getattr(exc, "code", None) == 404:
+                        if isinstance(exc, nyaa.NyaaNotFoundError) or getattr(exc, "code", None) == 404:
                             direct_not_found.append(candidate_id)
                         else:
                             direct_failures.append(f"{candidate_id}: {exc}")
@@ -2402,6 +2457,7 @@ def search_release_report(
             diagnostics,
             failures,
             cache_state,
+            client,
         )
 
     exact_regular = [
@@ -2419,7 +2475,7 @@ def search_release_report(
     ):
         fallback_args = _targeted_fallback_args(args, requested_season, requested_episode)
         fallback_raw, fallback_failures, fallback_cache = collect_raw_candidates(
-            fallback_args, cache_path, refresh_cache
+            fallback_args, cache_path, refresh_cache, client
         )
         failures.extend(fallback_failures)
         rss_failure_count += len(fallback_failures)
@@ -2557,7 +2613,7 @@ def search_release_report(
         qualified,
         prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
     )
-    detail_inspection = _inspect_details(selected, args)
+    detail_inspection = _inspect_details(selected, args, client)
     diagnostics.update(detail_inspection.as_diagnostics())
     failures.extend(detail_inspection.failures[:2])
     if getattr(args, "require_zh", False):
@@ -2605,6 +2661,7 @@ def search_release_report(
                     cache_path=cache_path,
                     refresh_cache=True,
                     context=context,
+                    client=client,
                 )
                 refreshed.diagnostics.update(
                     {

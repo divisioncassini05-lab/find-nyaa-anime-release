@@ -1,19 +1,19 @@
 ---
 name: find-nyaa-anime-release
-description: Find and verify Nyaa anime releases with Agent-reviewed work, season, episode, and movie identity; default soft preference for Chinese subtitles; strict Chinese verification only when explicitly required; hard quality and size checks; mandatory magnets; optional qBittorrent enqueue; and monotonic tracking for current anime. Use for latest, specific, tracked-next, movie, whole-season, quality, size, subtitle, magnet, progress, and scheduled-download requests. Discovery is read-only. Default floors are 1 GiB per regular episode and 10 GiB total per movie.
+description: Find and verify Nyaa anime releases with Agent-reviewed work, season, episode, and movie identity; soft Chinese-subtitle preference unless explicitly required; hard quality and size checks; verified magnets; automatic qBittorrent enqueue for scheduled bare-title runs; and monotonic current-anime tracking. Use for latest, specific, tracked-next, movie, whole-season, subtitle, magnet, progress, and scheduled-download requests. Non-download discovery is read-only. Default floors are 1 GiB per regular episode and 10 GiB per movie.
 ---
 
 # Find Nyaa Anime Release
 
-Use the scripts for deterministic collection, parsing evidence, detail and magnet verification, qBittorrent submission, and monotonic state writes. The Agent must read full release titles and decide the actual work/version, season, regular episode versus special, latest episode, movie/batch identity, and final candidate.
+Use the deterministic scripts to collect and verify evidence; use Agent judgment to decide the actual work, branch, season, release type, episode, and final candidate. Return only releases the user is legally entitled to access.
 
-Run commands from this skill directory. Return only releases the user is legally entitled to access.
+Run commands from this skill directory. Prefer the high-level resolver:
 
-## Workflow
+```powershell
+python scripts/find_anime_release.py "USER TITLE" --episode 4 --tier browse --want-zh --include-magnet --legal-ok --json
+```
 
-Follow one compact path: parse request and state → discover candidates → Agent judgment → exact verification → optional enqueue and progress update → failure-only rescue.
-
-### 1. Parse the request and state
+## Request routing
 
 Always run a read-only local-state probe before an ordinary title search:
 
@@ -21,153 +21,86 @@ Always run a read-only local-state probe before an ordinary title search:
 python scripts/airing_watch_state.py probe "USER TITLE"
 ```
 
-- For a tracked title, use its canonical season and verified search titles; when `verified_search_titles` is non-empty, use those titles as the ordinary Nyaa queries first. The record establishes work identity, not the target episode.
-- Tracking state is not an answer cache. Never add an alias learned only from a selected Nyaa release, a manual successful query, or a prior Agent answer. Persist aliases only from independent work-identity metadata. A regression test must remove any release-specific alias that would reveal the expected answer.
-- Explicit episode, continuation/“下一集”, and latest wording win. A bare tracked title means `next_episode` interactively, but “latest already available” means the latest regular episode in a Codex automation run.
-- Scheduled latest discovery must complete successfully; never fall back to stale `next_episode` after incomplete query coverage, network failure, or unresolved identity.
-- An explicit older/same episode and a latest result not newer than `watched_episode` are retrieval-only and must not rewrite state.
-- Determine movie versus episodic work, branch/version, season, target episode or whole season, named quality tier, explicit size bounds, and any source/group requirement. Script parsing and `fast_path` are evidence, not authority.
-- Map `随便看看` to `--tier browse`, `普通画质` to `--tier watch`, and `高画质`/`最高画质`/`顶级画质` to `--tier premium`. The default hard floor is 1 GiB per regular episode. A normal movie defaults to `--movie --min-total-gib 10`. Explicit user bounds are hard.
-- `--allow-upward-compatibility` is used only when the caller enables it. Prefer the named tier; if none qualifies, a higher-tier result may be selected, but the tier floor and every explicit maximum remain hard. Label the result as upward compatible.
+- Explicit episode, “下一集”, latest, movie, whole-season, quality, size, source, group, and subtitle wording override defaults.
+- A bare tracked title means its next episode interactively. “Latest already available” and a scheduled bare title mean the latest regular episode established by that run; incomplete discovery must not fall back to stored progress.
+- A bare-title Codex cron/automation is automatic-download intent unless its prompt explicitly says check only, magnet only, or no download. Use the high-level resolver with `--latest --include-magnet --legal-ok --enqueue-qbittorrent`; omitting enqueue is not a valid successful scheduled run.
+- Tracking state is not an answer cache. For tracked works with verified search titles, use those titles as the ordinary Nyaa queries first. Never persist an alias learned only from a selected release.
+- Use at most three broad, high-confidence queries. A CJK-only result cannot establish the latest episode; recover an independent Latin/romaji title and rerun the ordinary lane.
+- Map `随便看看` to `browse`, `普通画质` to `watch`, and `高画质`/stronger wording to `premium`. The default hard floor is 1 GiB per regular episode; movies default to `--movie --min-total-gib 10`. Explicit bounds are hard.
+- Enable `--allow-upward-compatibility` only when requested. It never relaxes a tier floor or explicit maximum.
 
-Read [references/airing-watch-state.md](references/airing-watch-state.md) before any tracking write or difficult latest/next decision. Read [references/quality-ranking.md](references/quality-ranking.md) for tier fallback, upward compatibility, batch math, or unusual ranking disputes.
+Read [references/airing-watch-state.md](references/airing-watch-state.md) before a state write or difficult latest/next decision. Read [references/quality-ranking.md](references/quality-ranking.md) for tier fallback, batch math, source exemptions, or ranking disputes.
 
-#### Subtitle mode: exactly two defaults
+## Subtitle policy
 
-- If the originating user or automation prompt explicitly requires Simplified Chinese, Traditional Chinese, or Chinese subtitles, use strict mode and pass `--require-zh`. Chinese subtitle evidence is then a hard qualification condition.
-- Else, pass `--want-zh`. This is only a soft ranking preference; never reject an otherwise qualified release because Chinese subtitles are absent or unverified.
+There are exactly two normal modes:
 
-A Chinese title, alias, result, UI language, tracking record, automation memory, prior Agent summary, or retry reason does not create a hard subtitle requirement. Every retry must reread the originating prompt and inherit only its constraints, not conditions invented by an earlier run. Do not add an “exclude Chinese subtitles” mode; if the user later asks for a genuinely different third case, handle that request separately.
+- If the originating prompt explicitly requires Chinese, Simplified Chinese, or Traditional Chinese subtitles, pass `--require-zh`. Actual CHS/CHT, Chinese track, or subtitle-file evidence is mandatory; `MultiSub` alone is insufficient.
+- Otherwise pass `--want-zh`. Chinese evidence is a same-quality tie-breaker only and its absence never disqualifies a release.
 
-### 2. Discover candidates
+A Chinese title, UI language, tracking record, previous answer, or retry reason does not create a hard subtitle requirement. If ordinary discovery fails, the trustworthy Chinese-title supplemental exact-episode lane is mandatory before strict rejection; the Chinese lane is a supplement, not a replacement. If a genuine Simplified/Traditional pair is independently available, try both in the same supplemental call; a Japanese title containing kana is not a substitute. Do not manufacture or persist a Traditional alias merely to make a release discoverable.
 
-Use at most three broad, high-confidence ordinary queries. For tracked works prefer stored verified Latin/romaji titles; do not let a broad CJK display-name match replace work-identity review. Discovery is read-only, returns no magnet, and deliberately retains candidates that still need exact checks. RSS/listing cache writes are disposable network caches, not tracking-state writes.
+Use `--trust-cjk-title-for-zh` only for an independently known Chinese title that exactly matches the work and episode. It skips subtitle detail inspection, so report title-based evidence accurately. An S01 title may omit the season marker, but never extend that inference to later seasons. For latest strict-Chinese requests, let the ordinary broad Latin/romaji discovery determine the latest regular episode before the Chinese exact-episode lane.
 
-For a known regular episode, use the compact path:
+## Select and verify
 
-```powershell
-python scripts/search_nyaa_releases.py "USER TITLE" --alias "BROAD ALIAS" --season S01 --episode 3 --fast-verify --server-sort-size-desc --min-gib-per-episode 1 --want-zh --include-magnets --legal-ok --report
-```
+Follow: discover → audit full titles → verify the selected ID → enqueue when requested or scheduled → update progress.
 
-For latest discovery, first use the ordinary Latin/romaji recency lane with `--intent latest_regular`; only after the Agent confirms the exact episode should size-driven exact-episode comparison run. Never declare a latest episode from a CJK-only discovery. If CJK-only results expose a complete Latin/romaji alias, rerun the broad lane; if they do not, use metadata only to recover a search-title hint.
+- Exclude previews, recaps, OVA/OAD, specials, movies, mini-series, and batches from regular-episode decisions. Never select the first row merely because it is first.
+- Apply work, season, type, tier, size, source, group, and explicit subtitle constraints before ranking. Compare swarm health only among otherwise comparable releases; do not add a fixed seeder threshold.
+- For an exact/latest episode, compare visible same-episode alternatives once and verify exactly one ID. Prefer a `--fast-verify` hint only after auditing it; on failure, try exactly one distinct backup candidate.
+- Build a representative shortlist of up to 3–5 IDs only for real identity ambiguity, strict subtitle evidence, whole-season validation, conflicting parsing, or explicit alternatives.
+- Reuse the discovery query set for `--candidate-id` verification. Final verification always includes `--include-magnets --legal-ok`; never expose a magnet from an unqualified report.
+- Movie checks use total size, never per-episode bounds. Whole-season checks require an authoritative episode count, file-list coverage, extras exclusion, and per-file quality; package total alone is insufficient.
+- Ask the user only when a real work/version ambiguity changes the answer.
 
-For an ordinary movie:
+RSS/listing cache writes are disposable network caches, not tracking-state writes. Never declare a latest episode from a CJK-only discovery. If the selected ID is absent from cached discovery, the verifier reads `https://nyaa.si/view/ID` directly and rechecks its evidence.
 
-```powershell
-python scripts/search_nyaa_releases.py "MOVIE TITLE" --alias "BROAD ALIAS" --movie --discover --server-sort-size-desc --min-total-gib 10 --want-zh --legal-ok --report
-```
-
-For strict Chinese only, if the ordinary Latin/romaji lane does not return a qualified release, the trustworthy Chinese-title supplemental exact-episode lane is mandatory before reporting failure:
-
-```powershell
-python scripts/search_nyaa_releases.py "简体标题" --alias "繁體標題" --season S01 --episode 3 --fast-verify --server-sort-size-desc --min-gib-per-episode 1 --require-zh --trust-cjk-title-for-zh --include-magnets --legal-ok --report
-```
-
-For an ordinary tracked strict-Chinese request, use the high-level resolver so metadata titles, diacritic folding, Latin episode anchors, detail verification, and state rules run as one deterministic path:
-
-```powershell
-python scripts/find_anime_release.py "USER TITLE" --require-zh --include-magnet --legal-ok --json
-```
-
-Use `--no-state-update` only for a read-only regression test. Do not manufacture or persist a Traditional alias merely to make a known release discoverable. `strict_zh_title_variants` may be used only when those variants already came from independent metadata. If a genuine Simplified/Traditional pair is independently available, try both in the same supplemental call; a Japanese title containing kana is not a substitute. Otherwise let the high-level resolver use its Latin/romaji episode bridge and inspect the resulting release title/detail for CHS/CHT evidence. `--trust-cjk-title-for-zh` accepts an exact matched Chinese release title and skips subtitle detail inspection; report that title-based evidence accurately. Keep the ordinary broad lane and its strict detail-verification path: the Chinese lane is a supplement, not a replacement. For latest, let the ordinary broad Latin/romaji discovery determine the latest regular episode before querying the strict Chinese lane for that exact episode. Never report `subtitle_unqualified` or no qualified Chinese release until the applicable high-level/mandatory supplemental path has completed.
-
-In the explicit S01 CJK trust lane, a release title may identify the exact regular episode as `- 09` while omitting `S01`. Treat that as first-season evidence only when the full Chinese work title and exact episode both match. Do not extend this inference to S02 or later seasons.
-
-### 3. Agent judgment
-
-Read every relevant full title. Group by exact work/version and season, correct parser mistakes, and exclude recaps, previews, OVA/OAD, specials, movies, mini-series, and batches from latest regular-episode decisions. Never select the first row merely because it is first.
-
-For a simple exact or latest regular episode, compare visible same-episode alternatives once and verify exactly one ID. Prefer the `fast_path` hint only after auditing identity, season, episode, type, size, and visible alternatives. If verification or magnet extraction fails, try exactly one distinct backup candidate.
-
-Build a representative shortlist of up to 3–5 IDs only for strict Chinese subtitles, real identity ambiguity, conflicting episode parsing, whole-season validation, special source/group constraints, or an explicit request for alternatives.
-
-Apply hard identity, type, quality tier, size, source, and explicit subtitle constraints before ranking. In default `--want-zh` mode:
-
-- Compare the same work, season, episode, quality class, and hard size eligibility first.
-- Use the existing swarm score; add no fixed seed threshold.
-- When swarm health is comparable, prefer the Chinese-subtitled candidate.
-- A dead or clearly weaker Chinese candidate loses to a healthy non-Chinese candidate.
-- Chinese signals never cross a quality tier, break a hard size bound, trigger upward compatibility, or justify a quality downgrade.
-- Do not fetch a detail page solely to resolve this soft preference. Use discovery/title evidence already available; exact verification may still fetch details for its ordinary non-subtitle checks.
-
-If a real work/version ambiguity would change the answer, ask the user. Otherwise make the narrowest supported inference and continue.
-
-### 4. Verify the selected release
-
-Reuse the discovery query set and verify only selected IDs. Ordinary mode includes `--want-zh`:
-
-```powershell
-python scripts/search_nyaa_releases.py "USER TITLE" --alias "BROAD ALIAS" --season S01 --episode 3 --candidate-id 2135067 --min-gib-per-episode 1 --want-zh --include-magnets --legal-ok --report
-```
-
-Explicit hard Chinese mode replaces `--want-zh` with `--require-zh`:
-
-```powershell
-python scripts/search_nyaa_releases.py "USER TITLE" --alias "BROAD ALIAS" --season S01 --episode 3 --candidate-id 2135067 --min-gib-per-episode 1 --require-zh --include-magnets --legal-ok --report
-```
-
-Strict ordinary-lane verification requires actual Simplified/Traditional Chinese, CHS/CHT, a Chinese subtitle track, or a corresponding subtitle file. `MultiSub` alone is insufficient. Without explicit hard Chinese wording, subtitle absence or uncertainty must not produce `subtitle_unqualified`.
-
-Always require `--include-magnets --legal-ok` on final verification. Never expose a magnet from a failed or unqualified report. If an ID is missing from cached discovery, the verifier reads `https://nyaa.si/view/ID` directly and rechecks title/alias, size, seed, hash, files, and any hard subtitle condition.
-
-Movie verification uses `--movie --candidate-id ID --min-total-gib 10 --want-zh`; never apply per-episode bounds to a movie. For a whole season, use the high-level verifier with an authoritative expected episode count:
+For a read-only whole-season check:
 
 ```powershell
 python scripts/find_anime_release.py "TITLE" --season S01 --whole-season --tier premium --want-zh --no-state-update --include-magnet --legal-ok --json
 ```
 
-It must inspect the file list, exclude extras, verify complete regular-episode coverage, and enforce per-file quality. Package total alone never proves per-episode qualification. A qualified multi-season collection may satisfy one requested season when that season is mapped unambiguously; prefer an exact-season package.
+## Enqueue and tracking
 
-#### First-search finalization for an untracked current anime
-
-After read-only discovery of an untracked episodic work, finalise the exact result through the high-level resolver rather than low-level `record-found`:
-
-```powershell
-python scripts/find_anime_release.py "USER TITLE" --episode 4 --search-title "BROAD ROMAJI" --search-title "BROAD ENGLISH" --tier browse --want-zh --include-magnet --legal-ok --json
-```
-
-Preserve the actual tier, bounds, season, and subtitle mode. Omit `--no-state-update`. A qualified current/still-airing TV, TV_SHORT, or ONA success must report `state_update: advanced`, `tracked: true`, and a verified magnet. If the current work is confirmed but no release qualifies yet, accept `state_update: tracked_waiting` without marking the episode watched. Movies, OVAs, specials, completed/old shows, and unresolved works remain stateless.
-
-### 5. Enqueue and update progress
-
-For a scheduled run or explicit download request, enqueue exactly the final qualified release, after a final audit that a scheduled bare-title candidate equals the latest episode established by this run:
+Only enqueue after exact verification, and enqueue exactly one qualified release:
 
 ```powershell
 python scripts/qbittorrent_submit.py "MAGNET" --source-url "NYAA_PAGE_URL" --save-path "C:\User_data\Download\qBittorrent" --json
 ```
 
-Accept only `ok: true` with `already_present`, `submitted`, or `submitted_verified`. Require the source URL when available so torrent metadata and infohash are validated. On submission failure, report the qualified magnet and error but do not advance progress.
+Accept only `already_present`, `submitted`, or `submitted_verified`. On failure, report the verified magnet and error without advancing state.
 
-For an already tracked current anime, after a qualified magnet is returned—or qBittorrent accepts/already has it in an automatic run—advance only a strictly newer integer regular episode:
+- For a scheduled bare title, enqueue exactly one qualified latest regular episode. Only an explicit check-only, magnet-only, or no-download instruction makes that run read-only.
+- When the high-level resolver downloads, use `--enqueue-qbittorrent` so submission succeeds before its state write.
+- In link-only mode, advance progress only when a fully qualified magnet is actually returned. Metadata-only results do not advance progress. In automatic-download mode, advance only after qBittorrent returns `already_present`, `submitted`, or `submitted_verified`.
+- A latest episode at or below stored progress is `latest_already_handled`: report the latest, current progress, and next target. Do not call qBittorrent for that scheduled latest run, and report `not_attempted`; stored progress is never evidence that a qBittorrent task or downloaded file currently exists.
+- Classify tracked-next availability before searching: `not_aired_yet` means the normal scheduled time is still in the future; `availability.state = aired_no_release` means the target has aired but no qualified release was delivered; `airing_schedule_break` means an official same-series gap of 10.5–27.99 days; `long_break_unconfirmed` means a gap of 28 days or more without explicit split-cour evidence; and `split_cour_break` means the current part is finished and an official mainline sequel is explicitly named Part 2/2nd Cour. A completed part without that explicit evidence is `part_finished`. Report dates and evidence, never collapse these cases into “not found.”
+- For `not_aired_yet`, schedule breaks, long breaks, and part boundaries, do not search Nyaa or update progress. Only call a long gap split-cour when official structured sequel metadata supports it; title resemblance alone is insufficient.
+- Advance an already tracked show only for a verified, strictly newer integer regular episode. Older/same episodes are retrieval-only.
+- Never update progress for discovery rows, failed candidates, missing magnets, movies, batches, specials, decimal episodes, or unresolved identity.
+- A first qualified result may start tracking only for a confirmed current TV, TV_SHORT, or ONA. Confirmed current works with no qualifying release may become `tracked_waiting`; completed works and non-episodic releases remain stateless.
+- Keep metadata-only, movie, batch, rescue, and unresolved calls read-only with `--no-state-update`.
 
-```powershell
-python scripts/airing_watch_state.py record-found "USER TITLE" --episode 4
-```
+### First-search finalization for an untracked current anime
 
-`record-found` is monotonic. `recorded` advances `watched_episode` and `next_episode`; `unchanged` is retrieval-only and must not rewrite state. Never update for discovery rows, failed/unqualified candidates, missing magnets, movies, batches, specials, decimal episodes, or unresolved identity. Untracked works use first-search finalization above.
+Finalize an untracked episodic work through `find_anime_release.py`, preserving the discovered season, episode, tier, bounds, subtitle mode, and independently verified search titles. Do not replace this with a low-level `record-found` write. A qualified current work reports `state_update: advanced`; a confirmed current work with no qualified release may report `state_update: tracked_waiting`.
 
-When the high-level resolver handles final verification, pass `--enqueue-qbittorrent` so submission occurs before its state write. Keep metadata-only, movie, batch, rescue, and unresolved calls read-only with `--no-state-update`.
+## Failure-only rescue
 
-### 6. Failure-only rescue
-
-The seven-day rescue is failure-only. Use it only after ordinary discovery/verification fails for an exact regular episode; never run it after success. Obtain the official date first:
+The seven-day rescue is failure-only. Use it only after ordinary exact-episode discovery or verification fails:
 
 ```powershell
 python scripts/find_anime_release.py "USER TITLE" --official-air-date --episode 4 --no-state-update --json
 ```
 
-Proceed only for an eligible currently releasing TV/TV_SHORT/ONA with an exact schedule. Copy the returned dates without guessing or widening them:
+Proceed only for an eligible currently releasing TV/TV_SHORT/ONA with an exact schedule. Copy the returned scan dates without widening them, preserve every originating constraint, and require `recent_scan.status == complete`. Network, detail, or incomplete-scan failure is not evidence that no release exists.
 
-```powershell
-python scripts/search_nyaa_releases.py "USER TITLE" --alias "OFFICIAL ROMAJI" --episode 4 --discover --recent-since 2026-07-04 --recent-until 2026-07-11 --current-new-anime --want-zh
-```
-
-In explicit hard Chinese mode, replace `--want-zh` with `--require-zh`. Require `recent_scan.status == complete`; an incomplete scan or network/detail failure is not proof that no release exists. Let the Agent choose and verify from the combined candidates using the same rules.
-
-Retries inherit the originating prompt's identity, quality, size, subtitle mode, enqueue, and progress rules. They must not promote a previous failure explanation into a new constraint.
+Run the returned window with `--recent-since DATE --recent-until DATE --current-new-anime`; preserve `--require-zh` when strict Chinese was explicit.
 
 ## Final response
 
-Compose from structured evidence, not a script's prose. State the exact work/season/episode or movie, title, size scope, seeders, upward compatibility when used, subtitle evidence when relevant, and automatic submission result. A final recommendation always includes a verified magnet; put it in its own plain-text code block. Never expose an unqualified magnet.
+Compose from structured evidence. State the exact work/season/episode or movie, release title, size scope, seeders, upward compatibility if used, relevant subtitle evidence, and enqueue result. A recommendation includes its verified magnet in a plain-text code block.
 
-For failure, distinguish not released, identity ambiguity, hard quality/size failure, strict subtitle rejection, incomplete detail/recent scan, network failure, and qBittorrent failure. If latest exists but no release qualifies, report that exact episode and reason; never silently return an older episode.
+For failure, distinguish not released, identity ambiguity, hard quality/size rejection, strict subtitle rejection, incomplete scan/detail inspection, network failure, and qBittorrent failure. If the latest episode exists but no release qualifies, report that episode and reason rather than returning an older one.

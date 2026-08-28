@@ -9,22 +9,31 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import html
 import json
 import math
 import re
 import sys
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
 
+import nyaa_client as client_api
+from nyaa_client import (
+    NyaaClient,
+    NyaaClientError,
+    NyaaFileEntry,
+    NyaaNetworkError,
+    NyaaNotFoundError,
+    NyaaParseError,
+    NyaaRelease,
+    NyaaReleaseDetail,
+    NyaaSearchRequest,
+)
 from runtime_paths import DEFAULT_STATE
 
 
@@ -34,9 +43,10 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-NYAA_RSS = "https://nyaa.si/"
-NYAA_NS = "{https://nyaa.si/xmlns/nyaa}"
+NYAA_RSS = client_api.NYAA_BASE_URL
+NYAA_NS = client_api.NYAA_NS
 DEFAULT_CACHE = DEFAULT_STATE.parent / ".cache" / "find_nyaa_raw_cache.json"
+_TRANSPORT_CLIENT = NyaaClient()
 
 ASCII_CHINESE_PATTERNS = {
     "CHS": r"(?<![a-z0-9])chs(?![a-z0-9])",
@@ -209,24 +219,7 @@ class Candidate:
     detail_subtitle_signal: str | None = None
 
 
-@dataclass(frozen=True)
-class NyaaFileEntry:
-    name: str
-    size: str
-    size_bytes: int | None
-
-
-@dataclass(frozen=True)
-class NyaaListingEntry:
-    nyaa_id: str
-    title: str
-    category: str | None
-    size: str | None
-    published_at: int | None
-    seeders: int
-    leechers: int
-    downloads: int
-    info_hash: str | None = None
+NyaaListingEntry = NyaaRelease
 
 
 def text_of(parent: ET.Element, tag: str, default: str = "") -> str:
@@ -247,16 +240,7 @@ def as_int(value: str) -> int:
 
 
 def parse_size(value: str) -> int | None:
-    if not value:
-        return None
-    match = re.search(r"([\d.]+)\s*([kmgt]i?b)", value, re.I)
-    if not match:
-        return None
-    amount = float(match.group(1))
-    unit = match.group(2).lower()
-    powers = {"kb": 1, "kib": 1, "mb": 2, "mib": 2, "gb": 3, "gib": 3, "tb": 4, "tib": 4}
-    base = 1024 if "i" in unit else 1000
-    return int(amount * (base ** powers[unit]))
+    return client_api.parse_size(value)
 
 
 def bytes_to_gib(size_bytes: int) -> float:
@@ -307,218 +291,35 @@ def contains_cjk(value: str) -> bool:
 
 
 def strip_html_to_text(value: str) -> str:
-    value = re.sub(r"<br\s*/?>", "\n", value, flags=re.I)
-    value = re.sub(r"</(?:p|div|li|tr|h\d)>", "\n", value, flags=re.I)
-    value = re.sub(r"<[^>]+>", " ", value)
-    return html.unescape(re.sub(r"[ \t]+", " ", value)).replace("\r", "")
+    return client_api.strip_html_to_text(value)
 
 
 def extract_nyaa_description(page_html: str) -> str:
-    """Extract the release title, description, and file list from one Nyaa detail page."""
-    patterns = (
-        r"<h3[^>]*class=[\"'][^\"']*panel-title[^\"']*[\"'][^>]*>(.*?)</h3>",
-        r"<div[^>]+id=[\"']torrent-description[\"'][^>]*>(.*?)</div>",
-        r"<div[^>]+class=[\"'][^\"']*torrent-file-list[^\"']*[\"'][^>]*>(.*?)</div>",
-    )
-    fragments: list[str] = []
-    for pattern in patterns:
-        match = re.search(pattern, page_html, re.I | re.S)
-        if match:
-            fragments.append(match.group(1))
-    return strip_html_to_text("\n".join(fragments) if fragments else page_html)
+    return client_api.extract_description(page_html)
 
 
 def decode_http_payload(payload: bytes, content_encoding: str | None = None) -> bytes:
-    """Decode HTTP content codings that urllib does not handle automatically."""
-    encoding = (content_encoding or "").casefold().strip()
-    if "gzip" in encoding or payload.startswith(b"\x1f\x8b"):
-        return gzip.decompress(payload)
-    if "deflate" in encoding:
-        try:
-            return zlib.decompress(payload)
-        except zlib.error:
-            return zlib.decompress(payload, -zlib.MAX_WBITS)
-    return payload
+    return client_api.decode_http_payload(payload, content_encoding)
 
 
 def fetch_nyaa_detail_page(url: str, timeout: int | float) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = decode_http_payload(
-            response.read(), response.headers.get("Content-Encoding")
-        )
-        return payload.decode("utf-8", "replace")
+    return _TRANSPORT_CLIENT.fetch_detail_page(url, timeout)
 
 
 def fetch_nyaa_detail_text(url: str, timeout: int | float) -> str:
     return extract_nyaa_description(fetch_nyaa_detail_page(url, timeout))
 
 
-class _NyaaFileListParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.panel_depth = 0
-        self.li_stack: list[dict[str, object]] = []
-        self.entries: list[NyaaFileEntry] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = {name.casefold(): value or "" for name, value in attrs}
-        classes = set(attributes.get("class", "").casefold().split())
-        if tag.casefold() == "div" and "torrent-file-list" in classes:
-            self.panel_depth = 1
-            return
-        if not self.panel_depth:
-            return
-        if tag.casefold() == "div":
-            self.panel_depth += 1
-        elif tag.casefold() == "li":
-            self.li_stack.append({"text": [], "size": [], "in_size": False})
-        elif tag.casefold() == "span" and self.li_stack and "file-size" in classes:
-            self.li_stack[-1]["in_size"] = True
-
-    def handle_endtag(self, tag: str) -> None:
-        if not self.panel_depth:
-            return
-        lowered = tag.casefold()
-        if lowered == "span" and self.li_stack:
-            self.li_stack[-1]["in_size"] = False
-        elif lowered == "li" and self.li_stack:
-            node = self.li_stack.pop()
-            size = " ".join(node["size"]).strip().strip("()")  # type: ignore[arg-type]
-            leaf = " ".join(node["text"]).strip().strip("/\\")  # type: ignore[arg-type]
-            if size and leaf:
-                parents = [
-                    " ".join(parent["text"]).strip().strip("/\\")  # type: ignore[arg-type]
-                    for parent in self.li_stack
-                ]
-                name = "/".join(part for part in [*parents, leaf] if part)
-                self.entries.append(
-                    NyaaFileEntry(name=name, size=size, size_bytes=parse_size(size))
-                )
-        elif lowered == "div":
-            self.panel_depth -= 1
-
-    def handle_data(self, data: str) -> None:
-        if not self.panel_depth or not self.li_stack or not data.strip():
-            return
-        key = "size" if self.li_stack[-1]["in_size"] else "text"
-        self.li_stack[-1][key].append(data.strip())  # type: ignore[union-attr]
-
-
 def extract_nyaa_file_entries(page_html: str) -> list[NyaaFileEntry]:
-    """Return structured file rows, retaining nested directory names."""
-    parser = _NyaaFileListParser()
-    parser.feed(page_html)
-    parser.close()
-    return parser.entries
+    return client_api.parse_file_entries(page_html)
 
 
-class _NyaaListingParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.in_row = False
-        self.current_td: dict[str, object] | None = None
-        self.tds: list[dict[str, object]] = []
-        self.nyaa_id: str | None = None
-        self.title: str | None = None
-        self.info_hash: str | None = None
-        self.entries: list[NyaaListingEntry] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        lowered = tag.casefold()
-        attributes = {name.casefold(): value or "" for name, value in attrs}
-        if lowered == "tr":
-            self.in_row = True
-            self.current_td = None
-            self.tds = []
-            self.nyaa_id = None
-            self.title = None
-            self.info_hash = None
-            return
-        if not self.in_row:
-            return
-        if lowered == "td":
-            self.current_td = {
-                "text": [],
-                "timestamp": attributes.get("data-timestamp"),
-                "category": None,
-            }
-            return
-        if lowered != "a" or self.current_td is None:
-            return
-        href = attributes.get("href", "")
-        match = re.fullmatch(r"/view/(\d+)", href)
-        if match:
-            self.nyaa_id = match.group(1)
-            self.title = html.unescape(attributes.get("title", "")).strip() or None
-        elif href.casefold().startswith("magnet:?"):
-            magnet_query = urllib.parse.parse_qs(
-                urllib.parse.urlsplit(html.unescape(href)).query
-            )
-            for xt_value in magnet_query.get("xt", []):
-                hash_match = re.fullmatch(r"urn:btih:([0-9a-f]{40})", xt_value, re.I)
-                if hash_match:
-                    self.info_hash = hash_match.group(1).lower()
-                    break
-        elif href.startswith("/?c=") and not self.current_td.get("category"):
-            self.current_td["category"] = html.unescape(attributes.get("title", "")).strip() or None
-
-    def handle_endtag(self, tag: str) -> None:
-        lowered = tag.casefold()
-        if lowered == "td" and self.in_row and self.current_td is not None:
-            self.tds.append(self.current_td)
-            self.current_td = None
-            return
-        if lowered != "tr" or not self.in_row:
-            return
-        self.in_row = False
-        if not self.nyaa_id or not self.title or len(self.tds) < 8:
-            return
-
-        def cell_text(index: int) -> str:
-            values = self.tds[index].get("text", [])
-            return " ".join(values).strip() if isinstance(values, list) else ""
-
-        timestamp = self.tds[4].get("timestamp")
-        try:
-            published_at = int(timestamp) if timestamp else None
-        except (TypeError, ValueError):
-            published_at = None
-
-        def cell_int(index: int) -> int:
-            return as_int(cell_text(index).replace(",", ""))
-
-        self.entries.append(
-            NyaaListingEntry(
-                nyaa_id=self.nyaa_id,
-                title=self.title,
-                category=self.tds[0].get("category") if isinstance(self.tds[0].get("category"), str) else None,
-                size=cell_text(3) or None,
-                published_at=published_at,
-                seeders=cell_int(5),
-                leechers=cell_int(6),
-                downloads=cell_int(7),
-                info_hash=self.info_hash,
-            )
-        )
-
-    def handle_data(self, data: str) -> None:
-        if self.in_row and self.current_td is not None and data.strip():
-            values = self.current_td.get("text")
-            if isinstance(values, list):
-                values.append(data.strip())
-
-
-def parse_nyaa_listing(page_html: str) -> list[NyaaListingEntry]:
-    parser = _NyaaListingParser()
-    parser.feed(page_html)
-    parser.close()
-    return parser.entries
+def parse_nyaa_listing(page_html: str) -> list[NyaaRelease]:
+    return client_api.parse_listing(page_html)
 
 
 def build_listing_url(category: str, nyaa_filter: str, page: int) -> str:
-    params = {"c": category, "f": nyaa_filter, "p": page, "s": "id", "o": "desc"}
-    return NYAA_RSS + "?" + urllib.parse.urlencode(params)
+    return client_api.build_listing_url(category, nyaa_filter, page)
 
 
 def build_search_listing_url(
@@ -529,28 +330,20 @@ def build_search_listing_url(
     sort: str = "size",
     order: str = "desc",
 ) -> str:
-    """Build a Nyaa HTML search URL whose ordering is performed by Nyaa."""
-    params = {
-        "q": query,
-        "c": category,
-        "f": nyaa_filter,
-        "p": page,
-        "s": sort,
-        "o": order,
-    }
-    return NYAA_RSS + "?" + urllib.parse.urlencode(params)
+    return client_api.build_listing_url(
+        category,
+        nyaa_filter,
+        page,
+        query=query,
+        sort=sort,
+        order=order,
+    )
 
 
 def fetch_listing_page(category: str, nyaa_filter: str, page: int, timeout: int) -> str:
-    request = urllib.request.Request(
-        build_listing_url(category, nyaa_filter, page),
-        headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
+    return _TRANSPORT_CLIENT.fetch_listing(
+        "", category, nyaa_filter, page, timeout, sort="id", order="desc"
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = decode_http_payload(
-            response.read(), response.headers.get("Content-Encoding")
-        )
-        return payload.decode("utf-8", "replace")
 
 
 def fetch_search_listing_page(
@@ -562,53 +355,20 @@ def fetch_search_listing_page(
     sort: str = "size",
     order: str = "desc",
 ) -> str:
-    request = urllib.request.Request(
-        build_search_listing_url(
-            query,
-            category,
-            nyaa_filter,
-            page,
-            sort=sort,
-            order=order,
-        ),
-        headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
+    return _TRANSPORT_CLIENT.fetch_listing(
+        query,
+        category,
+        nyaa_filter,
+        page,
+        timeout,
+        sort=sort,
+        order=order,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = decode_http_payload(
-            response.read(), response.headers.get("Content-Encoding")
-        )
-        return payload.decode("utf-8", "replace")
-
-
-def _detail_label_value(page_html: str, label: str) -> str | None:
-    match = re.search(
-        rf"<div[^>]*>\s*{re.escape(label)}\s*</div>\s*<div[^>]*>(.*?)</div>",
-        page_html,
-        re.I | re.S,
-    )
-    return strip_html_to_text(match.group(1)).strip() if match else None
 
 
 def extract_nyaa_detail_metadata(page_html: str, nyaa_id: str) -> dict[str, object]:
-    title_match = re.search(
-        r"<h3[^>]*class=[\"'][^\"']*panel-title[^\"']*[\"'][^>]*>(.*?)</h3>",
-        page_html,
-        re.I | re.S,
-    )
-    title = strip_html_to_text(title_match.group(1)).strip() if title_match else ""
-    timestamp_match = re.search(r"data-timestamp=[\"'](\d+)[\"']", page_html, re.I)
-    hash_match = re.search(r"<kbd>\s*([0-9a-f]{40})\s*</kbd>", page_html, re.I)
-    return {
-        "nyaa_id": nyaa_id,
-        "title": title,
-        "category": _detail_label_value(page_html, "Category:"),
-        "size": _detail_label_value(page_html, "File size:"),
-        "seeders": as_int((_detail_label_value(page_html, "Seeders:") or "").replace(",", "")),
-        "leechers": as_int((_detail_label_value(page_html, "Leechers:") or "").replace(",", "")),
-        "downloads": as_int((_detail_label_value(page_html, "Completed:") or "").replace(",", "")),
-        "published_at": int(timestamp_match.group(1)) if timestamp_match else None,
-        "info_hash": hash_match.group(1).lower() if hash_match else None,
-    }
+    return asdict(client_api.parse_detail(nyaa_id, page_html).release)
+
 
 
 def detect_chinese_in_detail(detail_text: str) -> tuple[bool, str]:
@@ -812,19 +572,11 @@ def target_episode_label(season: str | None, episode: int | None) -> str:
 
 
 def magnet_from_hash(info_hash: str, title: str) -> str | None:
-    if not info_hash:
-        return None
-    return "magnet:?xt=urn:btih:{}&dn={}".format(info_hash, urllib.parse.quote(title))
+    return client_api.magnet_from_hash(info_hash, title)
 
 
 def nyaa_id_from_url(value: str | None) -> str | None:
-    if not value:
-        return None
-    stripped = value.strip()
-    if stripped.isdigit():
-        return stripped
-    match = re.search(r"nyaa\.si/(?:view|download)/(\d+)(?:\.torrent)?", stripped)
-    return match.group(1) if match else None
+    return client_api.nyaa_id_from_url(value)
 
 
 def normalize_nyaa_url(link: str, guid: str) -> str | None:
@@ -833,28 +585,70 @@ def normalize_nyaa_url(link: str, guid: str) -> str | None:
         return None
     nyaa_id = nyaa_id_from_url(source)
     if nyaa_id:
-        return f"https://nyaa.si/view/{nyaa_id}"
+        return client_api.view_url(nyaa_id)
     return source
 
 
 def build_url(query: str, category: str, nyaa_filter: str) -> str:
-    params = {"page": "rss", "q": query, "c": category, "f": nyaa_filter}
-    return NYAA_RSS + "?" + urllib.parse.urlencode(params)
+    return client_api.build_rss_url(query, category, nyaa_filter)
 
 
 def fetch_rss(query: str, category: str, nyaa_filter: str, timeout: int) -> bytes:
-    request = urllib.request.Request(
-        build_url(query, category, nyaa_filter),
-        headers={"User-Agent": "CodexSkill/1.1 (+https://nyaa.si/)"},
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return decode_http_payload(
-            response.read(), response.headers.get("Content-Encoding")
+    return _TRANSPORT_CLIENT.fetch_rss(query, category, nyaa_filter, timeout)
+
+
+class SkillNyaaClient(NyaaClient):
+    """Compatibility façade that keeps legacy test hooks outside the core workflow."""
+
+    def search(self, request: NyaaSearchRequest) -> list[NyaaRelease]:
+        if request.source == "rss":
+            return client_api.parse_rss(
+                fetch_rss(
+                    request.query,
+                    request.category,
+                    request.nyaa_filter,
+                    int(request.timeout),
+                )
+            )
+        if request.source != "listing":
+            raise ValueError(f"Unsupported Nyaa search source: {request.source}")
+        if request.query:
+            page_html = fetch_search_listing_page(
+                request.query,
+                request.category,
+                request.nyaa_filter,
+                request.page,
+                int(request.timeout),
+                sort=request.sort,
+                order=request.order,
+            )
+        else:
+            page_html = fetch_listing_page(
+                request.category,
+                request.nyaa_filter,
+                request.page,
+                int(request.timeout),
+            )
+        return parse_nyaa_listing(page_html)
+
+    def get(self, release_id: str, *, timeout: float = 20) -> NyaaReleaseDetail:
+        nyaa_id = nyaa_id_from_url(release_id)
+        target = (
+            client_api.view_url(nyaa_id)
+            if nyaa_id
+            else release_id
         )
+        page_html = fetch_nyaa_detail_page(target, timeout)
+        return client_api.parse_detail(nyaa_id or "0", page_html)
+
+    def get_description(self, release_id: str, *, timeout: float = 20) -> str:
+        return fetch_nyaa_detail_text(release_id, timeout)
 
 
-def score_item(
-    item: ET.Element,
+DEFAULT_CLIENT = SkillNyaaClient()
+
+
+def score_release(release: NyaaRelease,
     query: str,
     want_zh: bool,
     airing_priority: bool,
@@ -866,22 +660,25 @@ def score_item(
     avoid_groups: Iterable[str],
     include_magnets: bool,
 ) -> Candidate:
-    title = text_of(item, "title")
-    link = text_of(item, "link")
-    guid = text_of(item, "guid")
-    url = normalize_nyaa_url(link, guid)
-    size = nyaa_text(item, "size") or None
-    size_bytes = parse_size(size or "")
-    seeders = as_int(nyaa_text(item, "seeders"))
-    leechers = as_int(nyaa_text(item, "leechers"))
-    downloads = as_int(nyaa_text(item, "downloads"))
-    category = nyaa_text(item, "category") or None
-    info_hash = nyaa_text(item, "infoHash")
-    published_raw = text_of(item, "pubDate")
+    title = release.title
+    url = release.url
+    size = release.size
+    size_bytes = release.size_bytes
+    seeders = release.seeders
+    leechers = release.leechers
+    downloads = release.downloads
+    category = release.category
+    info_hash = release.info_hash
+    published_raw = release.published
 
     try:
-        published = parsedate_to_datetime(published_raw).date().isoformat() if published_raw else None
-    except (TypeError, ValueError):
+        if published_raw:
+            published = parsedate_to_datetime(published_raw).date().isoformat()
+        elif release.published_at is not None:
+            published = datetime.fromtimestamp(release.published_at, timezone.utc).date().isoformat()
+        else:
+            published = None
+    except (TypeError, ValueError, OverflowError):
         published = published_raw or None
 
     group = detect_group(title)
@@ -989,11 +786,41 @@ def score_item(
     )
 
 
+
+def score_item(
+    item: ET.Element,
+    query: str,
+    want_zh: bool,
+    airing_priority: bool,
+    desired_resolution: str | None,
+    tier: str,
+    duration_min: float,
+    episodes: int | None,
+    prefer_groups: Iterable[str],
+    avoid_groups: Iterable[str],
+    include_magnets: bool,
+) -> Candidate:
+    """Compatibility wrapper for callers that still provide one RSS XML item."""
+    return score_release(
+        client_api.release_from_rss_item(item),
+        query=query,
+        want_zh=want_zh,
+        airing_priority=airing_priority,
+        desired_resolution=desired_resolution,
+        tier=tier,
+        duration_min=duration_min,
+        episodes=episodes,
+        prefer_groups=prefer_groups,
+        avoid_groups=avoid_groups,
+        include_magnets=include_magnets,
+    )
+
+
 def _metadata_item(metadata: dict[str, object]) -> ET.Element:
     item = ET.Element("item")
     nyaa_id = str(metadata.get("nyaa_id") or "")
     title = str(metadata.get("title") or "")
-    url = f"https://nyaa.si/view/{nyaa_id}" if nyaa_id else ""
+    url = client_api.view_url(nyaa_id) if nyaa_id else ""
     ET.SubElement(item, "title").text = title
     ET.SubElement(item, "link").text = url
     ET.SubElement(item, "guid").text = url

@@ -263,7 +263,12 @@ def _episode_from_title(
         if match:
             return _decimal(match.group("episode")), Confidence.EXPLICIT
 
-    for match in re.finditer(r"[\[\(\u3010]\s*0*(?P<episode>\d+(?:\.\d+)?)(?:v\d+)?\s*[\]\)\u3011]", lower):
+    for match in re.finditer(
+        r"[\[\(\u3010]\s*0*(?P<episode>\d+(?:\.\d+)?)(?:v\d+)?"
+        r"\s*(?:[-\u2013\u2014]\s*(?:\u603b\u7b2c|\u7e3d\u7b2c)\s*\d+)?"
+        r"\s*[\]\)\u3011]",
+        lower,
+    ):
         value = _decimal(match.group("episode"))
         if value is not None and value < Decimal("100"):
             return value, Confidence.WEAK

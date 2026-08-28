@@ -27,6 +27,7 @@ from airing_watch_state import (
 )
 from qbittorrent_submit import (
     DEFAULT_SAVE_PATH as DEFAULT_QBITTORRENT_SAVE_PATH,
+    SUCCESS_STATUSES as QBITTORRENT_SUCCESS_STATUSES,
     SubmissionError,
     inspect_torrent,
     submit_magnet,
@@ -75,6 +76,7 @@ class ResolvedAnime:
     next_airing_at: int | None = None
     mainline_scope: str = "unknown"
     related_titles: list[str] = field(default_factory=list)
+    continuation_parts: list[dict[str, Any]] = field(default_factory=list)
     choices: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -522,6 +524,8 @@ def upsert_show(
         show["mainline_scope"] = resolved.mainline_scope
     if resolved and resolved.related_titles:
         show["related_titles"] = resolved.related_titles
+    if resolved and resolved.continuation_parts:
+        show["continuation_parts"] = resolved.continuation_parts
     if resolved and resolved.search_titles:
         show["search_titles"] = resolved.search_titles
     if resolved and resolved.verified_search_titles:
@@ -593,6 +597,10 @@ def anilist_request(query: str, timeout: int) -> dict[str, Any]:
                 id
                 type
                 format
+                status
+                episodes
+                startDate { year month day }
+                nextAiringEpisode { episode airingAt }
                 title { romaji english native }
                 synonyms
               }
@@ -636,6 +644,10 @@ def anilist_media_request(media_id: int, timeout: int) -> dict[str, Any]:
               id
               type
               format
+              status
+              episodes
+              startDate { year month day }
+              nextAiringEpisode { episode airingAt }
               title { romaji english native }
               synonyms
             }
@@ -823,6 +835,7 @@ def resolved_from_state(show: dict[str, Any], fallback_title: str, source: str =
         anilist_id=show.get("anilist_id"),
         mainline_scope=show.get("mainline_scope", "unknown"),
         related_titles=show.get("related_titles", []),
+        continuation_parts=show.get("continuation_parts", []),
     )
 
 
@@ -880,6 +893,57 @@ def related_anime_titles(media: dict[str, Any]) -> list[str]:
             ]
         )
     return unique(titles)
+
+
+def continuation_parts_from_media(media: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return structured, official mainline sequel evidence without guessing from titles alone."""
+    relations = media.get("relations")
+    edges = relations.get("edges") if isinstance(relations, dict) else None
+    if not isinstance(edges, list):
+        return []
+    parts: list[dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("relationType") != "SEQUEL":
+            continue
+        node = edge.get("node")
+        if (
+            not isinstance(node, dict)
+            or node.get("type") != "ANIME"
+            or node.get("format") not in MAINLINE_FORMATS
+        ):
+            continue
+        title_data = node.get("title") or {}
+        title = title_data.get("english") or title_data.get("romaji") or title_data.get("native")
+        start = node.get("startDate") or {}
+        try:
+            start_date = date(
+                int(start["year"]),
+                int(start["month"]),
+                int(start["day"]),
+            ).isoformat()
+        except (KeyError, TypeError, ValueError):
+            start_date = None
+        next_airing = node.get("nextAiringEpisode") or {}
+        parts.append(
+            {
+                "anilist_id": node.get("id"),
+                "title": title,
+                "status": node.get("status"),
+                "episodes": node.get("episodes"),
+                "start_date": start_date,
+                "next_airing_episode": next_airing.get("episode"),
+                "next_airing_at": next_airing.get("airingAt"),
+                "explicit_split_cour": bool(
+                    title
+                    and re.search(
+                        r"(?:\bpart\s*(?:2|ii)\b|\b(?:2nd|second)\s+cour\b|\bcour\s*2\b|第[二2]クール)",
+                        title,
+                        re.I,
+                    )
+                ),
+            }
+        )
+    return parts
 
 
 def mainline_scope_from_media(media: dict[str, Any]) -> str:
@@ -954,6 +1018,7 @@ def media_to_resolved(query: str, media: dict[str, Any], today: date) -> tuple[R
             next_airing_at=next_airing.get("airingAt"),
             mainline_scope=mainline_scope,
             related_titles=related_anime_titles(media),
+            continuation_parts=continuation_parts_from_media(media),
         ),
         score,
     )
@@ -1034,6 +1099,7 @@ def resolved_snapshot(resolved: ResolvedAnime) -> dict[str, Any]:
         "next_airing_at": resolved.next_airing_at,
         "mainline_scope": resolved.mainline_scope,
         "related_titles": resolved.related_titles,
+        "continuation_parts": resolved.continuation_parts,
     }
 
 
@@ -1108,6 +1174,7 @@ def merge_resolved(base: ResolvedAnime, fresh: ResolvedAnime) -> ResolvedAnime:
     fresh.search_titles = unique([*base.search_titles, *fresh.search_titles])
     fresh.verified_search_titles = unique([*base.verified_search_titles, *fresh.verified_search_titles])
     fresh.related_titles = unique([*base.related_titles, *fresh.related_titles])
+    fresh.continuation_parts = fresh.continuation_parts or base.continuation_parts
     fresh.season = base.season or fresh.season
     fresh.trackable = base.trackable or fresh.trackable
     fresh.current = base.current or fresh.current
@@ -1433,18 +1500,185 @@ def official_air_date_report(
     }
 
 
+def next_airing_context(
+    identity: IdentityResolution,
+    episode: int,
+    cache_path: Path,
+    timeout: int,
+    refresh_cache: bool,
+    today: date,
+) -> dict[str, Any]:
+    """Distinguish an ordinary future airing from a verified schedule break."""
+    target = official_air_date_report(
+        identity,
+        episode,
+        cache_path,
+        timeout,
+        refresh_cache,
+        today,
+    )
+    context: dict[str, Any] = {
+        "status": "schedule_unavailable",
+        "episode": episode,
+        "airing_at": target.get("airing_at"),
+        "airing_date": target.get("airing_date"),
+        "previous_episode": episode - 1 if episode > 1 else None,
+        "previous_airing_at": None,
+        "previous_airing_date": None,
+        "gap_days": None,
+        "weekly_break": False,
+        "long_break": False,
+        "skipped_weeks": 0,
+    }
+    if target.get("status") != "not_aired_yet" or not isinstance(target.get("airing_at"), int):
+        return context
+    context["status"] = "future_scheduled"
+    if episode <= 1:
+        return context
+
+    previous = official_air_date_report(
+        identity,
+        episode - 1,
+        cache_path,
+        timeout,
+        refresh_cache,
+        today,
+    )
+    previous_airing_at = previous.get("airing_at")
+    if not isinstance(previous_airing_at, int):
+        return context
+    gap_days = (target["airing_at"] - previous_airing_at) / 86400
+    context.update(
+        {
+            "previous_airing_at": previous_airing_at,
+            "previous_airing_date": previous.get("airing_date"),
+            "gap_days": round(gap_days, 2),
+        }
+    )
+    if gap_days >= 28:
+        context["status"] = "long_break_unconfirmed"
+        context["long_break"] = True
+        context["skipped_weeks"] = max(1, round(gap_days / 7) - 1)
+    elif gap_days >= 10.5:
+        context["status"] = "weekly_break"
+        context["weekly_break"] = True
+        context["skipped_weeks"] = max(1, round(gap_days / 7) - 1)
+    return context
+
+
+def completed_part_context(
+    resolved: ResolvedAnime,
+    completed: int | None,
+) -> dict[str, Any] | None:
+    """Return a completed-part boundary before blindly searching the next episode number."""
+    if (
+        resolved.status != "FINISHED"
+        or not isinstance(resolved.episodes, int)
+        or completed is None
+        or completed < resolved.episodes
+    ):
+        return None
+    parts = [part for part in resolved.continuation_parts if isinstance(part, dict)]
+    explicit_parts = [part for part in parts if part.get("explicit_split_cour")]
+    continuation = (explicit_parts or parts or [None])[0]
+    if continuation is None:
+        return {
+            "status": "part_finished",
+            "kind": "season_complete",
+            "completed_episodes": resolved.episodes,
+            "continuation": None,
+        }
+    next_airing_at = continuation.get("next_airing_at")
+    return {
+        "status": "split_cour_break" if continuation.get("explicit_split_cour") else "part_finished",
+        "kind": "split_cour" if continuation.get("explicit_split_cour") else "sequel_scheduled",
+        "completed_episodes": resolved.episodes,
+        "continuation": continuation,
+        "return_date": (
+            datetime.fromtimestamp(next_airing_at).date().isoformat()
+            if isinstance(next_airing_at, int)
+            else continuation.get("start_date")
+        ),
+    }
+
+
+def render_not_aired_reply(
+    display_title: str,
+    season: str | None,
+    episode: int,
+    airing: dict[str, Any],
+) -> str:
+    season_label = canonical_season(season) or "S01"
+    target_label = f"{season_label}E{episode:02d}"
+    airing_date = airing.get("airing_date")
+    if airing.get("long_break"):
+        return (
+            f"《{display_title}》{target_label} 与上一集相隔 {airing.get('gap_days'):g} 天，"
+            f"属于长休区间；官方目前排在 {airing_date}。尚无足够证据断言是临时停更还是分段放送。"
+        )
+    if airing.get("weekly_break"):
+        skipped_weeks = int(airing.get("skipped_weeks") or 1)
+        previous_date = airing.get("previous_airing_date")
+        gap_days = airing.get("gap_days")
+        detail = ""
+        if previous_date and gap_days is not None:
+            detail = f"，距上一集（{previous_date}）{gap_days:g} 天"
+        return (
+            f"《{display_title}》本周停更。{target_label} 官方安排在 {airing_date} 播出"
+            f"{detail}，预计停更 {skipped_weeks} 周。"
+        )
+    if airing_date:
+        return f"《{display_title}》{target_label} 尚未播出，官方安排在 {airing_date} 播出。"
+    return f"《{display_title}》{target_label} 尚未播出，暂时无法取得可靠的下一次播出日期。"
+
+
+def render_part_finished_reply(
+    display_title: str,
+    season: str | None,
+    context: dict[str, Any],
+) -> str:
+    season_label = canonical_season(season) or "S01"
+    completed = context.get("completed_episodes")
+    continuation = context.get("continuation") or {}
+    next_title = continuation.get("title")
+    return_date = context.get("return_date")
+    if context.get("status") == "split_cour_break":
+        date_text = f"，预计 {return_date} 开始" if return_date else "，恢复日期尚未明确"
+        return (
+            f"《{display_title}》{season_label} 前半段已于第 {completed} 集结束。"
+            f"官方续篇《{next_title}》属于后半段分批放送{date_text}。"
+        )
+    if next_title:
+        date_text = f"，预计 {return_date} 开始" if return_date else ""
+        return (
+            f"《{display_title}》{season_label} 当前部分已于第 {completed} 集结束。"
+            f"已确认后续《{next_title}》{date_text}；它不是本周临时停更。"
+        )
+    return (
+        f"《{display_title}》{season_label} 当前部分已于第 {completed} 集结束。"
+        "尚未确认后半段或续作排期，因此不继续按下一集编号搜索。"
+    )
+
+
 def latest_regular_target(
-    resolved: ResolvedAnime, state_show: dict[str, Any] | None
+    resolved: ResolvedAnime,
+    state_show: dict[str, Any] | None,
+    *,
+    use_state_fallback: bool = True,
 ) -> tuple[int | None, str]:
     now = int(time.time())
     if resolved.next_airing_episode and resolved.next_airing_at and resolved.next_airing_at > now:
         target = resolved.next_airing_episode - 1
         return (target, "anilist_schedule") if target > 0 else (None, "not_aired_yet")
     if resolved.status == "FINISHED" and resolved.episodes:
-        return resolved.episodes, "anilist_finished_total"
-    if state_show and isinstance(state_show.get("latest_known_episode"), int):
+        # AniList's episode count is the planned/known season total, not
+        # evidence that the final episode is currently available on Nyaa.
+        # Let the latest-regular search establish the newest released episode
+        # from qualified regular candidates instead of targeting the total.
+        return None, "nyaa_discovery_required"
+    if use_state_fallback and state_show and isinstance(state_show.get("latest_known_episode"), int):
         return state_show["latest_known_episode"], "observed_state_only"
-    return None, "latest_unresolved"
+    return None, "nyaa_discovery_required"
 
 
 def build_search_args(
@@ -1581,6 +1815,24 @@ def render_result_reply(
         lines.append(f"Nyaa: {selected['url']}")
     if include_magnet:
         lines.extend(["", "```text", str(selected.get("magnet") or ""), "```"])
+    return "\n".join(lines)
+
+
+def render_latest_already_handled_reply(
+    display_title: str,
+    season: str | None,
+    latest_episode: int,
+    next_episode: int,
+    qbittorrent_requested: bool,
+) -> str:
+    season_label = canonical_season(season) or "S01"
+    lines = [
+        f"《{display_title}》{season_label}E{latest_episode:02d} 是目前最新正篇。",
+        f"追番进度已到 {season_label}E{latest_episode:02d}；下一目标是 {season_label}E{next_episode:02d}。",
+        "本轮没有新的正篇。",
+    ]
+    if qbittorrent_requested:
+        lines.append("未调用 qBittorrent；已有追番进度不能证明下载任务当前存在。")
     return "\n".join(lines)
 
 
@@ -2008,6 +2260,10 @@ def render_batch_child_status(display_title: str, result: dict[str, Any]) -> str
     status = result.get("status")
     messages = {
         "not_aired_yet": "尚未播出。",
+        "airing_schedule_break": "本周期停更。",
+        "long_break_unconfirmed": "进入长休区间，分段放送尚待确认。",
+        "split_cour_break": "前半段已结束，等待后半段放送。",
+        "part_finished": "当前部分已结束，等待后续排期。",
         "no_rss_candidates": "没有检索到 Nyaa 发布。",
         "no_nyaa_release_for_target": "没有匹配目标集数的 Nyaa 发布。",
         "release_unqualified": "已有发布，但没有符合当前画质档位的资源。",
@@ -2050,7 +2306,8 @@ def run_tracked_title_batch(args: argparse.Namespace, mentions: list[dict[str, A
         "reply_text": reply_text,
         "output_contract": {
             "ready": rendered_count == len(results) and all(
-                result.get("status") not in {"found", "finished_deleted", "latest_unresolved"}
+                result.get("status")
+                not in {"found", "finished_deleted", "latest_unresolved", "latest_already_handled"}
                 or result.get("output_contract", {}).get("ready", False)
                 for result in results
             ),
@@ -2153,6 +2410,11 @@ def build_parser() -> argparse.ArgumentParser:
 def status_return_code(status: str) -> int | None:
     return {
         "found": 0,
+        "latest_already_handled": 0,
+        "airing_schedule_break": 0,
+        "long_break_unconfirmed": 0,
+        "split_cour_break": 0,
+        "part_finished": 0,
         "download_pending": 0,
         "finished_deleted": 0,
         "needs_quality_upgrade_confirmation": 0,
@@ -2389,6 +2651,7 @@ def main(argv: list[str] | None = None) -> int:
     intent: SearchIntent
     availability: dict[str, Any] = {"target_source": "input", "official_target": False}
     not_aired_yet = False
+    part_finished: dict[str, Any] | None = None
     if (
         args.defer_state_until_download_complete
         and queued_download is not None
@@ -2417,7 +2680,9 @@ def main(argv: list[str] | None = None) -> int:
             identity.resolved = resolved
             state_aliases = unique([*resolved.aliases, args.title])
             search_names = select_search_names(resolved.title, state_aliases, args.query_limit, resolved.search_titles)
-        target_episode, target_source = latest_regular_target(resolved, state_show)
+        target_episode, target_source = latest_regular_target(
+            resolved, state_show, use_state_fallback=False
+        )
         availability = {
             "target_source": target_source,
             "official_target": target_source.startswith("anilist"),
@@ -2441,6 +2706,7 @@ def main(argv: list[str] | None = None) -> int:
             identity.resolved = resolved
             state_aliases = unique([*resolved.aliases, args.title])
             search_names = select_search_names(resolved.title, state_aliases, args.query_limit, resolved.search_titles)
+            part_finished = completed_part_context(resolved, completed_episode(state_show))
             official_latest, official_source = latest_regular_target(resolved, state_show)
             availability = {
                 "target_source": "tracked_next_episode",
@@ -2461,9 +2727,106 @@ def main(argv: list[str] | None = None) -> int:
     else:
         intent = SearchIntent.SEASON_BROWSE
 
-    if not_aired_yet:
+    if part_finished is not None:
+        report_status = str(part_finished["status"])
+        availability.update(
+            {
+                "state": "split_cour_break" if report_status == "split_cour_break" else "part_finished",
+                "part": part_finished,
+            }
+        )
+        current_progress = completed_episode(state_show)
+        progress = {
+            "before_episode": current_progress,
+            "after_episode": current_progress,
+            "latest_episode": resolved.episodes,
+            "next_episode": (state_show or {}).get("next_episode"),
+            "advanced": False,
+        }
+        display_title = str((state_show or {}).get("title") or args.title)
+        reply_text = render_part_finished_reply(display_title, season, part_finished)
         report = {
-            "status": "not_aired_yet",
+            "status": report_status,
+            "intent": intent.value,
+            "resolved_title": resolved.title,
+            "aliases": search_names,
+            "season": season,
+            "target_episode": target_episode,
+            "availability": availability,
+            "quality": {"requested_tier": requested_tier, "fallback": None},
+            "tracked": tracked,
+            "selected": None,
+            "choices": [],
+            "diagnostic": {"raw_count": 0, "search_skipped": "part_boundary"},
+            "state_update": "none",
+            "progress": progress,
+            "resolver": resolver_status,
+            "cache": {"rss": "not_used", "schedule": schedule_cache_status},
+            "search_return_code": 0,
+            "search_stderr": "",
+            "reply_text": reply_text,
+            **identity_report_fields(identity, season, search_names),
+        }
+        if args.json:
+            emit_json(report)
+        else:
+            print(reply_text)
+        return 0
+
+    if not_aired_yet:
+        airing = {
+            "status": "schedule_unavailable",
+            "episode": target_episode,
+            "airing_at": resolved.next_airing_at,
+            "airing_date": (
+                datetime.fromtimestamp(resolved.next_airing_at).date().isoformat()
+                if isinstance(resolved.next_airing_at, int)
+                else None
+            ),
+            "weekly_break": False,
+            "skipped_weeks": 0,
+        }
+        if (
+            isinstance(target_episode, int)
+            and availability.get("official_target")
+            and resolved.anilist_id
+            and not args.no_web_resolve
+        ):
+            airing = next_airing_context(
+                identity,
+                target_episode,
+                args.schedule_cache,
+                args.timeout,
+                args.refresh_cache,
+                date.today(),
+            )
+        if airing.get("long_break"):
+            report_status = "long_break_unconfirmed"
+            availability["state"] = "long_break_unconfirmed"
+        elif airing.get("weekly_break"):
+            report_status = "airing_schedule_break"
+            availability["state"] = "schedule_break"
+        else:
+            report_status = "not_aired_yet"
+            availability["state"] = "not_due"
+        availability["next_airing"] = airing
+        current_progress = completed_episode(state_show)
+        next_progress = (state_show or {}).get("next_episode")
+        progress = {
+            "before_episode": current_progress,
+            "after_episode": current_progress,
+            "latest_episode": availability.get("official_latest_episode"),
+            "next_episode": next_progress,
+            "advanced": False,
+        }
+        display_title = str((state_show or {}).get("title") or args.title)
+        reply_text = (
+            render_not_aired_reply(display_title, season, target_episode, airing)
+            if isinstance(target_episode, int)
+            else f"《{display_title}》下一集尚未播出。"
+        )
+        report = {
+            "status": report_status,
             "intent": intent.value,
             "resolved_title": resolved.title,
             "aliases": search_names,
@@ -2476,16 +2839,18 @@ def main(argv: list[str] | None = None) -> int:
             "choices": [],
             "diagnostic": {"raw_count": 0, "search_skipped": "official_schedule"},
             "state_update": "none",
+            "progress": progress,
             "resolver": resolver_status,
             "cache": {"rss": "not_used", "schedule": schedule_cache_status},
-            "search_return_code": None,
+            "search_return_code": 0,
             "search_stderr": "",
+            "reply_text": reply_text,
             **identity_report_fields(identity, season, search_names),
         }
         if args.json:
             emit_json(report)
         else:
-            print("not_aired_yet")
+            print(reply_text)
         return 0
 
     base_search_names = list(search_names)
@@ -2703,6 +3068,7 @@ def main(argv: list[str] | None = None) -> int:
         intent is SearchIntent.LATEST_REGULAR
         and not availability["official_target"]
         and status == "found"
+        and availability.get("target_source") != "nyaa_discovery_required"
     ):
         status = "latest_unresolved"
     output_contract = result_output_contract(selected, args.include_magnet, args.require_zh)
@@ -2761,19 +3127,6 @@ def main(argv: list[str] | None = None) -> int:
     if status in {"found", "latest_unresolved"} and not output_contract["ready"]:
         status = "output_incomplete"
 
-    qbittorrent_report: dict[str, Any] | None = None
-    if args.enqueue_qbittorrent and status == "found" and output_contract["ready"]:
-        try:
-            qbittorrent_report = submit_magnet(
-                str((selected or {}).get("magnet") or ""),
-                source_url=str((selected or {}).get("url") or "") or None,
-                executable=args.qbittorrent_exe,
-                save_path=args.qbittorrent_save_path,
-            )
-        except SubmissionError as exc:
-            qbittorrent_report = {"status": "error", "ok": False, "error": str(exc)}
-            status = "download_enqueue_failed"
-
     found_episode: int | None = None
     if (
         selected_item
@@ -2783,7 +3136,76 @@ def main(argv: list[str] | None = None) -> int:
     ):
         found_episode = int(selected_item.identity.episode)
 
-    if status == "found" and found_episode is not None:
+    current_completed_before = completed_episode(state_show)
+    already_handled_latest = bool(
+        intent is SearchIntent.LATEST_REGULAR
+        and found_episode is not None
+        and current_completed_before is not None
+        and found_episode <= current_completed_before
+    )
+
+    qbittorrent_report: dict[str, Any] | None = None
+    if (
+        args.enqueue_qbittorrent
+        and status == "found"
+        and output_contract["ready"]
+    ):
+        if already_handled_latest:
+            qbittorrent_report = {
+                "status": "not_attempted",
+                "ok": True,
+                "reason": "latest_already_handled",
+            }
+        else:
+            try:
+                qbittorrent_report = submit_magnet(
+                    str((selected or {}).get("magnet") or ""),
+                    source_url=str((selected or {}).get("url") or "") or None,
+                    executable=args.qbittorrent_exe,
+                    save_path=args.qbittorrent_save_path,
+                )
+                if qbittorrent_report.get("status") not in QBITTORRENT_SUCCESS_STATUSES:
+                    status = "download_enqueue_failed"
+            except SubmissionError as exc:
+                qbittorrent_report = {"status": "error", "ok": False, "error": str(exc)}
+                status = "download_enqueue_failed"
+
+    if (
+        intent is SearchIntent.LATEST_REGULAR
+        and target_episode is None
+        and found_episode is not None
+    ):
+        # In discovery mode the selected, verified regular release is the
+        # actual latest episode for this run and should be reported as such.
+        target_episode = found_episode
+        availability["target_episode"] = found_episode
+
+    link_delivered = bool(
+        not args.enqueue_qbittorrent
+        and args.include_magnet
+        and output_contract["ready"]
+        and (selected or {}).get("magnet")
+    )
+    qbittorrent_delivered = bool(
+        args.enqueue_qbittorrent
+        and qbittorrent_report is not None
+        and qbittorrent_report.get("status") in QBITTORRENT_SUCCESS_STATUSES
+    )
+    delivery_succeeded = bool(status == "found" and (link_delivered or qbittorrent_delivered))
+
+    if (
+        status == "found"
+        and found_episode is not None
+        and current_completed_before is not None
+        and found_episode <= current_completed_before
+        and not args.no_state_update
+    ):
+        state_update = "unchanged_already_watched"
+
+    if already_handled_latest and status == "found":
+        status = "latest_already_handled"
+
+    if delivery_succeeded and found_episode is not None:
         if not args.no_state_update and (resolved.trackable or tracked):
             current_completed = completed_episode(state_show)
             advances_progress = (
@@ -2831,6 +3253,10 @@ def main(argv: list[str] | None = None) -> int:
         }
         and not args.no_state_update
         and resolved.trackable
+        and not (
+            intent is SearchIntent.LATEST_REGULAR
+            and availability.get("target_source") == "nyaa_discovery_required"
+        )
     ):
         upsert_show(
             state,
@@ -2847,6 +3273,44 @@ def main(argv: list[str] | None = None) -> int:
         save_state(args.state, state)
         state_update = "tracked_waiting"
         tracked = True
+
+    progress_show = find_show(state, args.title) or find_show(state, resolved.title) or state_show
+    progress_after = completed_episode(progress_show)
+    progress_next = (progress_show or {}).get("next_episode")
+    if not isinstance(progress_next, int) and progress_after is not None:
+        progress_next = progress_after + 1
+    progress = {
+        "before_episode": current_completed_before,
+        "after_episode": progress_after,
+        "latest_episode": found_episode if found_episode is not None else target_episode,
+        "next_episode": progress_next,
+        "advanced": bool(
+            current_completed_before is not None
+            and progress_after is not None
+            and progress_after > current_completed_before
+        )
+        or bool(current_completed_before is None and progress_after is not None),
+    }
+
+    if status in {"found", "finished_deleted", "latest_already_handled"}:
+        availability["state"] = "available"
+    elif status in {
+        "no_rss_candidates",
+        "no_nyaa_release_for_target",
+        "release_unqualified",
+        "subtitle_unqualified",
+        "no_complete_season_release",
+    }:
+        availability["state"] = "aired_no_release"
+    elif status in {
+        "network_error",
+        "subtitle_check_incomplete",
+        "season_check_incomplete",
+        "latest_unresolved",
+        "output_incomplete",
+        "download_enqueue_failed",
+    }:
+        availability["state"] = "search_incomplete"
 
     diagnostic = dict(core_report.diagnostics)
     diagnostic["queries"] = release_search_names
@@ -2891,7 +3355,18 @@ def main(argv: list[str] | None = None) -> int:
         public_quality_upgrade_selected["source_type"] = quality_upgrade_selected.get("source_type")
     display_title = str((state_show or {}).get("title") or args.title)
     reply_text = ""
-    if status in {"found", "finished_deleted", "latest_unresolved"} and public_selected and output_contract["ready"]:
+    if status == "latest_already_handled" and found_episode is not None:
+        next_episode = progress.get("next_episode")
+        if not isinstance(next_episode, int):
+            next_episode = found_episode + 1
+        reply_text = render_latest_already_handled_reply(
+            display_title,
+            season,
+            found_episode,
+            next_episode,
+            args.enqueue_qbittorrent,
+        )
+    elif status in {"found", "finished_deleted", "latest_unresolved"} and public_selected and output_contract["ready"]:
         if intent is SearchIntent.SEASON_BATCH:
             reply_text = render_season_batch_reply(
                 display_title,
@@ -2966,6 +3441,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
         "diagnostic": diagnostic,
         "state_update": state_update,
+        "progress": progress,
         "resolver": resolver_status,
         "cache": {"rss": core_report.cache, "schedule": schedule_cache_status},
         "search_return_code": status_return_code(status),
