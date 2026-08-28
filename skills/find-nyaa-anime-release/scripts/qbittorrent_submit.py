@@ -187,12 +187,17 @@ def ensure_qbittorrent_ready(
     *,
     wait_seconds: float = DEFAULT_STARTUP_WAIT_SECONDS,
     settle_seconds: float = DEFAULT_STARTUP_SETTLE_SECONDS,
+    profile_path: Path | None = None,
 ) -> dict[str, Any]:
     """Cold-start qBittorrent separately and wait until its process is stable."""
-    if qbittorrent_process_running(executable):
+    if profile_path is None and qbittorrent_process_running(executable):
         return {"client_was_running": True, "client_started": False}
 
-    process = _launch([str(executable), "--no-splash"])
+    startup_command = [str(executable), "--no-splash"]
+    if profile_path is not None:
+        profile_path.mkdir(parents=True, exist_ok=True)
+        startup_command.append(f"--profile={profile_path}")
+    process = _launch(startup_command)
     effective_wait = max(0.0, wait_seconds)
     effective_settle = max(0.0, settle_seconds)
     deadline = time.monotonic() + effective_wait
@@ -411,6 +416,7 @@ def submit_magnet(
     executable: Path | None = None,
     save_path: Path | None = DEFAULT_SAVE_PATH,
     backup_dir: Path = DEFAULT_BACKUP_DIR,
+    profile_path: Path | None = None,
     wait_seconds: float = DEFAULT_PERSISTENCE_WAIT_SECONDS,
     startup_wait_seconds: float = DEFAULT_STARTUP_WAIT_SECONDS,
     startup_settle_seconds: float = DEFAULT_STARTUP_SETTLE_SECONDS,
@@ -465,6 +471,10 @@ def submit_magnet(
         "--skip-dialog=true",
         "--add-stopped=false",
     ]
+    if profile_path is not None:
+        if not dry_run:
+            profile_path.mkdir(parents=True, exist_ok=True)
+        command.append(f"--profile={profile_path}")
     if save_path:
         if not dry_run:
             save_path.mkdir(parents=True, exist_ok=True)
@@ -503,6 +513,7 @@ def submit_magnet(
             exe,
             wait_seconds=startup_wait_seconds,
             settle_seconds=startup_settle_seconds,
+            profile_path=profile_path,
         )
         process = _launch(command)
         submission_attempts = 1
@@ -608,6 +619,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-path", type=Path, default=DEFAULT_SAVE_PATH)
     parser.add_argument("--backup-dir", type=Path, default=DEFAULT_BACKUP_DIR)
     parser.add_argument(
+        "--profile",
+        type=Path,
+        help="Use an isolated qBittorrent profile directory (intended for controlled testing).",
+    )
+    parser.add_argument(
         "--wait-seconds",
         type=float,
         default=DEFAULT_PERSISTENCE_WAIT_SECONDS,
@@ -665,6 +681,7 @@ def main(argv: list[str] | None = None) -> int:
                 executable=args.exe,
                 save_path=args.save_path,
                 backup_dir=args.backup_dir,
+                profile_path=args.profile,
                 wait_seconds=args.wait_seconds,
                 startup_wait_seconds=args.startup_wait_seconds,
                 startup_settle_seconds=args.startup_settle_seconds,

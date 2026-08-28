@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime_paths import DEFAULT_STATE
+from state_io import StateFileError, load_state, save_state
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -26,25 +27,6 @@ def now_iso() -> str:
 
 def norm(text: str) -> str:
     return re.sub(r"[\W_]+", "", text.casefold())
-
-
-def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"version": 1, "shows": []}
-    with path.open("r", encoding="utf-8-sig") as fh:
-        data = json.load(fh)
-    data.setdefault("version", 1)
-    data.setdefault("shows", [])
-    return data
-
-
-def save_state(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=False, indent=2)
-        fh.write("\n")
-    tmp.replace(path)
 
 
 def names_for(show: dict[str, Any]) -> list[str]:
@@ -407,7 +389,11 @@ def main(argv: list[str] | None = None) -> int:
     p_delete.add_argument("title")
 
     args = parser.parse_args(argv)
-    data = load_state(args.state)
+    try:
+        data = load_state(args.state)
+    except StateFileError as exc:
+        print(json.dumps({"status": "state_corrupt", "error": str(exc)}, ensure_ascii=False))
+        return 2
 
     if args.cmd == "get":
         print_show(find_show(data, args.title))

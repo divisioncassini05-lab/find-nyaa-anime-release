@@ -68,6 +68,23 @@ class QbittorrentSubmitTests(unittest.TestCase):
         self.assertIn("--add-stopped=false", report["command"])
         self.assertEqual(report["command"][-1], "<magnet>")
 
+    def test_dry_run_can_target_an_isolated_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = root / "qbittorrent.exe"
+            executable.touch()
+            profile = root / "profile"
+            report = qbt.submit_magnet(
+                MAGNET,
+                executable=executable,
+                save_path=root / "downloads",
+                backup_dir=root / "backup",
+                profile_path=profile,
+                dry_run=True,
+            )
+
+        self.assertIn(f"--profile={profile}", report["command"])
+
     def test_existing_fastresume_is_not_resubmitted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

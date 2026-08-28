@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import contextlib
 import io
 import json
@@ -36,6 +37,7 @@ from release_identity import EpisodeKind, normalize_season_number, parse_release
 from release_search_core import SearchContext, SearchIntent, search_release_report
 from runtime_paths import DEFAULT_STATE
 from search_nyaa_releases import DEFAULT_TIER_MIN_GIB
+from state_io import StateFileError, load_state, save_state
 
 
 HERE = Path(__file__).resolve().parent
@@ -336,25 +338,6 @@ def promote_search_titles(current: list[str], matched_queries: list[str]) -> lis
     return unique([*matched_latin, *current_latin])
 
 
-def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"version": 1, "shows": []}
-    with path.open("r", encoding="utf-8-sig") as fh:
-        data = json.load(fh)
-    data.setdefault("version", 1)
-    data.setdefault("shows", [])
-    return data
-
-
-def save_state(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=False, indent=2)
-        fh.write("\n")
-    tmp.replace(path)
-
-
 def names_for(show: dict[str, Any]) -> list[str]:
     return unique([show.get("title"), *show.get("aliases", []), *show.get("search_titles", [])])
 
@@ -506,6 +489,12 @@ def upsert_show(
             watched_episode,
             current_watched if isinstance(current_watched, int) else 0,
         )
+        queued = pending_download(show)
+        if queued is not None and queued["episode"] <= show["watched_episode"]:
+            # Legacy deferred-download state must not survive the standard
+            # success boundary, where a verified link/qBittorrent acceptance
+            # already counts as handled progress.
+            show.pop("pending_download", None)
     if latest_episode is not None:
         show["latest_known_episode"] = latest_episode
     if next_episode is not None:
@@ -1064,7 +1053,11 @@ def load_schedule_cache(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"version": SCHEDULE_CACHE_VERSION, "entries": {}}
-    if data.get("version") != SCHEDULE_CACHE_VERSION or not isinstance(data.get("entries"), dict):
+    if (
+        not isinstance(data, dict)
+        or data.get("version") != SCHEDULE_CACHE_VERSION
+        or not isinstance(data.get("entries"), dict)
+    ):
         return {"version": SCHEDULE_CACHE_VERSION, "entries": {}}
     return data
 
@@ -2456,10 +2449,19 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    state = load_state(args.state)
+    try:
+        state = load_state(args.state)
+    except StateFileError as exc:
+        report = {"status": "state_corrupt", "error": str(exc), "state_update": "unchanged"}
+        if args.json:
+            emit_json(report)
+        else:
+            print(str(exc), file=sys.stderr)
+        return 2
+    state_base = copy.deepcopy(state)
     state_repairs = sanitize_state_aliases(state)
     if state_repairs and not args.no_state_update:
-        save_state(args.state, state)
+        save_state(args.state, state, base=state_base)
     mentions = detect_tracked_titles(state, args.title)
     if len(mentions) >= 2 and not args.no_auto_batch and not args.search_title:
         report = run_tracked_title_batch(args, mentions)
@@ -2544,7 +2546,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_state_update:
             deleted = delete_show(state, [args.title, resolved.title, *resolved.aliases])
             if deleted:
-                save_state(args.state, state)
+                save_state(args.state, state, base=state_base)
                 state_update = "deleted_finished"
         report = {
             "status": "finished_deleted" if state_update == "deleted_finished" else "finished_not_tracked",
@@ -3217,7 +3219,7 @@ def main(argv: list[str] | None = None) -> int:
                 delete_show(state, [args.title, resolved.title, *resolved.aliases])
                 state_update = "deleted_final_episode"
                 status = "finished_deleted"
-                save_state(args.state, state)
+                save_state(args.state, state, base=state_base)
             else:
                 upsert_show(
                     state,
@@ -3237,7 +3239,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 state_update = "advanced"
                 tracked = True
-                save_state(args.state, state)
+                save_state(args.state, state, base=state_base)
     elif (
         status
         in {
@@ -3270,7 +3272,7 @@ def main(argv: list[str] | None = None) -> int:
             "waiting",
             show_hint=state_show,
         )
-        save_state(args.state, state)
+        save_state(args.state, state, base=state_base)
         state_update = "tracked_waiting"
         tracked = True
 

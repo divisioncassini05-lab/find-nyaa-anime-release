@@ -4354,6 +4354,12 @@ class HighLevelStateTests(unittest.TestCase):
                             "watched_episode": 7,
                             "latest_known_episode": 7,
                             "next_episode": 8,
+                            "pending_download": {
+                                "episode": 7,
+                                "season": "S01",
+                                "info_hash": "d" * 40,
+                                "release_title": "[Old] Example Anime - 07 [1080p]",
+                            },
                             "airing": True,
                             "status": "airing",
                             "format": "TV",
@@ -4387,7 +4393,7 @@ class HighLevelStateTests(unittest.TestCase):
                     finder,
                     "search_release_report",
                     side_effect=[missing, found, found],
-                ),
+                ) as search,
                 patch.object(finder, "submit_magnet", return_value=accepted) as submit,
             ):
                 for _ in range(3):
@@ -4401,9 +4407,11 @@ class HighLevelStateTests(unittest.TestCase):
                         after_retry = finder.load_state(state_path)["shows"][0]
 
         self.assertEqual(after_failure["watched_episode"], 7)
+        self.assertEqual(search.call_args_list[0].kwargs["requested_episode"], 8)
         self.assertEqual(outputs[0]["state_update"], "tracked_waiting")
         self.assertEqual(after_retry["watched_episode"], 8)
         self.assertEqual(after_retry["next_episode"], 9)
+        self.assertNotIn("pending_download", after_retry)
         self.assertEqual(outputs[1]["state_update"], "advanced")
         self.assertTrue(outputs[1]["progress"]["advanced"])
         self.assertEqual(outputs[2]["status"], "latest_already_handled")
