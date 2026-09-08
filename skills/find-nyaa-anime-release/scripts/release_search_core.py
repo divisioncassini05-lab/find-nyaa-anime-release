@@ -10,6 +10,7 @@ import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
@@ -18,7 +19,9 @@ from typing import Any
 
 import search_nyaa_releases as nyaa
 from nyaa_client import NyaaClient, NyaaRelease, NyaaSearchRequest
-from release_identity import EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
+from release_identity import Confidence, EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
+from retrieval_decisions import (ACTIVE_RUN, TITLE_CONTEXT, SearchRun, TargetDecision,
+    EligibilityDecision, RecordingClient, REPORT_VERSION, plan_queries)
 
 
 RAW_CACHE_VERSION = 5
@@ -57,6 +60,10 @@ class SearchContext:
     resolved_season: int | None = None
     expected_episodes: int | None = None
     flexible_title_match: bool = False
+    identifiers: tuple[tuple[str, int], ...] = ()
+    episode_mappings: tuple[dict[str, Any], ...] = ()
+    source_numbering: str | None = None
+    target_numbering: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,14 +177,21 @@ class ReleaseSearchReport:
     diagnostics: dict[str, Any]
     failures: list[str]
     cache: str
+    search_run: SearchRun | None = None
 
     def as_dict(self, explain: bool = False) -> dict[str, Any]:
         selected = [item.as_dict(explain, explain) for item in self.selected]
-        choices = [item.as_dict(True, explain) for item in self.choices[:2]]
+        choices = [item.as_dict(True, explain) for item in (self.choices if explain else self.choices[:2])]
         if self.status != "found":
             for item in [*selected, *choices]:
                 item.pop("magnet", None)
         return {
+            "report_version": REPORT_VERSION,
+            "search_run": self.search_run.as_dict() if self.search_run else None,
+            "target_decision": asdict(self.search_run.target) if self.search_run and self.search_run.target else None,
+            "choice_count": len(self.choices),
+            "choices_returned": len(choices),
+            "choices_truncated": len(choices) < len(self.choices),
             "status": self.status,
             "intent": self.intent.value,
             "requested_season": self.requested_season,
@@ -185,7 +199,7 @@ class ReleaseSearchReport:
             "selected": selected,
             "choices": choices,
             "diagnostic": self.diagnostics,
-            "failures": self.failures[:2],
+            "failures": self.failures,
             "cache": self.cache,
         }
 
@@ -407,7 +421,8 @@ def _merge_candidates(*candidate_lists: list[nyaa.Candidate]) -> list[nyaa.Candi
     merged: dict[str, nyaa.Candidate] = {}
     for candidates in candidate_lists:
         for candidate in candidates:
-            key = candidate.url or candidate.title
+            hash_match = re.search(r'btih:([a-fA-F0-9]{40})', candidate.magnet or '')
+            key = candidate.info_hash or (hash_match.group(1).lower() if hash_match else (candidate.url or candidate.title))
             merged[key] = nyaa.merge_candidate(merged[key], candidate) if key in merged else candidate
     return list(merged.values())
 
@@ -431,7 +446,7 @@ def _score_rss_items(items: list[dict[str, Any]], args: argparse.Namespace) -> l
             avoid_groups=args.avoid_group,
             include_magnets=args.include_magnets,
         )
-        candidate_key = candidate.url or candidate.title
+        candidate_key = candidate.info_hash or candidate.url or candidate.title
         by_key[candidate_key] = (
             nyaa.merge_candidate(by_key[candidate_key], candidate)
             if candidate_key in by_key
@@ -450,7 +465,7 @@ def _targeted_fallback_args(
     )
     payload = vars(args).copy()
     payload["query"] = f"{args.query} {episode_token}"
-    payload["alias"] = []
+    payload["alias"] = [f"{args.query} {requested_episode:02d}"]
     return argparse.Namespace(**payload)
 
 
@@ -568,6 +583,10 @@ def collect_raw_candidates(
     if cache_path is not None and not refresh_cache:
         cached = _read_cached_rss_items(cache_path, key)
         if cached is not None:
+            run = ACTIVE_RUN.get()
+            if run is not None:
+                run.requests.append({'source':'cache','status':'ok','items':[
+                    {'query': i.get('query'), 'release': {k:v for k,v in i.get('release',{}).items() if k!='magnet'}} for i in cached]})
             return _score_rss_items(cached, args), [], "hit"
 
     raw_items: list[dict[str, Any]] = []
@@ -600,15 +619,8 @@ def collect_raw_candidates(
                     }
                     for entry in entries
                 )
-                if any(
-                    _entry_matches_size_sorted_target(entry, query, args)
-                    for entry in entries
-                ):
-                    break
-                if (
-                    len(entries) < NYAA_LISTING_PAGE_SIZE
-                    or _size_sorted_page_is_below_floor(entries, args)
-                ):
+                # Raw collection never stops because of quality or a matching row.
+                if len(entries) < NYAA_LISTING_PAGE_SIZE:
                     break
             return collected
         releases = client.search(
@@ -1141,11 +1153,35 @@ def discover_release_candidates(
     limit: int = 20,
     client: NyaaClient | None = None,
 ) -> dict[str, Any]:
+    context = SearchContext(canonical_title=args.query, search_titles=tuple([args.query,*args.alias]),
+        resolved_season=normalize_season_number(args.season),mainline_scope='unknown')
+    run = SearchRun('discovery',plan_queries([args.query,*args.alias],'discovery',getattr(args,'episode',None),context.resolved_season))
+    rt = ACTIVE_RUN.set(run)
+    tt = TITLE_CONTEXT.set(context.search_titles)
+    try:
+        result = _discover_impl(args,cache_path,refresh_cache,limit,RecordingClient(client or DEFAULT_NYAA_CLIENT,run))
+        run.errors = result.get('failures',[])
+        run.ingest_requests()
+        if run.errors:
+            run.completeness = 'partial'
+        result.update(report_version=REPORT_VERSION,search_run=run.as_dict())
+        result['returned_count'] = len(result.get('candidates',[]))
+        result['raw_count'] = len(run.raw_candidates)
+        result['candidates_truncated'] = result['returned_count'] < result['raw_count']
+        return result
+    finally:
+        TITLE_CONTEXT.reset(tt)
+        ACTIVE_RUN.reset(rt)
+
+
+def _discover_impl(args,cache_path=None,refresh_cache=False,limit=20,client=None):
     """Collect a compact, unqualified candidate set for Agent-side decisions."""
     client = client or DEFAULT_NYAA_CLIENT
     raw, failures, cache_state = collect_raw_candidates(
         args, cache_path, refresh_cache, client
     )
+    if ACTIVE_RUN.get():
+        ACTIVE_RUN.get().add_raw(raw)
     candidate_source = _raw_candidate_source(args)
     recent_scan: dict[str, Any] | None = None
     recent_since = getattr(args, "recent_since", None)
@@ -1176,7 +1212,7 @@ def discover_release_candidates(
             return [
                 item
                 for item in items
-                if item.identity.kind is EpisodeKind.UNKNOWN
+                if _is_movie_identity(item.identity)
                 and item.season_match not in {"other", "other_work"}
             ]
         if requested_episode is None:
@@ -1340,7 +1376,8 @@ def _compact_title(value: str, flexible: bool = False) -> str:
 
 def _contains_title(release_title: str, work_title: str, flexible: bool = False) -> bool:
     compact_work = _compact_title(work_title, flexible)
-    return len(compact_work) >= 4 and compact_work in _compact_title(release_title, flexible)
+    minimum = 2 if re.search(r'[\u3400-\u9fff]',compact_work) else 4
+    return len(compact_work) >= minimum and compact_work in _compact_title(release_title, flexible)
 
 
 def _work_match_evidence(
@@ -1440,9 +1477,28 @@ def _classify(
 ) -> list[ClassifiedCandidate]:
     classified: list[ClassifiedCandidate] = []
     for candidate in candidates:
-        identity = parse_release_identity(candidate.title)
+        aliases = tuple(filter(None, (context.canonical_title, *context.aliases, *context.search_titles))) if context else TITLE_CONTEXT.get()
+        identity = parse_release_identity(candidate.title, aliases)
         work_match_evidence = _work_match_evidence(candidate, context)
         work_match = work_match_evidence.outcome
+        if (context and context.source_numbering and context.target_numbering and identity.episode is not None
+            and identity.kind is EpisodeKind.REGULAR and work_match in {'canonical','alias','search_title'}):
+            from offline_identity import map_episode
+            mapped = map_episode(identity.episode,context.episode_mappings,context.source_numbering,context.target_numbering)
+            if mapped:
+                identity.decision['evidence'].append({'field':'episode','basis':'source_stamped_mapping',
+                    'from':[identity.season,str(identity.episode)],'to':[mapped[0],str(mapped[1])]})
+                identity = replace(identity,season=mapped[0],episode=Decimal(mapped[1]),covered_seasons=(mapped[0],))
+                identity.decision.update(season=mapped[0],episode=str(mapped[1]))
+            else:
+                identity.decision['status']='conflict'
+                identity.decision['conflicts'].append('numbering_mapping_unresolved')
+                identity=replace(identity,episode_confidence=Confidence.WEAK)
+        if identity.decision is not None:
+            identity.decision['work'] = work_match
+        run = ACTIVE_RUN.get()
+        if run is not None:
+            run.identities[candidate.url] = identity.decision or {}
         effective_season = identity.season
         season_source = "title" if identity.season is not None else "unknown"
         season_match = season_relation(identity, requested_season)
@@ -1479,6 +1535,12 @@ def _classify(
                 if requested_season is None
                 else ("match" if effective_season == requested_season else "other")
             )
+        if identity.decision is not None:
+            identity.decision.update(effective_season=effective_season, season_match=season_match,
+                                     season_source=season_source, work_evidence=work_match_evidence.as_dict(),
+                                     work_ids=dict(context.identifiers) if context else {})
+            if context and work_match in {'unknown','related_work'} and identity.decision['status'] == 'confirmed':
+                identity.decision['status'] = 'unresolved' if work_match == 'unknown' else 'rejected'
         classified.append(
             ClassifiedCandidate(
                 candidate=candidate,
@@ -1497,10 +1559,20 @@ def _in_requested_season(item: ClassifiedCandidate) -> bool:
     return item.work_match != "related_work" and item.season_match in {"match", "not_requested"}
 
 
+def _is_movie_identity(identity: ReleaseIdentity) -> bool:
+    if identity.kind is EpisodeKind.UNKNOWN:
+        return True  # Legacy movie mode requires an independently verified film title.
+    return (identity.kind is EpisodeKind.SPECIAL
+            and identity.special_markers == ('non_regular_media',)
+            and bool(re.search(r'(?<!\w)(?:movie|film)(?!\w)|劇場版|剧场版', identity.raw_title, re.I))
+            and not re.search(r'(?<!\w)(?:PV|OP|ED|trailer|preview)(?!\w)|予告', identity.raw_title, re.I))
+
+
 def _is_exact_regular_episode(
     item: ClassifiedCandidate, requested_episode: int | None
 ) -> bool:
-    if item.identity.kind is not EpisodeKind.REGULAR or item.identity.episode is None:
+    if (item.identity.kind is not EpisodeKind.REGULAR or item.identity.episode is None
+        or (item.identity.decision or {}).get('status') == 'conflict'):
         return False
     if not _in_requested_season(item):
         return False
@@ -1551,6 +1623,7 @@ def _quality_filter(
     movie_mode = bool(getattr(args, "movie", False))
     unit_label = "GiB total" if movie_mode else "GiB/episode"
     for item in candidates:
+        reason_start = len(item.candidate.reasons)
         comparable = (
             nyaa.bytes_to_gib(item.candidate.size_bytes)
             if movie_mode and item.candidate.size_bytes is not None
@@ -1563,23 +1636,31 @@ def _quality_filter(
                 if movie_mode
                 else "actual single-episode size is unavailable"
             )
+            if ACTIVE_RUN.get():
+                ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'rejected', item.candidate.reasons[reason_start:])
             continue
         if policy.hard_min_gib is not None and comparable < policy.hard_min_gib:
             counts["below_min_count"] += 1
             item.candidate.reasons.append(
                 f"below hard size minimum: {comparable:.2f} < {policy.hard_min_gib:.2f} {unit_label}"
             )
+            if ACTIVE_RUN.get():
+                ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'rejected', item.candidate.reasons[reason_start:])
             continue
         if policy.hard_max_gib is not None and comparable > policy.hard_max_gib:
             counts["above_max_count"] += 1
             item.candidate.reasons.append(
                 f"above hard size maximum: {comparable:.2f} > {policy.hard_max_gib:.2f} {unit_label}"
             )
+            if ACTIVE_RUN.get():
+                ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'rejected', item.candidate.reasons[reason_start:])
             continue
         item.candidate.reasons.append(
             f"meets {policy.source} size policy at {comparable:.2f} {unit_label}"
         )
         kept.append(item)
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'quality_passed_detail_pending')
     return kept, counts
 
 
@@ -2135,7 +2216,15 @@ def _latest_regular(items: list[ClassifiedCandidate]) -> list[ClassifiedCandidat
     if not ordered:
         return []
     latest_episode = ordered[0].identity.episode
-    return [item for item in ordered if item.identity.episode == latest_episode]
+    # Never fall back to an older episode when a newer observation is ambiguous.
+    if any(item.identity.kind is EpisodeKind.REGULAR for item in ordered) and not any(
+        item.identity.episode == latest_episode
+        and item.identity.episode_confidence is Confidence.EXPLICIT
+        for item in ordered
+    ):
+        return []
+    return [item for item in ordered if item.identity.episode == latest_episode
+            and (item.identity.kind is not EpisodeKind.REGULAR or item.identity.episode_confidence is Confidence.EXPLICIT)]
 
 
 def _observed_target_max_gib(
@@ -2284,7 +2373,69 @@ def _direct_candidate_from_page(
     return candidate, None
 
 
-def search_release_report(
+def search_release_report(args, intent=SearchIntent.SEASON_BROWSE, requested_episode=None,
+                          include_specials=False, cache_path=None, refresh_cache=False,
+                          context=None, client=None):
+    intent = SearchIntent(intent)
+    if intent is SearchIntent.LATEST_REGULAR:
+        args = argparse.Namespace(**vars(args))
+        args.episode = None
+        requested_episode = None
+        args.intent = intent.value
+    titles = tuple(filter(None, (context.canonical_title,*context.aliases,*context.search_titles))) if context else tuple([args.query,*args.alias])
+    run = SearchRun(intent.value,plan_queries([args.query,*args.alias],intent.value,
+                   requested_episode if requested_episode is not None else args.episode,normalize_season_number(args.season)))
+    rt,tt = ACTIVE_RUN.set(run),TITLE_CONTEXT.set(titles)
+    try:
+        report = _search_release_impl(args,intent,requested_episode,include_specials,cache_path,refresh_cache,
+                                      context,RecordingClient(client or DEFAULT_NYAA_CLIENT,run))
+        if report.search_run is not None:
+            # A cache-refresh subrun has its own context; retain both histories.
+            child = report.search_run
+            run.requests.extend(r for r in child.requests if r not in run.requests)
+            run.identities.update(child.identities)
+            run.eligibility.extend(child.eligibility)
+        run.ingest_requests()
+        run.errors = list(report.failures)
+        if report.failures:
+            run.completeness = 'partial'
+        observations = [int(Decimal(d['episode'])) for d in run.identities.values()
+                        if d.get('episode') is not None and Decimal(d['episode']) == Decimal(d['episode']).to_integral_value()
+                        and d.get('kind') == 'regular' and d.get('work') != 'related_work'
+                        and d.get('season_match') in {'match','not_requested'}]
+        confirmed = report.requested_episode
+        if intent is SearchIntent.LATEST_REGULAR and report.status == 'latest_unresolved':
+            confirmed = None
+        run.target = TargetDecision(max(observations,default=None),confirmed,
+             'confirmed' if confirmed is not None else 'unresolved',
+             'verified_release_identity' if intent is SearchIntent.LATEST_REGULAR else 'requested_episode',
+             [rid for rid,d in run.identities.items() if d.get('status') in {'unresolved','conflict'}])
+        accepted = {x.candidate.url for x in report.selected}
+        choices = {x.candidate.url:x for x in report.choices}
+        prior = {d.release_id:d for d in run.eligibility}
+        run.eligibility = []
+        for raw in run.raw_candidates:
+            rid = raw['release_id']
+            ident = run.identities.get(rid,{})
+            if rid in accepted:
+                decision = EligibilityDecision(rid,'qualified')
+            elif rid in prior:
+                decision = prior[rid]
+            elif rid in choices:
+                decision = EligibilityDecision(rid,'review_required',list(choices[rid].candidate.reasons))
+            elif ident.get('status') != 'confirmed':
+                decision = EligibilityDecision(rid,'identity_unresolved',ident.get('conflicts',[]))
+            else:
+                decision = EligibilityDecision(rid,'not_selected',['outside_target_or_reviewed_candidate'])
+            run.eligibility.append(decision)
+        report.search_run = run
+        return report
+    finally:
+        TITLE_CONTEXT.reset(tt)
+        ACTIVE_RUN.reset(rt)
+
+
+def _search_release_impl(
     args: argparse.Namespace,
     intent: SearchIntent | str = SearchIntent.SEASON_BROWSE,
     requested_episode: int | None = None,
@@ -2302,6 +2453,8 @@ def search_release_report(
     raw, failures, cache_state = collect_raw_candidates(
         args, cache_path, refresh_cache, client
     )
+    if ACTIVE_RUN.get():
+        ACTIVE_RUN.get().add_raw(raw)
     candidate_source = _raw_candidate_source(args)
     rss_failure_count = len(failures)
     queries = list(dict.fromkeys([args.query, *args.alias]))
@@ -2331,6 +2484,35 @@ def search_release_report(
             cache=cache_state,
         )
 
+    if intent is SearchIntent.LATEST_REGULAR and requested_episode is None:
+        # Establish latest from the complete ordinary query set before pinning;
+        # the reviewed ID and its quality cannot redefine the target episode.
+        latest_items = _classify(raw, requested_season, context)
+        latest = _latest_regular([
+            item for item in latest_items
+            if item.identity.kind is EpisodeKind.REGULAR
+            and _in_requested_season(item)
+            and (context is None or item.work_match != "unknown")
+            and (item.identity.decision or {}).get('status') != 'conflict'
+        ])
+        latest_number = latest[0].identity.episode if latest else None
+        conflicts = [item for item in latest_items if _in_requested_season(item)
+                     and (context is None or item.work_match != 'unknown')
+                     and (item.identity.decision or {}).get('status')=='conflict'
+                     and item.identity.kind not in {EpisodeKind.SPECIAL,EpisodeKind.BATCH}
+                     and (latest_number is None or any(Decimal(e['value']) > latest_number
+                          for e in item.identity.decision['evidence'] if e.get('field')=='episode' and e.get('value')))]
+        if failures or not latest or conflicts:
+            return ReleaseSearchReport(
+                intent=intent, requested_season=requested_season, requested_episode=None,
+                status="latest_unresolved", selected=[], choices=[],
+                diagnostics={"raw_count": len(raw), "queries": queries,
+                             "rss_failure_count": rss_failure_count,
+                             "candidate_id_filter": sorted(requested_candidate_ids)},
+                failures=failures, cache=cache_state,
+            )
+        requested_episode = int(latest[0].identity.episode)
+
     direct_fetched_ids: list[str] = []
     direct_mismatches: dict[str, str] = {}
     direct_not_found: list[str] = []
@@ -2347,7 +2529,9 @@ def search_release_report(
             for candidate in rss_matches
             if (candidate_id := nyaa.nyaa_id_from_url(candidate.url)) is not None
         }
-        missing_ids = sorted(requested_candidate_ids - rss_ids)
+        # A reviewed ID is a selection, not permission to trust cached metadata.
+        # Always refetch its detail identity before delivery; never fall back to RSS.
+        missing_ids = sorted(requested_candidate_ids)
         direct_candidates: list[nyaa.Candidate] = []
         if missing_ids:
             with ThreadPoolExecutor(max_workers=min(5, len(missing_ids))) as executor:
@@ -2371,7 +2555,9 @@ def search_release_report(
                             direct_not_found.append(candidate_id)
                         else:
                             direct_failures.append(f"{candidate_id}: {exc}")
-        raw = _merge_candidates(rss_matches, direct_candidates)
+        raw = direct_candidates
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().add_raw(raw)
         if not raw:
             if direct_mismatches and not direct_failures:
                 status = "candidate_id_title_mismatch"
@@ -2403,6 +2589,11 @@ def search_release_report(
         failures = [*failures, *direct_failures]
 
     classified = _classify(raw, requested_season, context)
+    if intent is SearchIntent.LATEST_REGULAR and requested_episode is not None and candidate_id_values:
+        if any(_in_requested_season(item) and item.identity.kind is EpisodeKind.REGULAR
+               and item.identity.episode is not None and item.identity.episode > requested_episode for item in classified):
+            return ReleaseSearchReport(intent,requested_season,None,'latest_unresolved',[],[],
+                {'raw_count':len(raw),'detail_latest_conflict':True},failures,cache_state)
     _apply_trusted_cjk_first_season(
         classified, args, requested_season, requested_episode
     )
@@ -2415,7 +2606,7 @@ def search_release_report(
         item for item in in_season if item.identity.kind in {EpisodeKind.UNKNOWN, EpisodeKind.BATCH}
     ]
     movie_candidates = [
-        item for item in in_season if item.identity.kind is EpisodeKind.UNKNOWN
+        item for item in in_season if _is_movie_identity(item.identity)
     ]
     diagnostics: dict[str, Any] = {
         "raw_count": len(classified),
@@ -2469,17 +2660,25 @@ def search_release_report(
     if (
         requested_episode is not None
         and not exact_regular
-        and parse_is_uncertain
         and intent is not SearchIntent.SEASON_BROWSE
         and not candidate_id_values
     ):
         fallback_args = _targeted_fallback_args(args, requested_season, requested_episode)
+        if context:
+            chinese = [t for t in (context.canonical_title,*context.aliases) if t and re.search(r'[\u3400-\u9fff]',t)
+                       and not re.search(r'[\u3040-\u30ff]',t)]
+            fallback_args.alias.extend(f'{t} {requested_episode:02d}' for t in list(dict.fromkeys(chinese))[:2])
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().query_plan.extend({'query':q,'lane':'exact_fallback','basis':'verified_alias_and_requested_episode'}
+                for q in [fallback_args.query,*fallback_args.alias])
         fallback_raw, fallback_failures, fallback_cache = collect_raw_candidates(
             fallback_args, cache_path, refresh_cache, client
         )
         failures.extend(fallback_failures)
         rss_failure_count += len(fallback_failures)
         raw = _merge_candidates(raw, fallback_raw)
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().add_raw(raw)
         classified = _classify(raw, requested_season, context)
         _apply_trusted_cjk_first_season(
             classified, args, requested_season, requested_episode
@@ -2493,7 +2692,7 @@ def search_release_report(
             item for item in in_season if item.identity.kind in {EpisodeKind.UNKNOWN, EpisodeKind.BATCH}
         ]
         movie_candidates = [
-            item for item in in_season if item.identity.kind is EpisodeKind.UNKNOWN
+            item for item in in_season if _is_movie_identity(item.identity)
         ]
         diagnostics.update(
             {
@@ -2530,34 +2729,22 @@ def search_release_report(
             item
             for item in regular
             if _is_exact_regular_episode(item, requested_episode)
+            and item.identity.episode_confidence is Confidence.EXPLICIT
         ]
     elif intent is SearchIntent.LATEST_REGULAR:
         target_candidates = _latest_regular(regular)
+        diagnostics["identity_unconfirmed_count"] = sum(
+            item.identity.episode_confidence is not Confidence.EXPLICIT for item in regular
+        )
+        diagnostics["latest_identity_unresolved"] = bool(regular and not target_candidates)
     else:
         target_candidates = regular
-
-    if intent is SearchIntent.LATEST_REGULAR and specials and not include_specials:
-        choices = _rank(
-            _latest_regular(regular)[:1] + _latest_regular(specials)[:1],
-            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
-        )
-        return ReleaseSearchReport(
-            intent=intent,
-            requested_season=requested_season,
-            requested_episode=requested_episode,
-            status="needs_confirmation",
-            selected=[],
-            choices=choices,
-            diagnostics=diagnostics,
-            failures=failures,
-            cache=cache_state,
-        )
 
     if include_specials and specials:
         target_candidates = _latest_regular(specials)
 
     unconfirmed_work_candidates: list[ClassifiedCandidate] = []
-    if getattr(args, "require_zh", False) and context is not None:
+    if context is not None:
         unconfirmed_work_candidates = [
             item for item in target_candidates if item.work_match == "unknown"
         ]
@@ -2569,7 +2756,7 @@ def search_release_report(
 
     if not target_candidates:
         choices = _rank(
-            (unconfirmed_work_candidates + specials + unknown_identity + unknown_season)[:2],
+            unconfirmed_work_candidates + specials + unknown_identity + unknown_season,
             prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
         )
         if choices:
@@ -2578,6 +2765,8 @@ def search_release_report(
             status = "no_nyaa_release_for_target"
         else:
             status = "latest_unresolved" if intent is SearchIntent.LATEST_REGULAR else "no_nyaa_release_for_target"
+        if rss_failure_count and status != "needs_confirmation":
+            status = "network_error"
         return ReleaseSearchReport(
             intent=intent,
             requested_season=requested_season,
@@ -2590,6 +2779,13 @@ def search_release_report(
             cache=cache_state,
         )
 
+    diagnostics["target_candidate_count"] = len(target_candidates)
+    if rss_failure_count and intent is SearchIntent.LATEST_REGULAR and requested_episode is None:
+        return ReleaseSearchReport(
+            intent=intent, requested_season=requested_season, requested_episode=requested_episode,
+            status="latest_unresolved", selected=[], choices=[], diagnostics=diagnostics,
+            failures=failures, cache=cache_state,
+        )
     qualified, size_counts = _quality_filter(target_candidates, args, size_policy)
     diagnostics.update(size_counts)
     diagnostics["quality_rejected_count"] = sum(size_counts.values())
@@ -2598,12 +2794,12 @@ def search_release_report(
             intent=intent,
             requested_season=requested_season,
             requested_episode=requested_episode,
-            status="release_unqualified",
+            status="network_error" if rss_failure_count else "release_unqualified",
             selected=[],
             choices=_rank(
                 target_candidates,
                 prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
-            )[:2],
+            ),
             diagnostics=diagnostics,
             failures=failures,
             cache=cache_state,
@@ -2615,7 +2811,7 @@ def search_release_report(
     )
     detail_inspection = _inspect_details(selected, args, client)
     diagnostics.update(detail_inspection.as_diagnostics())
-    failures.extend(detail_inspection.failures[:2])
+    failures.extend(detail_inspection.failures)
     if getattr(args, "require_zh", False):
         if getattr(args, "trust_cjk_title_for_zh", False):
             trusted = [

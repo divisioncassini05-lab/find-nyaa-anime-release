@@ -1,14 +1,14 @@
 # Quality, Ranking, and Diagnostics
 
-Use this reference only for unusual quality disputes, batch math, downgrade decisions, or a structured diagnostic. Ordinary requests use `scripts/find_anime_release.py` once.
+Use this reference only for unusual quality disputes, batch math, downgrade decisions, or a structured diagnostic. Use the entrypoint table in SKILL.md for discovery and reviewed-ID finalization. The automatic tier fallback rules below apply only to unpinned high-level searches; `--candidate-id` finalization keeps the supplied tier and constraints.
 
 ## Search Budget
 
-- The high-level path resolves at most two non-redundant, Nyaa-friendly titles. Unconstrained/latest discovery uses RSS recency; a known episode, complete season, premium tier, explicit size range, or trusted Chinese-title lane uses Nyaa's native HTML `s=size&o=desc` search.
-- A size-driven search reads a bounded descending window of at most three pages per query and normally stops on the first page containing an in-range target. It never downloads every result and sorts the full history locally. Local work, season, episode, subtitle, and hard-size checks remain mandatory.
+- The high-level path uses at most three verified broad query titles. Latest discovery retains episode-free RSS recency queries even when a schedule predicts an episode; exact episodes, complete seasons, premium tiers, explicit bounds and trusted Chinese-title lanes use the bounded HTML size-sorted lane.
+- A size-sorted lane reads at most three pages per query and stops on an exhausted page, not on a quality match or floor. The complete collected window is retained before quality decisions. Report the query/page scope and coverage notes; a bounded search does not prove global absence.
 - Raw RSS or size-sorted listing items are cached briefly and rescored/reclassified under every new season, episode, and size policy. Final "no result" conclusions are not cached as facts.
-- Schedule metadata is cached briefly for latest/next checks. Use `--refresh-cache` only when the user explicitly asks for a fresh check or supplies current Nyaa evidence that contradicts the report.
-- A single exact fallback query is allowed only when raw candidates are present but their season/episode parsing is uncertain. Never broaden blindly across aliases or browse manually after a conclusive report.
+- Schedule metadata is cached briefly for latest/next checks. Use `--refresh-cache` for an explicitly fresh check, contradictory current evidence, or the single cached-negative refresh / scheduled retry defined in [failure recovery](failure-recovery.md).
+- If no exact target is confirmed, the bounded fallback uses explicit seasonal/episode and bare episode formats, plus independently verified Chinese-title variants when available. Query and failure records remain visible; do not invent aliases or numeric offsets.
 
 ## Tiers and Size Floors
 
@@ -57,9 +57,10 @@ Rank qualified candidates by requested quality, then swarm strength, original au
 - `no_complete_season_release` means inspected packages were partial, wrong-season, special-only, or otherwise failed complete regular coverage.
 - `season_check_incomplete` means a plausible package could not be verified because its detail page, file list, or file identity remained unavailable or ambiguous.
 - `no_nyaa_release_for_target` means no regular candidate matched the target after parsing, not that a regex hid it.
+- Partial query failure takes precedence over a negative candidate/quality conclusion: return `network_error` with the surviving rejection diagnostics. A latest discovery with partial query coverage remains `latest_unresolved` and cannot be enqueued.
 - `subtitle_unqualified` means every size-qualified candidate was checked successfully and none had verified Chinese subtitles.
 - `subtitle_check_incomplete` means the detail budget expired, a request failed, a URL was unavailable, or candidates remain unchecked. Do not state that no Chinese release exists.
 - `needs_quality_fallback_confirmation` means a hard-Chinese request can only be met by dropping from **普通观看** to **轻量观看**. Do not expose the fallback magnet before approval.
 - `needs_quality_upgrade_confirmation` means normal and lightweight complete-season checks failed but a verified premium package exists. Do not expose its page or magnet before approval.
 - `needs_confirmation` means special/batch/unknown parsing makes a definitive choice unsafe. Present at most two choices and their parsed identity.
-- `latest_unresolved` means an official airing target was unavailable; do not phrase the observed candidate as official latest.
+- `latest_unresolved` means release-based latest cannot be confirmed due to identity ambiguity or incomplete query evidence. A missing official schedule alone does not imply it. Keep official airing evidence separate from observed resource publication.

@@ -23,6 +23,11 @@ TORRENT_HASH = hashlib.sha1(INFO_DICT).hexdigest()
 TORRENT_MAGNET = f"magnet:?xt=urn:btih:{TORRENT_HASH}&dn=fixture"
 
 
+def resume_data(info_hash: str) -> bytes:
+    return (b"d11:file-format22:libtorrent resume file9:info-hash20:"
+            + bytes.fromhex(info_hash) + b"e")
+
+
 class FakeResponse:
     def __init__(self, data: bytes) -> None:
         self.data = data
@@ -38,6 +43,110 @@ class FakeResponse:
 
 
 class QbittorrentSubmitTests(unittest.TestCase):
+    def test_tasklist_denied_falls_back_to_process_enumeration(self) -> None:
+        executable = Path("qbittorrent.exe")
+        with (
+            patch.object(qbt.os, "name", "nt"),
+            patch.object(qbt.subprocess, "run", side_effect=[
+                Mock(returncode=1, stdout="", stderr="Access denied"),
+                Mock(returncode=0),
+            ]) as run,
+        ):
+            self.assertTrue(qbt.qbittorrent_process_running(executable))
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("GetProcessesByName('qbittorrent')", run.call_args.args[0][-1])
+
+    def test_fallback_can_confirm_process_absent(self) -> None:
+        executable = Path("qbittorrent.exe")
+        with (
+            patch.object(qbt.os, "name", "nt"),
+            patch.object(qbt.subprocess, "run", side_effect=[
+                Mock(returncode=1, stdout=""), Mock(returncode=1),
+            ]),
+        ):
+            self.assertFalse(qbt.qbittorrent_process_running(executable))
+
+    def test_failed_process_probes_are_not_reported_as_absent(self) -> None:
+        executable = Path("qbittorrent.exe")
+        with (
+            patch.object(qbt.os, "name", "nt"),
+            patch.object(qbt.subprocess, "run", side_effect=[
+                Mock(returncode=1, stdout=""), Mock(returncode=2),
+            ]),
+            patch.object(qbt, "_launch") as launch,
+        ):
+            with self.assertRaises(qbt.SubmissionError) as raised:
+                qbt.ensure_qbittorrent_ready(executable)
+        self.assertEqual(raised.exception.code, "process_probe_failed")
+        launch.assert_not_called()
+
+    def test_tasklist_timeout_uses_fallback(self) -> None:
+        executable = Path("qbittorrent.exe")
+        with (
+            patch.object(qbt.os, "name", "nt"),
+            patch.object(qbt.subprocess, "run", side_effect=[
+                qbt.subprocess.TimeoutExpired("tasklist", 5), Mock(returncode=0),
+            ]),
+        ):
+            self.assertTrue(qbt.qbittorrent_process_running(executable))
+
+    def test_successful_tasklist_does_not_use_fallback(self) -> None:
+        executable = Path("qbittorrent.exe")
+        with (
+            patch.object(qbt.os, "name", "nt"),
+            patch.object(qbt.subprocess, "run", return_value=Mock(
+                returncode=0, stdout='"qbittorrent.exe","1234"',
+            )) as run,
+        ):
+            self.assertTrue(qbt.qbittorrent_process_running(executable))
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs["errors"], "replace")
+
+    def test_missing_tasklist_output_does_not_crash_failure_diagnostics(self) -> None:
+        executable = Path("qbittorrent.exe")
+        with (
+            patch.object(qbt.os, "name", "nt"),
+            patch.object(qbt.subprocess, "run", side_effect=[
+                Mock(returncode=0, stdout=None), Mock(returncode=1),
+            ]),
+        ):
+            self.assertFalse(qbt.qbittorrent_process_running(executable))
+
+    def test_zero_exit_without_client_is_diagnostic_not_generic_timeout(self) -> None:
+        elapsed = [0.0]
+        process = Mock()
+        process.poll.return_value = 0
+        with (
+            patch.object(qbt, "qbittorrent_process_running", return_value=False),
+            patch.object(qbt, "_launch", return_value=process),
+            patch.object(qbt.time, "monotonic", side_effect=lambda: elapsed[0]),
+            patch.object(qbt.time, "sleep", side_effect=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds)),
+        ):
+            with self.assertRaises(qbt.SubmissionError) as raised:
+                qbt.ensure_qbittorrent_ready(Path("qbittorrent.exe"))
+        self.assertLess(elapsed[0], 4)
+        report = raised.exception.as_report()
+        self.assertEqual(report["error_code"], "startup_exited_without_client")
+        self.assertIsNone(report["retryable"])
+        self.assertFalse(report["ok"])
+
+    def test_zero_exit_with_visible_existing_client_can_finish_startup(self) -> None:
+        process = Mock()
+        process.poll.return_value = 0
+        with (
+            patch.object(qbt, "qbittorrent_process_running", side_effect=[False, True]),
+            patch.object(qbt, "_launch", return_value=process),
+        ):
+            report = qbt.ensure_qbittorrent_ready(Path("qbittorrent.exe"), settle_seconds=0)
+        self.assertTrue(report["client_started"])
+
+    def test_permission_denial_is_not_a_transient_network_failure(self) -> None:
+        with patch.object(qbt.subprocess, "Popen", side_effect=PermissionError("denied")):
+            with self.assertRaises(qbt.SubmissionError) as raised:
+                qbt._launch(["qbittorrent.exe"])
+        self.assertEqual(raised.exception.code, "permission_denied")
+        self.assertFalse(raised.exception.retryable)
+
     def test_extracts_hex_and_base32_btih(self) -> None:
         self.assertEqual(qbt.extract_btih(MAGNET), INFO_HASH)
         encoded = base64.b32encode(bytes.fromhex(INFO_HASH)).decode("ascii")
@@ -92,7 +201,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
             executable.touch()
             backup = root / "backup"
             backup.mkdir()
-            (backup / f"{INFO_HASH}.fastresume").touch()
+            (backup / f"{INFO_HASH}.fastresume").write_bytes(resume_data(INFO_HASH))
             with patch.object(qbt.subprocess, "Popen") as popen:
                 report = qbt.submit_magnet(
                     MAGNET,
@@ -104,7 +213,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
         self.assertEqual(report["status"], "already_present")
         popen.assert_not_called()
 
-    def test_zero_exit_is_an_accepted_handoff(self) -> None:
+    def test_zero_exit_without_task_evidence_is_not_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             executable = root / "qbittorrent.exe"
@@ -118,23 +227,50 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     return_value={"client_was_running": True, "client_started": False},
                 ),
                 patch.object(qbt.subprocess, "Popen", return_value=process),
+                patch.object(qbt, "qbittorrent_process_running", return_value=True),
             ):
-                report = qbt.submit_magnet(
-                    MAGNET,
-                    executable=executable,
-                    save_path=root / "downloads",
-                    backup_dir=root / "backup",
-                    wait_seconds=0,
-                )
+                with self.assertRaises(qbt.SubmissionError) as raised:
+                    qbt.submit_magnet(
+                        MAGNET,
+                        executable=executable,
+                        save_path=root / "downloads",
+                        backup_dir=root / "backup",
+                        wait_seconds=0,
+                    )
 
-        self.assertEqual(report["status"], "submitted")
-        self.assertTrue(report["ok"])
+        report = raised.exception.as_report()
+        self.assertEqual(report["error_code"], "handoff_unverified")
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["info_hash"], INFO_HASH)
+        self.assertEqual(report["launches"][0]["launch_returncode"], 0)
+        self.assertFalse(report["acceptance_evidence"]["fastresume_valid"])
 
     def test_nyaa_page_is_converted_to_torrent_download(self) -> None:
         self.assertEqual(
             qbt.nyaa_torrent_url("https://nyaa.si/view/2141829"),
             "https://nyaa.si/download/2141829.torrent",
         )
+
+    def test_unverified_torrent_handoff_does_not_claim_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executable = root / "qbittorrent.exe"
+            executable.touch()
+            process = Mock()
+            process.poll.return_value = 0
+            with (
+                patch.object(qbt, "urlopen", return_value=FakeResponse(TORRENT_DATA)),
+                patch.object(qbt, "ensure_qbittorrent_ready", return_value={}),
+                patch.object(qbt, "_launch", return_value=process),
+            ):
+                with self.assertRaises(qbt.SubmissionError) as raised:
+                    qbt.submit_magnet(
+                        TORRENT_MAGNET, source_url="https://nyaa.si/view/2141829",
+                        executable=executable, save_path=None,
+                        backup_dir=root / "backup", wait_seconds=0,
+                    )
+        self.assertEqual(raised.exception.code, "handoff_unverified")
+        self.assertNotIn("accepted the torrent", str(raised.exception))
 
     def test_torrent_metadata_is_preferred_and_verified(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,7 +279,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
             executable.touch()
             backup = root / "backup"
             backup.mkdir()
-            (backup / f"{TORRENT_HASH}.fastresume").touch()
+            (backup / f"{TORRENT_HASH}.fastresume").write_bytes(resume_data(TORRENT_HASH))
 
             def accept_torrent(command: list[str], **_: object) -> Mock:
                 submitted = Path(command[-1])
@@ -194,7 +330,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 nonlocal elapsed
                 elapsed += seconds
                 if elapsed >= 9.0:
-                    (backup / f"{TORRENT_HASH}.fastresume").touch()
+                    (backup / f"{TORRENT_HASH}.fastresume").write_bytes(resume_data(TORRENT_HASH))
                     (backup / f"{TORRENT_HASH}.torrent").write_bytes(TORRENT_DATA)
 
             with (
@@ -240,7 +376,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     return startup_process
                 submitted = Path(command[-1])
                 self.assertEqual(submitted.read_bytes(), TORRENT_DATA)
-                (backup / f"{TORRENT_HASH}.fastresume").touch()
+                (backup / f"{TORRENT_HASH}.fastresume").write_bytes(resume_data(TORRENT_HASH))
                 (backup / f"{TORRENT_HASH}.torrent").write_bytes(TORRENT_DATA)
                 return submission_process
 
@@ -287,7 +423,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 nonlocal launches
                 launches += 1
                 if launches == 2:
-                    (backup / f"{TORRENT_HASH}.fastresume").touch()
+                    (backup / f"{TORRENT_HASH}.fastresume").write_bytes(resume_data(TORRENT_HASH))
                     (backup / f"{TORRENT_HASH}.torrent").write_bytes(TORRENT_DATA)
                 return process
 

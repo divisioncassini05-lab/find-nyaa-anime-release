@@ -83,24 +83,11 @@ def search_args() -> argparse.Namespace:
     )
 
 
-class SkillContractTests(unittest.TestCase):
-    def test_untracked_current_anime_uses_first_search_finalization(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        skill_text = (root / "SKILL.md").read_text(encoding="utf-8")
-        state_text = (root / "references" / "airing-watch-state.md").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("First-search finalization for an untracked current anime", skill_text)
-        self.assertIn('find_anime_release.py "USER TITLE" --episode 4', skill_text)
-        self.assertIn("state_update: advanced", skill_text)
-        self.assertIn("state_update: tracked_waiting", skill_text)
-        self.assertIn("use those titles as the ordinary Nyaa queries first", skill_text)
-        self.assertIn("omit the broad Chinese display title from that lane", state_text)
-        self.assertIn("Do not use low-level `record-found` to create an untracked title", state_text)
-        self.assertIn("bare-title Codex cron/automation is automatic-download intent", skill_text)
-        self.assertIn("--enqueue-qbittorrent", skill_text)
-        self.assertIn("accepting a result without enqueueing is an incomplete scheduled run", state_text)
+def detail_for_candidate(item, description=''):
+    from nyaa_client import NyaaRelease, NyaaReleaseDetail
+    rid=nyaa.nyaa_id_from_url(item.url)
+    return NyaaReleaseDetail(NyaaRelease(rid,item.title,item.category,item.size,item.size_bytes,
+        item.published,None,item.seeders,item.leechers,item.downloads,item.url,f'{int(rid):040x}'),description,())
 
 
 def rss_item(title: str, size: str, seeders: int) -> dict[str, str]:
@@ -938,7 +925,7 @@ class SearchReportTests(unittest.TestCase):
         self.assertEqual(report.status, "found")
         detail_fetch.assert_not_called()
 
-    def test_special_conflict_requires_confirmation(self) -> None:
+    def test_special_is_excluded_from_latest_regular(self) -> None:
         self.mock_collect.return_value = (
             [
                 candidate("[A] Re:ZERO 4th season - 11.5 SP01 [1080p]", "1.4 GiB", 500),
@@ -950,9 +937,10 @@ class SearchReportTests(unittest.TestCase):
         report = core.search_release_report(
             self.args, core.SearchIntent.LATEST_REGULAR, requested_episode=12
         )
-        self.assertEqual(report.status, "needs_confirmation")
-        self.assertEqual(len(report.choices), 2)
-        self.assertEqual(report.selected, [])
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.requested_episode, 12)
+        self.assertEqual(len(report.selected), 1)
+        self.assertEqual(report.selected[0].identity.kind, EpisodeKind.REGULAR)
 
     def test_existing_but_small_release_is_not_missing(self) -> None:
         self.mock_collect.return_value = (
@@ -1659,6 +1647,7 @@ class HybridWorkflowTests(unittest.TestCase):
                 "collect_raw_candidates",
                 return_value=([release], [], "fixture"),
             ) as collect,
+            patch.object(core.DEFAULT_NYAA_CLIENT, 'get', return_value=detail_for_candidate(release)),
             contextlib.redirect_stdout(output),
         ):
             code = nyaa.main(
@@ -1727,6 +1716,7 @@ class HybridWorkflowTests(unittest.TestCase):
                     "fixture",
                 ),
             ) as collect,
+            patch.object(core.DEFAULT_NYAA_CLIENT, 'get', return_value=detail_for_candidate(largest)),
             patch.object(nyaa, "fetch_nyaa_detail_text") as fetch_detail,
             contextlib.redirect_stdout(output),
         ):
@@ -1785,6 +1775,7 @@ class HybridWorkflowTests(unittest.TestCase):
                 "collect_raw_candidates",
                 return_value=([release], [], "fixture"),
             ) as collect,
+            patch.object(core.DEFAULT_NYAA_CLIENT, 'get', return_value=detail_for_candidate(release)),
             patch.object(nyaa, "fetch_nyaa_detail_text") as fetch_detail,
             contextlib.redirect_stdout(output),
         ):
@@ -2756,11 +2747,11 @@ class HybridWorkflowTests(unittest.TestCase):
                 args.detail_limit = 5
                 args.include_magnets = True
                 with patch.object(
-                    nyaa,
-                    "fetch_nyaa_detail_text",
-                    return_value=(
-                        "Subtitle languages: Simplified Chinese, Traditional Chinese"
-                    ),
+                    core.DEFAULT_NYAA_CLIENT,
+                    "get",
+                    return_value=detail_for_candidate(self.nyaa_candidate(
+                        release_title,'1.9 GiB',2135067,seeders=10),
+                        "Subtitle languages: Simplified Chinese, Traditional Chinese"),
                 ):
                     verified = core.search_release_report(
                         args,
@@ -2826,9 +2817,11 @@ class HybridWorkflowTests(unittest.TestCase):
                 return_value=(releases, [], "fixture"),
             ),
             patch.object(
-                nyaa,
-                "fetch_nyaa_detail_text",
-                return_value="Subtitle languages: Simplified Chinese",
+                core.DEFAULT_NYAA_CLIENT,
+                "get",
+                side_effect=lambda rid,**_: detail_for_candidate(
+                    next(r for r in releases if nyaa.nyaa_id_from_url(r.url)==str(rid)),
+                    "Subtitle languages: Simplified Chinese"),
             ) as details,
         ):
             report = core.search_release_report(
@@ -2838,7 +2831,8 @@ class HybridWorkflowTests(unittest.TestCase):
             )
         self.assertEqual(report.status, "found")
         self.assertEqual(report.selected[0].candidate.url, balanced_older.url)
-        details.assert_called_once_with(balanced_older.url, args.timeout)
+        self.assertEqual(details.call_count, 2)
+        self.assertEqual({c.args[0] for c in details.call_args_list}, {'2135586','2134348'})
 
     def test_skill_uses_one_candidate_fast_path_and_keeps_complex_shortlists(self) -> None:
         skill_text = (SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8")
@@ -2896,13 +2890,14 @@ class HybridWorkflowTests(unittest.TestCase):
             skill_text,
         )
         self.assertIn("--trust-cjk-title-for-zh", skill_text)
-        self.assertIn("--official-air-date", skill_text)
-        self.assertIn("--recent-since", skill_text)
-        self.assertIn("--recent-until", skill_text)
-        self.assertIn("--current-new-anime", skill_text)
-        self.assertIn("The seven-day rescue is failure-only.", skill_text)
+        self.assertIn("references/failure-recovery.md", skill_text)
+        recovery_text = (SCRIPTS.parent / "references" / "failure-recovery.md").read_text(encoding="utf-8")
+        self.assertIn("--official-air-date", recovery_text)
+        self.assertIn("--recent-since", recovery_text)
+        self.assertIn("--recent-until", recovery_text)
+        self.assertIn("--current-new-anime", recovery_text)
         self.assertIn("latest already available", skill_text.lower())
-        self.assertIn("the verifier reads `https://nyaa.si/view/ID` directly", skill_text)
+        self.assertIn("Every pinned finalization reads `https://nyaa.si/view/ID`", skill_text)
         self.assertNotIn("--min-gib-per-episode 0", skill_text)
 
     def test_candidate_id_rejects_multisub_only_and_hides_magnet(self) -> None:
@@ -2928,9 +2923,9 @@ class HybridWorkflowTests(unittest.TestCase):
                 return_value=([release], [], "fixture"),
             ),
             patch.object(
-                nyaa,
-                "fetch_nyaa_detail_text",
-                return_value="Subtitle languages: English, German, Russian; MultiSub",
+                core.DEFAULT_NYAA_CLIENT,
+                "get",
+                return_value=detail_for_candidate(release,"Subtitle languages: English, German, Russian; MultiSub"),
             ),
         ):
             report = core.search_release_report(
@@ -3073,7 +3068,7 @@ class HighLevelStateTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(
             payload["reply_text"],
-            "《Example》当前区间内没有合格资源，但有高于该区间的资源可选。",
+            "《Example》 S01E01当前区间内没有合格资源，但有高于该区间的资源可选。",
         )
         self.assertNotIn("Oversized", payload["reply_text"])
         self.assertNotIn("4.1 GiB", payload["reply_text"])
@@ -3806,6 +3801,8 @@ class HighLevelStateTests(unittest.TestCase):
                 },
             )
             output = io.StringIO()
+            profile = root / "qbit-profile"
+            backup = profile / "qBittorrent" / "BT_backup"
             accepted = {
                 "status": "submitted_verified",
                 "ok": True,
@@ -3825,6 +3822,11 @@ class HighLevelStateTests(unittest.TestCase):
                         "--include-magnet",
                         "--legal-ok",
                         "--enqueue-qbittorrent",
+                        "--qbittorrent-profile",
+                        str(profile),
+                        "--candidate-id", "123",
+                        "--qbittorrent-backup-dir",
+                        str(backup),
                         "--json",
                         "--state",
                         str(state_path),
@@ -3840,6 +3842,8 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertEqual(saved["watched_episode"], 5)
         self.assertEqual(saved["next_episode"], 6)
         submit.assert_called_once()
+        self.assertEqual(submit.call_args.kwargs["profile_path"], profile)
+        self.assertEqual(submit.call_args.kwargs["backup_dir"], backup)
 
     def test_enqueue_failure_does_not_advance_state(self) -> None:
         release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
@@ -3904,6 +3908,7 @@ class HighLevelStateTests(unittest.TestCase):
                         "--include-magnet",
                         "--legal-ok",
                         "--enqueue-qbittorrent",
+                        "--candidate-id", "123",
                         "--json",
                         "--state",
                         str(state_path),
@@ -3915,6 +3920,11 @@ class HighLevelStateTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(payload["status"], "download_enqueue_failed")
         self.assertEqual(payload["qbittorrent"]["status"], "error")
+        self.assertEqual(payload["availability"]["state"], "available_enqueue_failed")
+        self.assertEqual(payload["recovery"]["stage"], "client")
+        self.assertTrue(payload["recovery"]["release_confirmed"])
+        self.assertIsNone(payload["recovery"]["retry_basis"])
+        self.assertIn("S01E05", payload["reply_text"])
         self.assertEqual(payload["state_update"], "none")
         self.assertEqual(before, after)
 
@@ -4012,6 +4022,7 @@ class HighLevelStateTests(unittest.TestCase):
                         "--include-magnet",
                         "--legal-ok",
                         "--enqueue-qbittorrent",
+                        "--candidate-id", "123",
                         "--json",
                         "--state",
                         str(state_path),
@@ -4100,7 +4111,7 @@ class HighLevelStateTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(payload["status"], "release_unqualified")
         self.assertEqual(payload["target_episode"], None)
-        self.assertEqual(payload["availability"]["state"], "aired_no_release")
+        self.assertEqual(payload["availability"]["state"], "release_unqualified")
         self.assertEqual(payload["state_update"], "none")
         self.assertEqual(before, after)
 
@@ -4374,6 +4385,7 @@ class HighLevelStateTests(unittest.TestCase):
                 "--include-magnet",
                 "--legal-ok",
                 "--enqueue-qbittorrent",
+                "--candidate-id", "123",
                 "--json",
                 "--state",
                 str(state_path),
@@ -4983,6 +4995,7 @@ class HighLevelStateTests(unittest.TestCase):
                     "next_airing_context",
                     return_value=break_context,
                 ),
+                patch.object(finder.time, "time", return_value=1787889600),
                 patch.object(finder, "search_release_report") as search,
                 contextlib.redirect_stdout(output),
             ):

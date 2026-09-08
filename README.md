@@ -14,7 +14,7 @@
 
 你只需要用自然语言说明动画、季度、集数、画质或字幕要求。Skill 会解析作品身份，比较 Nyaa 候选，检查季集、体积、字幕和磁力，再把合格结果交给你。
 
-本项目以 **Codex 作为设计基准和完整测试环境**，下文也以 Codex 演示安装与使用。核心由 `SKILL.md` 和 Python 标准库脚本组成，不依赖 Codex 私有 API；其他能够读取自定义指令、运行本地命令并访问网络的 Agent 通常可以直接使用，或只需做少量路径与调用方式的兼容调整。
+本项目以 **Codex 作为设计基准和完整测试环境**，下文也以 Codex 演示安装与使用。核心由 `SKILL.md`、Python 脚本和随附解析器组成，不依赖 Codex 私有 API；其他能够读取自定义指令、运行本地命令并访问网络的 Agent 通常可以直接使用，或只需做少量路径与调用方式的兼容调整。
 
 ## 能做什么
 
@@ -135,7 +135,7 @@ flowchart LR
 - 能够访问 Nyaa 的网络环境
 - qBittorrent 仅在启用自动提交时需要；该部分主要在 Windows 上测试
 
-核心检索和追番脚本只使用 Python 标准库，不需要额外安装 Python 包。
+运行所需的 Aniparse、Anitopy 解析器源码已随 Skill 附带，通常不需要额外安装 Python 包。第三方组件及离线索引的来源和许可证见[第三方说明](skills/find-nyaa-anime-release/references/third-party-notices.md)。
 
 ## 测试
 
@@ -151,4 +151,4 @@ python -m unittest discover -s skills/find-nyaa-anime-release/tests -p "test_*.p
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE)（项目自身代码）。随附解析器和数据库分别适用其原有许可证，详见[第三方说明](skills/find-nyaa-anime-release/references/third-party-notices.md)。

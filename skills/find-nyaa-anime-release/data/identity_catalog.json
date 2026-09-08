@@ -1,0 +1,379 @@
+{
+  "version": 1,
+  "imported_at": "2026-09-07T13:04:36.337580+00:00",
+  "entries": [
+    {
+      "ids": {
+        "anidb": 13734,
+        "anilist": 100922,
+        "mal": 37105
+      },
+      "aliases": [
+        "Grand Blue",
+        "Büyük Mavi Rüya",
+        "Grand Blue Dreaming",
+        "Grandblue Dreaming",
+        "Необъятный океан",
+        "حلم الأزرق الكبير",
+        "ग्रैंड ब्लू ड्रीमिंग",
+        "கிராண்ட் ப்ளூ டிரீமிங்",
+        "గ్రాండ్ బ్లూ డ్రీమింగ్",
+        "ก๊วนป่วนชวนบุ๋งบุ๋ง",
+        "ก๊วนป่วนชวนบุ๋งๆ",
+        "ぐらんぶる",
+        "碧蓝之海",
+        "碧藍之海",
+        "그랑블루"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 19473,
+        "anilist": 196017,
+        "mal": 62051
+      },
+      "aliases": [
+        "Grow Up Show: Himawari no Circus-dan",
+        "GROW UP SHOW -Sunflower Circus-",
+        "Grow Up Show - Himawari no Circus-dan",
+        "Grow Up Show ~Himawari no Circus-dan~",
+        "Grow Up Show: Sunflower Circus",
+        "Grow Up Show: The Sunflower Circus Troupe",
+        "グロウアップショウ ~ひまわりのサーカス団~",
+        "グロウアップショウ ～ひまわりのサーカス団～"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 19189,
+        "anilist": 187260,
+        "mal": 61126
+      },
+      "aliases": [
+        "Kimi ga Shinu made Koi wo Shitai",
+        "I Want to Love You Till Your Dying Day",
+        "Je veux t’aimer jusqu’à ta mort",
+        "Kimi ga Shinu made Koi o Shitai",
+        "KimiShinu",
+        "Kimishinu",
+        "Love You Till You Die",
+        "My Wish Is to Fall in Love Until You Die.",
+        "kimi shinu",
+        "きみが死ぬまで恋をしたい",
+        "きみ死ぬ"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 19232,
+        "anilist": 188525,
+        "mal": 61280
+      },
+      "aliases": [
+        "Kore Kaite Shine",
+        "Draw This",
+        "Draw This, Then Die!",
+        "Draw this",
+        "Draw this, then die!",
+        "Then Die!",
+        "kore shine",
+        "then die!",
+        "これ描いて死ね",
+        "これ死ね"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 18652,
+        "anilist": 177699,
+        "mal": 58929
+      },
+      "aliases": [
+        "Koukaku Kidoutai (TV)",
+        "GITS 2026",
+        "Ghost in the Shell (2026)",
+        "Koukaku Kidoutai (2026)",
+        "Koukaku Kidoutai: THE GHOST IN THE SHELL",
+        "Koukaku Kidoutai: The Ghost in the Shell",
+        "Kōkaku Kidōtai (2026)",
+        "THE GHOST IN THE SHELL",
+        "The Ghost in the Shell",
+        "The Ghost in the Shell (2026)",
+        "攻殻機動隊",
+        "攻殻機動隊 (2026)",
+        "攻殻機動隊 THE GHOST IN THE SHELL",
+        "攻殻機動隊 （2026）",
+        "攻殻機動隊（仮）"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 18727,
+        "anilist": 178789,
+        "mal": 59193
+      },
+      "aliases": [
+        "Mushoku Tensei III: Isekai Ittara Honki Dasu",
+        "Jobless Reincarnation: It Will Be All Out If I Go to Another World 3",
+        "Mushoku Tensei : Jobless Reincarnation (Saison 3)",
+        "Mushoku Tensei III: Jobless Reincarnation",
+        "Mushoku Tensei S3",
+        "Mushoku Tensei Ⅲ: Isekai Ittara Honki Dasu",
+        "Mushoku Tensei: Isekai Ittara Honki Dasu 3",
+        "Mushoku Tensei: Isekai Ittara Honki Dasu 3rd Season",
+        "Mushoku Tensei: Jobless Reincarnation - Season 3",
+        "Mushoku Tensei: Jobless Reincarnation - Staffel 3",
+        "Mushoku Tensei: Jobless Reincarnation 3rd Season",
+        "Mushoku Tensei: Jobless Reincarnation Season 3",
+        "無職転生 III ～異世界行ったら本気だす～",
+        "無職転生 Ⅲ ～異世界行ったら本気だす～",
+        "無職転生 ～異世界行ったら本気だす～ 第3期",
+        "無職転生III ~異世界行ったら本気だす~",
+        "無職転生III ～異世界行ったら本気だす～",
+        "無職転生III～異世界行ったら本気だす～",
+        "無職転生Ⅲ ～異世界行ったら本気だす～"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 11370,
+        "anilist": 21355,
+        "mal": 31240
+      },
+      "aliases": [
+        "Re:Zero kara Hajimeru Isekai Seikatsu",
+        "Re Zero",
+        "Re Zero kara Hajimeru Isekai Seikatsu",
+        "Re: Life in a Different World from Zero",
+        "Re: Life in a different world from zero",
+        "Re: Zero",
+        "Re: Zero Kara Hajimeru Isekai Seikatsu",
+        "Re: Zero – Życie w innym świecie od zera",
+        "Re: Życie od zera w innym świecie",
+        "Re: ゼロから始める異世界生活",
+        "Re: 从零开始的异世界生活",
+        "Re: 제로부터 시작하는 이세계 생활",
+        "Re:ZERO - Começando uma Vida em Outro Mundo",
+        "Re:ZERO - Starting Life in Another World",
+        "Re:ZERO -Starting Life in Another World-",
+        "Re:ZERO: Starting Life in Another World",
+        "Re:Zero",
+        "Re:Zero - Empezar de cero en un mundo diferente",
+        "Re:Zero - Starting Life in Another World",
+        "Re:Zero -Empezar de cero en un mundo diferente-",
+        "Re:Zero -Starting Life in Another World-",
+        "Re:Zero Empezar de cero en un mundo diferente",
+        "Re:Zero kara Hajimeru Isekai Seikatsu Shin Henshuuban",
+        "Re:Zero รีเซทชีวิต ฝ่าวิกฤตต่างโลก",
+        "Re:Zero – Bắt đầu lại ở thế giới khác",
+        "Re:Zero –Starting Life in Another World–",
+        "Re:Zero — жизнь с нуля в другом мире",
+        "Re:Zero — жизнь с нуля в другом мире. Режиссёрская версия",
+        "Re:Zero. Жизнь с нуля в альтернативном мире",
+        "Re:ゼロから始める異世界生活",
+        "Re:ゼロから始める異世界生活 新編集版",
+        "ReZero",
+        "Re：ゼロから始める異世界生活",
+        "Re：从零开始的异世界生活",
+        "Re：從零開始的異世界生活",
+        "rezero",
+        "rizero",
+        "רי:זירו",
+        "רי:זירו - התחלת החיים בעולם אחר",
+        "بدء الحياة من الصفر في عالم آخر",
+        "รี:ซีโร่ รีเซทชีวิต ฝ่าวิกฤติต่างโลก",
+        "リゼロ",
+        "从零开始的异世界"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 18643,
+        "anilist": 177637,
+        "mal": 58878
+      },
+      "aliases": [
+        "Sayonara Lara",
+        "Goodbye",
+        "Goodbye, Lara",
+        "Lara",
+        "SayoLara",
+        "さよなら ララ",
+        "さよならララ",
+        "さよララ"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 14236,
+        "anilist": 103303
+      },
+      "aliases": [
+        "Sparks of Tomorrow",
+        "20 Seiki Denki Mokuroku",
+        "20 Seiki Denki Mokuroku: Eureka Evrika",
+        "20th Century Electricity Catalog",
+        "20th Century Electricity Catalogue",
+        "A Luz do Futuro",
+        "Destellos del mañana",
+        "Nijusseiki Denki Mokuroku: Eureka Evrika",
+        "Nijusseiki Denki Mokuroku: Eureka・Evrika",
+        "Nijuuseiki Denki Mokuroku",
+        "Nijuuseiki Denki Mokuroku -Eureka Evrika-",
+        "Nijuuseiki Denki Mokuroku: Eureka Evrika",
+        "Nijūseiki Denki Mokuroku: Eureka Evrika",
+        "Twentieth Century Electrical Records",
+        "Étincelles de demain",
+        "⼆⼗世紀電氣⽬録-ユーレカ・エヴリカ-",
+        "二十世紀電氣目録",
+        "二十世紀電氣目録-ユーレカ・エヴリカ-"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 19290,
+        "anilist": 190569,
+        "mal": 61483
+      },
+      "aliases": [
+        "Tenmaku no Jaadugar",
+        "A Witch's Life in Mongol",
+        "A Witch’s Life in Mongol",
+        "Jaadugar: A Witch in Mongolia",
+        "Jaadugar: Eine Hexe in der Mongolei",
+        "Tenmaku no Jadoogar",
+        "Tenmaku no Jadugar",
+        "Tenmaku no Jādugar",
+        "Tenmaku no Jādūgar",
+        "天幕のジャードゥーガル"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anilist": 207141,
+        "mal": 63403
+      },
+      "aliases": [
+        "Yani Neko",
+        "Chainsmoker Cat",
+        "Fumadora empedernida",
+        "ヤニねこ"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 19451,
+        "anilist": 195600,
+        "mal": 62001
+      },
+      "aliases": [
+        "Yomi no Tsugai",
+        "Daemons do Reino das Sombras",
+        "Daemons of The Shadow Realm",
+        "Daemons of the Shadow Realm",
+        "Das Band der Unterwelt",
+        "Espíritus del Inframundo",
+        "Espíritus del inframundo",
+        "Kontraduety z zaświatów",
+        "Pasangan dari Alam Baka",
+        "Tsugai : Daemons of the Shadow Realm",
+        "Tsugai of the Underworld",
+        "Yomi no Tsugai: Dúo del Inframundo",
+        "Yomi no Tsugai: Dúo del inframundo",
+        "YomiTsuga",
+        "ยมลแห่งยมโลก",
+        "ヨミツガ",
+        "黃泉使者",
+        "黄泉のツガイ",
+        "黄泉使者",
+        "황천의 츠가이"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    },
+    {
+      "ids": {
+        "anidb": 16392,
+        "anilist": 135865,
+        "mal": 49233
+      },
+      "aliases": [
+        "Youjo Senki II",
+        "Saga of Tanya the Evil : Saison 2",
+        "Saga of Tanya the Evil II",
+        "Saga of Tanya the Evil Season 2",
+        "Saga of Tanya the Evil: Season 2",
+        "Saga of Tanya the Evil: Staffel 2",
+        "Saga of Tanya the Evil: Stagione 2",
+        "Saga of Tanya the Evil: Temporada 2",
+        "The Military Chronicles of a Little Girl II",
+        "Youjo Senki 2",
+        "Youjo Senki 2nd Season",
+        "Yōjo Senki II",
+        "幼女戦記 II",
+        "幼女戦記II",
+        "幼女戦記Ⅱ"
+      ],
+      "type": "TV",
+      "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+      "updated_at": "2026-07-04",
+      "mappings": []
+    }
+  ],
+  "license": {
+    "name": "Open Data Commons Open Database License (ODbL) v1.0 + Database Contents License (DbCL) v1.0",
+    "url": "https://github.com/manami-project/anime-offline-database/blob/2026-27/LICENSE"
+  },
+  "license_source": "https://raw.githubusercontent.com/manami-project/anime-offline-database/96da26358c8e599a9c076818aee247c68cb69401/LICENSE",
+  "source": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database-minified.json",
+  "release": "2026-27",
+  "source_sha256": "395be786fb2f98f1fca9e963911b9332110098a080e7e2569902bbc5641d1a41",
+  "last_update": "2026-07-04",
+  "scope": "Known tracked AniList IDs only. Identity/aliases, never airing or publication evidence."
+}

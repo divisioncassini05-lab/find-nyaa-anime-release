@@ -217,6 +217,7 @@ class Candidate:
     detail_checked: bool = False
     detail_chinese_confirmed: bool = False
     detail_subtitle_signal: str | None = None
+    info_hash: str | None = None
 
 
 NyaaListingEntry = NyaaRelease
@@ -781,6 +782,7 @@ def score_release(release: NyaaRelease,
         category=category,
         url=url,
         magnet=magnet,
+        info_hash=info_hash,
         matched_queries=[query],
         reasons=reasons,
     )

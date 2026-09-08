@@ -20,24 +20,23 @@ from pathlib import Path
 from typing import Any
 
 from airing_watch_state import (
-    clear_pending_download,
     completed_episode,
     pending_download,
-    record_found_episode,
-    record_pending_download,
 )
 from qbittorrent_submit import (
+    DEFAULT_BACKUP_DIR as DEFAULT_QBITTORRENT_BACKUP_DIR,
     DEFAULT_SAVE_PATH as DEFAULT_QBITTORRENT_SAVE_PATH,
     SUCCESS_STATUSES as QBITTORRENT_SUCCESS_STATUSES,
     SubmissionError,
-    inspect_torrent,
     submit_magnet,
 )
 from release_identity import EpisodeKind, normalize_season_number, parse_release_identity
+from nyaa_client import nyaa_id_from_url
 from release_search_core import SearchContext, SearchIntent, search_release_report
 from runtime_paths import DEFAULT_STATE
 from search_nyaa_releases import DEFAULT_TIER_MIN_GIB
 from state_io import StateFileError, load_state, save_state
+from failure_recovery import recovery_plan
 
 
 HERE = Path(__file__).resolve().parent
@@ -143,6 +142,7 @@ def lookup_nickname_alias(query: str, path: Path = DEFAULT_NICKNAME_ALIASES) -> 
 
 
 def emit_json(report: dict[str, Any]) -> None:
+    report.setdefault("recovery", recovery_plan(report))
     print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
 
 
@@ -1711,6 +1711,7 @@ def build_search_args(
         include_magnets=args.include_magnet,
         magnet_only=False,
         legal_ok=args.legal_ok,
+        candidate_id=[args.candidate_id] if getattr(args, "candidate_id", None) else [],
     )
 
 
@@ -1870,9 +1871,12 @@ def render_failure_reply(
     intent: SearchIntent,
     tier: str,
     diagnostic: dict[str, Any] | None = None,
+    target_episode: int | None = None,
 ) -> str:
     season_label = canonical_season(season) or "S01"
     subject = f"《{display_title}》{season_label} 整季" if intent is SearchIntent.SEASON_BATCH else f"《{display_title}》"
+    if intent is not SearchIntent.SEASON_BATCH and target_episode is not None:
+        subject += f" {season_label}E{target_episode:02d}"
     tier_label = {"browse": "轻量观看", "watch": "普通观看", "premium": "高画质"}.get(tier, tier)
     size_policy = (diagnostic or {}).get("size_policy") or {}
     has_above_range_release = (
@@ -1902,11 +1906,14 @@ def render_failure_reply(
         "release_unqualified": release_unqualified,
         "no_rss_candidates": f"{subject}没有检索到 Nyaa 原始候选。",
         "no_nyaa_release_for_target": f"{subject}没有检索到目标正篇发布。",
+        "candidate_not_found": f"{subject}未找到指定的 Nyaa 发布；未替换为其他资源。",
+        "candidate_id_title_mismatch": f"{subject}指定的 Nyaa 发布与作品不匹配；未提交下载。",
         "subtitle_unqualified": f"{subject}的画质合格候选均未确认带有中文字幕。",
         "subtitle_check_incomplete": f"{subject}的中文字幕检查尚未完成，因此没有返回磁力链接。",
         "latest_unresolved": f"{subject}目前无法可靠确认最新正篇。",
         "network_error": f"{subject}检索时网络请求失败，请稍后重试。",
         "output_incomplete": f"{subject}的结果缺少必要字段，因此没有输出不完整的资源信息。",
+        "download_enqueue_failed": f"{subject}已找到合格资源，但 qBittorrent 入队失败；进度未推进。请根据下载器错误排查，不要重新解释为找不到资源。",
     }
     return messages.get(status, status)
 
@@ -2222,8 +2229,10 @@ def child_argv_from_args(args: argparse.Namespace, title: str) -> list[str]:
         child.extend(["--qbittorrent-save-path", str(args.qbittorrent_save_path)])
         if args.qbittorrent_exe:
             child.extend(["--qbittorrent-exe", str(args.qbittorrent_exe)])
-    if args.defer_state_until_download_complete:
-        child.append("--defer-state-until-download-complete")
+        if args.qbittorrent_profile:
+            child.extend(["--qbittorrent-profile", str(args.qbittorrent_profile)])
+        if args.qbittorrent_backup_dir:
+            child.extend(["--qbittorrent-backup-dir", str(args.qbittorrent_backup_dir)])
     flags = (
         ("--refresh-cache", args.refresh_cache),
         ("--include-magnet", args.include_magnet),
@@ -2317,6 +2326,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tier", default="browse", choices=["browse", "watch", "premium"])
     parser.add_argument("--season")
     parser.add_argument("--episode", type=int)
+    parser.add_argument(
+        "--candidate-id",
+        help="Finalize exactly one reviewed Nyaa ID or view URL; requires --episode, --latest, or --whole-season. No automatic quality fallback.",
+    )
     parser.add_argument("--min-gib-per-episode", type=float)
     parser.add_argument("--max-gib-per-episode", type=float)
     parser.add_argument(
@@ -2342,6 +2355,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verified English/romaji Nyaa title supplied by the bounded web-resolution fallback.",
     )
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    parser.add_argument("--offline-catalog", type=Path, default=Path(__file__).resolve().parents[1] / "data" / "identity_catalog.json")
+    parser.add_argument("--source-numbering", choices=['anidb','tvdb'])
+    parser.add_argument("--target-numbering", choices=['anidb','tvdb'])
     parser.add_argument("--schedule-cache", type=Path, default=DEFAULT_SCHEDULE_CACHE)
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--include-magnet", "--include-magnets", dest="include_magnet", action="store_true")
@@ -2353,12 +2369,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--defer-state-until-download-complete",
         action="store_true",
-        help=(
-            "For automatic downloads, keep a verified episode pending until qBittorrent's "
-            "fastresume evidence confirms completion."
-        ),
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--qbittorrent-exe", type=Path)
+    parser.add_argument("--qbittorrent-profile", type=Path)
+    parser.add_argument("--qbittorrent-backup-dir", type=Path)
     parser.add_argument(
         "--qbittorrent-save-path",
         type=Path,
@@ -2408,16 +2423,19 @@ def status_return_code(status: str) -> int | None:
         "long_break_unconfirmed": 0,
         "split_cour_break": 0,
         "part_finished": 0,
-        "download_pending": 0,
         "finished_deleted": 0,
         "needs_quality_upgrade_confirmation": 0,
         "network_error": 1,
+        "review_required": 2,
+        "latest_unresolved": 4,
         "release_unqualified": 3,
         "subtitle_unqualified": 3,
         "subtitle_check_incomplete": 3,
         "season_check_incomplete": 3,
         "no_complete_season_release": 4,
         "no_nyaa_release_for_target": 4,
+        "candidate_not_found": 4,
+        "candidate_id_title_mismatch": 4,
         "output_incomplete": 5,
         "download_enqueue_failed": 6,
     }.get(status)
@@ -2425,6 +2443,27 @@ def status_return_code(status: str) -> int | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if bool(args.source_numbering) != bool(args.target_numbering):
+        print("--source-numbering and --target-numbering must be provided together.", file=sys.stderr)
+        return 2
+    if args.defer_state_until_download_complete:
+        print(
+            "--defer-state-until-download-complete has been retired. Remove it to use "
+            "the standard progress boundary: a qualified magnet returned or qBittorrent submission accepted.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.candidate_id:
+        args.candidate_id = nyaa_id_from_url(args.candidate_id)
+        if args.candidate_id is None:
+            print("--candidate-id must be a numeric Nyaa ID or view URL.", file=sys.stderr)
+            return 2
+        if (
+            sum((args.episode is not None, args.latest, args.whole_season)) != 1
+            or args.official_air_date or args.mark_finished or args.include_specials
+        ):
+            print("--candidate-id requires exactly one of --episode, --latest, or --whole-season and cannot be used for schedule, finish, or special operations.", file=sys.stderr)
+            return 2
     if args.official_air_date:
         if args.episode is None:
             print("--official-air-date requires --episode.", file=sys.stderr)
@@ -2443,12 +2482,6 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    if args.defer_state_until_download_complete and not args.enqueue_qbittorrent:
-        print(
-            "--defer-state-until-download-complete requires --enqueue-qbittorrent.",
-            file=sys.stderr,
-        )
-        return 2
     try:
         state = load_state(args.state)
     except StateFileError as exc:
@@ -2463,6 +2496,9 @@ def main(argv: list[str] | None = None) -> int:
     if state_repairs and not args.no_state_update:
         save_state(args.state, state, base=state_base)
     mentions = detect_tracked_titles(state, args.title)
+    if args.candidate_id and len(mentions) >= 2:
+        print("--candidate-id finalizes one work; supply a single title.", file=sys.stderr)
+        return 2
     if len(mentions) >= 2 and not args.no_auto_batch and not args.search_title:
         report = run_tracked_title_batch(args, mentions)
         report["state_repairs"] = state_repairs
@@ -2528,7 +2564,6 @@ def main(argv: list[str] | None = None) -> int:
     state_update = "none"
     schedule_cache_status = "not_used"
     season = canonical_season(args.season or resolved.season or (state_show or {}).get("season"))
-    queued_download = pending_download(state_show)
     if (
         season is None
         and state_show is None
@@ -2654,24 +2689,7 @@ def main(argv: list[str] | None = None) -> int:
     availability: dict[str, Any] = {"target_source": "input", "official_target": False}
     not_aired_yet = False
     part_finished: dict[str, Any] | None = None
-    if (
-        args.defer_state_until_download_complete
-        and queued_download is not None
-        and args.episode is None
-        and not args.whole_season
-    ):
-        # A queued-but-unconfirmed episode is a stronger target than a stale
-        # watched/next value or a newly discovered later episode. Reconcile it
-        # first so a delayed download cannot create a progress jump.
-        target_episode = int(queued_download["episode"])
-        intent = SearchIntent.SPECIFIC_EPISODE
-        availability = {
-            "target_source": "pending_download",
-            "official_target": False,
-            "pending_episode": target_episode,
-            "pending_info_hash": queued_download.get("info_hash"),
-        }
-    elif target_episode is not None:
+    if target_episode is not None:
         intent = SearchIntent.SPECIFIC_EPISODE
     elif args.latest:
         intent = SearchIntent.LATEST_REGULAR
@@ -2877,15 +2895,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     if intent is SearchIntent.SEASON_BATCH:
         search_args.episodes = resolved.episodes
+    from offline_identity import read_catalog, lookup
+    identity_ids = tuple((key,int(value)) for key,value in [('anilist',resolved.anilist_id),('bangumi',resolved.bangumi_id)] if value)
+    try:
+        offline_evidence = lookup(read_catalog(args.offline_catalog),identity_ids)
+    except (ValueError,OSError) as exc:
+        offline_evidence = {'aliases':[], 'mappings':[], 'sources':[], 'conflicts':[str(exc)]}
     search_context = SearchContext(
         canonical_title=resolved.title,
-        aliases=tuple(state_aliases),
+        aliases=tuple(unique([*state_aliases,*offline_evidence['aliases']])),
         search_titles=tuple(base_search_names),
         related_titles=tuple(resolved.related_titles),
         mainline_scope=resolved.mainline_scope,
         resolved_season=normalize_season_number(season or resolved.season),
         expected_episodes=resolved.episodes,
         flexible_title_match=args.require_zh,
+        identifiers=identity_ids,
+        episode_mappings=tuple(offline_evidence['mappings']),
+        source_numbering=args.source_numbering,
+        target_numbering=args.target_numbering,
     )
     core_report = search_release_report(
         search_args,
@@ -2896,6 +2924,9 @@ def main(argv: list[str] | None = None) -> int:
         refresh_cache=args.refresh_cache,
         context=search_context,
     )
+    if intent is SearchIntent.LATEST_REGULAR:
+        target_episode = core_report.requested_episode
+        availability["target_episode"] = target_episode
     primary_report = core_report
     quality_fallback: dict[str, Any] | None = None
     fallback_report_for_diagnostic = None
@@ -2907,6 +2938,7 @@ def main(argv: list[str] | None = None) -> int:
     fallback_tier = {"watch": "browse", "premium": "watch"}.get(requested_tier)
     if (
         fallback_tier is not None
+        and not args.candidate_id
         and args.size_policy_source == "tier"
         and (
             core_report.status == "release_unqualified"
@@ -2958,6 +2990,7 @@ def main(argv: list[str] | None = None) -> int:
             core_report = fallback_report
     if (
         intent is SearchIntent.SEASON_BATCH
+        and not args.candidate_id
         and requested_tier == "watch"
         and args.size_policy_source == "tier"
         and fallback_report is not None
@@ -3126,7 +3159,9 @@ def main(argv: list[str] | None = None) -> int:
             ],
             "missing_fields": [] if upgrade_ready else ["upgrade_candidate"],
         }
-    if status in {"found", "latest_unresolved"} and not output_contract["ready"]:
+    if (
+        status == "found" or (status == "latest_unresolved" and selected is not None)
+    ) and not output_contract["ready"]:
         status = "output_incomplete"
 
     found_episode: int | None = None
@@ -3158,6 +3193,9 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": True,
                 "reason": "latest_already_handled",
             }
+        elif not args.candidate_id:
+            status = 'review_required'
+            qbittorrent_report = {'status':'not_attempted','ok':False,'reason':'reviewed_candidate_id_required'}
         else:
             try:
                 qbittorrent_report = submit_magnet(
@@ -3165,11 +3203,17 @@ def main(argv: list[str] | None = None) -> int:
                     source_url=str((selected or {}).get("url") or "") or None,
                     executable=args.qbittorrent_exe,
                     save_path=args.qbittorrent_save_path,
+                    backup_dir=(
+                        args.qbittorrent_backup_dir
+                        if args.qbittorrent_backup_dir is not None
+                        else DEFAULT_QBITTORRENT_BACKUP_DIR
+                    ),
+                    profile_path=args.qbittorrent_profile,
                 )
-                if qbittorrent_report.get("status") not in QBITTORRENT_SUCCESS_STATUSES:
+                if not qbittorrent_report.get("ok") or qbittorrent_report.get("status") not in QBITTORRENT_SUCCESS_STATUSES:
                     status = "download_enqueue_failed"
             except SubmissionError as exc:
-                qbittorrent_report = {"status": "error", "ok": False, "error": str(exc)}
+                qbittorrent_report = exc.as_report()
                 status = "download_enqueue_failed"
 
     if (
@@ -3296,6 +3340,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if status in {"found", "finished_deleted", "latest_already_handled"}:
         availability["state"] = "available"
+    elif status == "download_enqueue_failed":
+        availability["state"] = "available_enqueue_failed"
     elif status in {
         "no_rss_candidates",
         "no_nyaa_release_for_target",
@@ -3303,18 +3349,19 @@ def main(argv: list[str] | None = None) -> int:
         "subtitle_unqualified",
         "no_complete_season_release",
     }:
-        availability["state"] = "aired_no_release"
+        availability["state"] = "release_unqualified" if status in {"release_unqualified","subtitle_unqualified"} else (
+            "aired_no_release" if availability.get("official_target") else "release_not_confirmed")
     elif status in {
         "network_error",
         "subtitle_check_incomplete",
         "season_check_incomplete",
         "latest_unresolved",
         "output_incomplete",
-        "download_enqueue_failed",
     }:
         availability["state"] = "search_incomplete"
 
     diagnostic = dict(core_report.diagnostics)
+    diagnostic['offline_identity'] = offline_evidence
     diagnostic["queries"] = release_search_names
     if args.require_zh:
         diagnostic["strict_zh"] = {
@@ -3414,11 +3461,20 @@ def main(argv: list[str] | None = None) -> int:
             intent,
             effective_tier,
             diagnostic,
+            target_episode,
         )
+    if status == 'review_required':
+        reply_text = f'《{display_title}》已发现第 {target_episode} 集候选；请审核完整标题与身份依据后，用 --candidate-id 核验并提交。'
     report = {
         "status": status,
         "intent": intent.value,
         "resolved_title": resolved.title,
+        "report_version": 2,
+        "search_run": core_report.as_dict(explain=True).get("search_run"),
+        "target_decision": core_report.as_dict(explain=True).get("target_decision"),
+        "choice_count": len(core_report.choices),
+        "choices_returned": len(core_report.as_dict(explain=args.explain)["choices"]),
+        "choices_truncated": len(core_report.choices) > len(core_report.as_dict(explain=args.explain)["choices"]),
         "aliases": search_names,
         "queries": release_search_names,
         "season": season,
@@ -3437,10 +3493,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "tracked": tracked,
         "selected": public_selected,
-        "choices": [
-            choice.as_dict(args.explain, args.explain)
-            for choice in core_report.choices
-        ],
+        "choices": core_report.as_dict(explain=args.explain)["choices"],
         "diagnostic": diagnostic,
         "state_update": state_update,
         "progress": progress,

@@ -35,6 +35,7 @@ class ReleaseIdentity:
     episode_end: Decimal | None = None
     covered_seasons: tuple[int, ...] = ()
     coverage_confidence: Confidence = Confidence.UNKNOWN
+    decision: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -253,6 +254,17 @@ def _episode_from_title(
         if match:
             return _decimal(match.group("episode")), Confidence.EXPLICIT
 
+    # A separated episode immediately before release metadata outranks numbers
+    # embedded in a multilingual series title (e.g. "20 Seiki ... - 03").
+    match = re.search(
+        r"\s[-\u2013\u2014]\s*0*(?P<episode>\d+(?:\.\d+)?)(?:v\d+)?"
+        r"(?=\s*(?:[\[\(\u3010]|\.(?:mkv|mp4|avi)$|$))",
+        lower,
+        re.I,
+    )
+    if match:
+        return _decimal(match.group("episode")), Confidence.EXPLICIT
+
     if season_span is not None:
         after_season = lower[season_span[1] :]
         match = re.match(
@@ -296,7 +308,7 @@ def _episode_from_title(
     return None, Confidence.UNKNOWN
 
 
-def parse_release_identity(title: str) -> ReleaseIdentity:
+def parse_legacy_identity(title: str) -> ReleaseIdentity:
     season, season_confidence, season_span = _season_from_title(title)
     covered_seasons = _covered_seasons_from_title(title, season)
     episode_start, episode_end, range_confidence = _episode_range_from_title(title)
@@ -346,6 +358,11 @@ def parse_release_identity(title: str) -> ReleaseIdentity:
         covered_seasons=covered_seasons,
         coverage_confidence=coverage_confidence,
     )
+
+
+def parse_release_identity(title: str, known_titles=()) -> ReleaseIdentity:
+    from identity_adapter import parse_identity
+    return parse_identity(title, known_titles)
 
 
 def season_relation(identity: ReleaseIdentity, requested_season: int | None) -> str:

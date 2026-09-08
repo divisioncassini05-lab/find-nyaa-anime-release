@@ -1,0 +1,2 @@
+aniparse==2.0.0
+anitopy==2.1.1

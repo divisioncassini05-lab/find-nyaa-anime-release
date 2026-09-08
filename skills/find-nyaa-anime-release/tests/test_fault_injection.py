@@ -89,7 +89,7 @@ class FailureClassificationTests(unittest.TestCase):
             "download_enqueue_failed",
         )
         self.assertTrue(all((finder.status_return_code(status) or 0) > 0 for status in statuses))
-        self.assertIsNone(finder.status_return_code("latest_unresolved"))
+        self.assertEqual(finder.status_return_code("latest_unresolved"), 4)
 
     def test_failure_reports_never_expose_selected_magnet(self) -> None:
         report = core.ReleaseSearchReport(

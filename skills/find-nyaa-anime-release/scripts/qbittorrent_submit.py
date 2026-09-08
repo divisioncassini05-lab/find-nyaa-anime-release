@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -13,7 +14,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -37,10 +40,83 @@ DEFAULT_PERSISTENCE_WAIT_SECONDS = 30.0
 DEFAULT_STARTUP_WAIT_SECONDS = 30.0
 DEFAULT_STARTUP_SETTLE_SECONDS = 2.0
 DEFAULT_RETRY_DELAY_SECONDS = 5.0
+DEFAULT_LOCK_WAIT_SECONDS = 90.0
+_LOCAL_LOCKS: dict[str, threading.Lock] = {}
+_LOCAL_LOCKS_GUARD = threading.Lock()
 
 
 class SubmissionError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "submission_failed", retryable: bool | None = None,
+                 diagnostics: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+        self.diagnostics = diagnostics or {}
+
+    def as_report(self) -> dict[str, Any]:
+        recovery = {}
+        if self.code in {"startup_exited_without_client", "handoff_unverified"}:
+            recovery = {"client_recovery": {
+                "action": "retry_full_resolver_in_approved_user_context",
+                "requires_execution_tool_approval": True,
+                "preserve_reviewed_candidate": True,
+                "recheck_acceptance_before_submission": True,
+                "startup_only_is_insufficient": True,
+                "do_not_repeat_unchanged_context": True,
+                "max_context_retries": 1,
+                "cause_confirmed": False,
+            }}
+        return {**self.diagnostics, **recovery, "status": "error", "ok": False, "error": str(self),
+                "error_code": self.code, "retryable": self.retryable}
+
+
+@contextmanager
+def _submission_lock(profile: Path, wait_seconds: float = DEFAULT_LOCK_WAIT_SECONDS):
+    """Serialize one client profile across threads/processes; recheck tasks inside it."""
+    key = os.path.normcase(str(profile.resolve()))
+    with _LOCAL_LOCKS_GUARD:
+        local_lock = _LOCAL_LOCKS.setdefault(key, threading.Lock())
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    if not local_lock.acquire(timeout=max(0.0, wait_seconds)):
+        raise SubmissionError("Another submission is using this qBittorrent profile.",
+                              code="client_busy", retryable=True)
+    try:
+        directory = Path(tempfile.gettempdir()) / "codex-qbittorrent-locks"
+        directory.mkdir(parents=True, exist_ok=True)
+        lock_file = directory / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
+        # Do not unlink lock files: waiters must always lock the same inode.
+        with lock_file.open("a+b") as stream:
+            stream.seek(0, os.SEEK_END)
+            if stream.tell() == 0:
+                stream.write(b"\0")
+                stream.flush()
+            while True:
+                stream.seek(0)
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as exc:
+                    if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise SubmissionError("Another process is submitting to this qBittorrent profile.",
+                                              code="client_busy", retryable=True) from exc
+                    time.sleep(0.1)
+            try:
+                yield
+            finally:
+                stream.seek(0)
+                if os.name == "nt":
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    finally:
+        local_lock.release()
 
 
 def extract_btih(magnet: str) -> str | None:
@@ -129,8 +205,43 @@ def find_executable(explicit: Path | None = None) -> Path:
         except OSError:
             continue
     raise SubmissionError(
-        "qBittorrent executable was not found; set QBITTORRENT_EXE or pass --exe."
+        "qBittorrent executable was not found; set QBITTORRENT_EXE or pass --exe.",
+        code="executable_missing", retryable=False,
     )
+
+
+def _windows_process_probe_fallback(executable: Path) -> bool:
+    """Use .NET process enumeration when tasklist is unavailable or denied."""
+    process_name = executable.stem.replace("'", "''")
+    powershell = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
+    )
+    script = (
+        "$ErrorActionPreference='Stop'; try { "
+        f"if ([System.Diagnostics.Process]::GetProcessesByName('{process_name}').Length -gt 0) "
+        "{ exit 0 }; exit 1 } catch { exit 2 }"
+    )
+    try:
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
+            timeout=5, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SubmissionError(
+            "Cannot inspect qBittorrent processes: tasklist and the .NET fallback failed; "
+            "check process-query permissions before retrying.",
+            code="process_probe_failed", retryable=None,
+        ) from exc
+    if result.returncode not in (0, 1):
+        raise SubmissionError(
+            "Cannot inspect qBittorrent processes: tasklist and the .NET fallback failed; "
+            "check process-query permissions before retrying.",
+            code="process_probe_failed", retryable=None,
+        )
+    return result.returncode == 0
 
 
 def qbittorrent_process_running(executable: Path) -> bool:
@@ -150,10 +261,13 @@ def qbittorrent_process_running(executable: Path) -> bool:
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=5,
                 check=False,
                 creationflags=creationflags,
             )
+            if result.returncode != 0 or result.stdout is None:
+                return _windows_process_probe_fallback(executable)
             return f'"{executable.name.casefold()}"' in result.stdout.casefold()
         result = subprocess.run(
             ["pgrep", "-x", executable.name],
@@ -165,21 +279,54 @@ def qbittorrent_process_running(executable: Path) -> bool:
         )
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
+        if os.name == "nt":
+            return _windows_process_probe_fallback(executable)
         return False
 
 
 def _launch(command: list[str]) -> subprocess.Popen[bytes]:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    startupinfo = None
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+    error_stream = tempfile.TemporaryFile()
     try:
-        return subprocess.Popen(
+        process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=error_stream,
             creationflags=creationflags,
+            startupinfo=startupinfo,
         )
+        process._qbt_error_stream = error_stream
+        return process
     except OSError as exc:
-        raise SubmissionError(f"Failed to start qBittorrent: {exc}") from exc
+        error_stream.close()
+        raise SubmissionError(
+            f"Failed to start qBittorrent: {exc}",
+            code="permission_denied" if isinstance(exc, PermissionError) else "client_launch_failed",
+            retryable=False if isinstance(exc, PermissionError) else None,
+        ) from exc
+
+
+def _launch_diagnostics(process: subprocess.Popen[bytes], *, close: bool = False) -> dict[str, Any]:
+    report = {"launch_returncode": process.poll()}
+    if isinstance(process.pid, int):
+        report["launcher_pid"] = process.pid
+    stream = vars(process).get("_qbt_error_stream")
+    if stream is not None and not stream.closed:
+        try:
+            stream.seek(0)
+            report["launch_stderr"] = stream.read(4096).decode("utf-8", errors="replace").strip()
+        except OSError as exc:
+            report["launch_stderr_error"] = str(exc)
+        finally:
+            if close:
+                stream.close()
+    return report
 
 
 def ensure_qbittorrent_ready(
@@ -200,28 +347,43 @@ def ensure_qbittorrent_ready(
     process = _launch(startup_command)
     effective_wait = max(0.0, wait_seconds)
     effective_settle = max(0.0, settle_seconds)
-    deadline = time.monotonic() + effective_wait
+    started_at = time.monotonic()
+    deadline = started_at + effective_wait
     stable_since: float | None = None
 
-    while time.monotonic() < deadline:
-        return_code = process.poll()
-        if return_code not in (None, 0):
-            raise SubmissionError(f"qBittorrent exited with code {return_code} during startup.")
-        running = qbittorrent_process_running(executable) or return_code is None
-        now = time.monotonic()
-        if running:
-            if stable_since is None:
-                stable_since = now
-            if now - stable_since >= effective_settle:
-                return {"client_was_running": False, "client_started": True}
-        else:
-            stable_since = None
-        time.sleep(0.2)
-
-    raise SubmissionError(
-        "qBittorrent did not become ready within "
-        f"{effective_wait:g} seconds after cold start."
-    )
+    try:
+        while time.monotonic() < deadline:
+            return_code = process.poll()
+            if return_code not in (None, 0):
+                raise SubmissionError(f"qBittorrent exited with code {return_code} during startup.",
+                                      code="startup_process_failed")
+            running = return_code is None or qbittorrent_process_running(executable)
+            now = time.monotonic()
+            if running:
+                if stable_since is None:
+                    stable_since = now
+                if now - stable_since >= effective_settle:
+                    return {"client_was_running": False, "client_started": True}
+            else:
+                stable_since = None
+                if now - started_at >= max(1.0, effective_settle):
+                    raise SubmissionError(
+                        "qBittorrent launcher exited with code 0 but no client process was detected; "
+                        "no torrent was handed off. Check process visibility, execution permissions "
+                        "and the user/profile context before retrying; a zero exit is not readiness.",
+                        code="startup_exited_without_client", retryable=None,
+                    )
+            time.sleep(0.2)
+        raise SubmissionError(
+            f"qBittorrent did not become ready within {effective_wait:g} seconds after cold start.",
+            code="startup_timeout", retryable=True,
+        )
+    except SubmissionError as exc:
+        exc.diagnostics.update(_launch_diagnostics(process))
+        exc.diagnostics["stage"] = "startup"
+        raise
+    finally:
+        _launch_diagnostics(process, close=True)
 
 
 def backup_path(info_hash: str | None, backup_dir: Path) -> Path | None:
@@ -321,6 +483,43 @@ def inspect_torrent(info_hash: str, backup_dir: Path = DEFAULT_BACKUP_DIR) -> di
         }
     )
     return report
+
+
+def _acceptance_evidence(info_hash: str | None, backup_dir: Path) -> dict[str, Any]:
+    """Existence alone is insufficient: validate saved records for this exact hash."""
+    evidence: dict[str, Any] = {
+        "fastresume_exists": False, "fastresume_valid": False,
+        "torrent_exists": False, "torrent_valid": False,
+    }
+    if not info_hash:
+        evidence["verification_error"] = "No supported v1 info-hash is available for verification."
+        return evidence
+    for kind, path in (
+        ("fastresume", backup_path(info_hash, backup_dir)),
+        ("torrent", torrent_backup_path(info_hash, backup_dir)),
+    ):
+        try:
+            with path.open("rb") as stream:
+                evidence[kind + "_exists"] = True
+                raw = stream.read(MAX_TORRENT_BYTES + 1)
+            if len(raw) > MAX_TORRENT_BYTES:
+                raise SubmissionError("Saved metadata exceeds the inspection size limit.")
+            value, end = _decode_bencode(raw)
+            if not isinstance(value, dict) or end != len(raw):
+                raise SubmissionError("Saved metadata is not a complete bencoded dictionary.")
+            if kind == "fastresume":
+                valid = (value.get(b"file-format") == b"libtorrent resume file"
+                         and value.get(b"info-hash") == bytes.fromhex(info_hash))
+            else:
+                valid = isinstance(value.get(b"info"), dict) and torrent_info_hash(raw) == info_hash
+            evidence[kind + "_valid"] = valid
+            if not valid:
+                evidence[kind + "_error"] = "Saved metadata format or info-hash does not match."
+        except FileNotFoundError:
+            pass
+        except (OSError, SubmissionError, ValueError, RecursionError) as exc:
+            evidence[kind + "_error"] = str(exc)
+    return evidence
 
 
 def nyaa_torrent_url(source_url: str | None) -> str | None:
@@ -423,16 +622,60 @@ def submit_magnet(
     retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    context = {
+        "info_hash": extract_btih(magnet.strip()),
+        "backup_dir": str(backup_dir.resolve()),
+        "profile_path": str(profile_path.resolve()) if profile_path else None,
+    }
+    options = dict(
+        source_url=source_url, torrent_url=torrent_url, executable=executable,
+        save_path=save_path, backup_dir=backup_dir, profile_path=profile_path,
+        wait_seconds=wait_seconds, startup_wait_seconds=startup_wait_seconds,
+        startup_settle_seconds=startup_settle_seconds, retry_delay_seconds=retry_delay_seconds,
+        dry_run=dry_run,
+    )
+    try:
+        if dry_run:
+            return _submit_magnet_locked(magnet, **options)
+        # Profile identity does not include the torrent hash: distinct targets also serialize.
+        with _submission_lock(profile_path if profile_path is not None else backup_dir):
+            return _submit_magnet_locked(magnet, **options)
+    except SubmissionError as exc:
+        exc.diagnostics = {**context, **exc.diagnostics}
+        raise
+    except OSError as exc:
+        raise SubmissionError(str(exc),
+                              code="permission_denied" if isinstance(exc, PermissionError) else "submission_io_failed",
+                              retryable=False if isinstance(exc, PermissionError) else None,
+                              diagnostics=context) from exc
+
+
+def _submit_magnet_locked(
+    magnet: str,
+    *,
+    source_url: str | None = None,
+    torrent_url: str | None = None,
+    executable: Path | None = None,
+    save_path: Path | None = DEFAULT_SAVE_PATH,
+    backup_dir: Path = DEFAULT_BACKUP_DIR,
+    profile_path: Path | None = None,
+    wait_seconds: float = DEFAULT_PERSISTENCE_WAIT_SECONDS,
+    startup_wait_seconds: float = DEFAULT_STARTUP_WAIT_SECONDS,
+    startup_settle_seconds: float = DEFAULT_STARTUP_SETTLE_SECONDS,
+    retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
+    dry_run: bool = False,
+) -> dict[str, Any]:
     magnet = magnet.strip()
     info_hash = extract_btih(magnet)
     exe = find_executable(executable)
     resume_file = backup_path(info_hash, backup_dir)
     metadata_file = torrent_backup_path(info_hash, backup_dir)
     resolved_torrent_url = torrent_url or nyaa_torrent_url(source_url)
-    resume_existed = bool(resume_file and resume_file.is_file())
+    evidence = _acceptance_evidence(info_hash, backup_dir)
+    resume_existed = evidence["fastresume_exists"]
 
-    if resume_existed and (
-        not resolved_torrent_url or (metadata_file and metadata_file.is_file())
+    if evidence["fastresume_valid"] and (
+        not resolved_torrent_url or evidence["torrent_valid"]
     ):
         report = {
             "status": "already_present",
@@ -447,6 +690,7 @@ def submit_magnet(
             ),
         }
         report.update(inspect_fastresume(resume_file))
+        report["acceptance_evidence"] = evidence
         return report
 
     torrent_data: bytes | None = None
@@ -508,6 +752,9 @@ def submit_magnet(
             "submission_source": "torrent" if resolved_torrent_url else "magnet",
         }
 
+    processes: list[subprocess.Popen[bytes]] = []
+    client_report: dict[str, Any] = {}
+    submission_attempts = 0
     try:
         client_report = ensure_qbittorrent_ready(
             exe,
@@ -516,6 +763,7 @@ def submit_magnet(
             profile_path=profile_path,
         )
         process = _launch(command)
+        processes.append(process)
         submission_attempts = 1
 
         effective_wait_seconds = max(0.0, wait_seconds)
@@ -523,10 +771,9 @@ def submit_magnet(
         deadline = started_at + effective_wait_seconds
         retry_at = started_at + max(0.0, retry_delay_seconds)
         return_code: int | None = None
-        while time.monotonic() < deadline:
-            resume_ready = bool(resume_file and resume_file.is_file())
-            metadata_ready = bool(metadata_file and metadata_file.is_file())
-            if resume_ready and (torrent_data is None or metadata_ready):
+        while True:
+            evidence = _acceptance_evidence(info_hash, backup_dir)
+            if evidence["fastresume_valid"] and (torrent_data is None or evidence["torrent_valid"]):
                 report = {
                     "status": "submitted_verified",
                     "ok": True,
@@ -539,13 +786,16 @@ def submit_magnet(
                     "submission_source": "torrent" if torrent_data is not None else "magnet",
                     "source_fallback_error": source_error,
                     "submission_attempts": submission_attempts,
+                    "acceptance_evidence": evidence,
                     **client_report,
                 }
                 report.update(inspect_fastresume(resume_file))
                 return report
             return_code = process.poll()
             if return_code not in (None, 0):
-                raise SubmissionError(f"qBittorrent exited with code {return_code}.")
+                raise SubmissionError(f"qBittorrent exited with code {return_code}.", code="handoff_process_failed")
+            if time.monotonic() >= deadline:
+                break
             if (
                 torrent_data is not None
                 and submission_attempts == 1
@@ -553,56 +803,35 @@ def submit_magnet(
                 and return_code == 0
             ):
                 process = _launch(command)
+                processes.append(process)
                 submission_attempts = 2
             time.sleep(0.2)
 
-        # qBittorrent may persist BT_backup files during the final polling sleep.
-        # Check once more at the deadline before reporting a failed handoff.
-        resume_ready = bool(resume_file and resume_file.is_file())
-        metadata_ready = bool(metadata_file and metadata_file.is_file())
-        if resume_ready and (torrent_data is None or metadata_ready):
-            report = {
-                "status": "submitted_verified",
-                "ok": True,
-                "info_hash": info_hash,
-                "executable": str(exe),
-                "save_path": str(save_path) if save_path else None,
-                "verification": (
-                    "torrent_metadata_saved" if torrent_data is not None else "fastresume_created"
-                ),
-                "submission_source": "torrent" if torrent_data is not None else "magnet",
-                "source_fallback_error": source_error,
-                "submission_attempts": submission_attempts,
-                **client_report,
-            }
-            report.update(inspect_fastresume(resume_file))
-            return report
-
-        return_code = process.poll()
-        if return_code not in (None, 0):
-            raise SubmissionError(f"qBittorrent exited with code {return_code}.")
-        if torrent_data is not None:
-            raise SubmissionError(
-                "qBittorrent accepted the torrent file but did not persist its metadata "
-                f"within {effective_wait_seconds:g} seconds after {submission_attempts} "
-                "submission attempt(s)."
-            )
-        report = {
-            "status": "submitted",
-            "ok": True,
-            "info_hash": info_hash,
-            "executable": str(exe),
-            "save_path": str(save_path) if save_path else None,
-            "verification": "native_cli_accepted",
-            "handoff_process_running": return_code is None,
-            "submission_source": "magnet",
-            "source_fallback_error": source_error,
-            "submission_attempts": submission_attempts,
-            **client_report,
+        raise SubmissionError(
+            "qBittorrent handoff was not verified: no valid matching task records appeared "
+            f"within {effective_wait_seconds:g} seconds after {submission_attempts} submission attempt(s). "
+            "Launcher exit is not acceptance. Desktop-session/IPC permissions are a possible, "
+            "unconfirmed cause; inspect diagnostics before retrying in an approved user context.",
+            code="handoff_unverified", retryable=None,
+        )
+    except SubmissionError as exc:
+        exc.diagnostics = {
+            "executable": str(exe), "submission_source": "torrent" if torrent_data is not None else "magnet",
+            "source_fallback_error": source_error, "submission_attempts": submission_attempts,
+            "acceptance_evidence": _acceptance_evidence(info_hash, backup_dir),
+            **client_report, **exc.diagnostics,
         }
-        report.update(inspect_fastresume(resume_file))
-        return report
+        if processes:
+            exc.diagnostics["launches"] = [_launch_diagnostics(item) for item in processes]
+        try:
+            exc.diagnostics["client_process_running"] = qbittorrent_process_running(exe)
+        except SubmissionError as probe_error:
+            exc.diagnostics["client_process_running"] = None
+            exc.diagnostics["client_probe_error"] = str(probe_error)
+        raise
     finally:
+        for item in processes:
+            _launch_diagnostics(item, close=True)
         if temporary_torrent is not None:
             try:
                 temporary_torrent.unlink()
@@ -689,7 +918,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
             )
     except SubmissionError as exc:
-        report = {"status": "error", "ok": False, "error": str(exc)}
+        report = exc.as_report()
         if args.json:
             print(json.dumps(report, ensure_ascii=False))
         else:
