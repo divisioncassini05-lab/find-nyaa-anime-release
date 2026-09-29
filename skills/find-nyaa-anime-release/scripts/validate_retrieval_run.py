@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 import find_anime_release as finder
+import anime_release.workflow as workflow
 import release_search_core as core
 from nyaa_client import NyaaRelease
 
@@ -21,12 +22,16 @@ def main():
     p.add_argument('--historical-cache',type=Path)
     p.add_argument('--candidate-id')
     p.add_argument('--offline-catalog',type=Path)
+    p.add_argument('--title',default='二十世纪电气目录')
+    p.add_argument('--require-zh',action='store_true')
+    p.add_argument('--episode',type=int)
     args=p.parse_args()
     args.output_dir.mkdir(parents=True,exist_ok=True)
     before=args.state.read_bytes()
     snapshot=args.output_dir/'state.json'
     snapshot.write_bytes(before)
-    argv=['二十世纪电气目录','--latest','--want-zh','--no-state-update','--json','--explain',
+    argv=[args.title,*(['--episode',str(args.episode)] if args.episode is not None else ['--latest']),
+          '--require-zh' if args.require_zh else '--want-zh','--no-state-update','--json','--explain',
           '--state',str(snapshot),'--cache',str(args.output_dir/'raw-cache.json'),
           '--schedule-cache',str(args.output_dir/'schedule-cache.json'),'--timeout','15','--refresh-cache']
     if args.offline_catalog:
@@ -35,7 +40,7 @@ def main():
         argv.extend(['--candidate-id',args.candidate_id,'--include-magnet','--legal-ok'])
     output=io.StringIO()
     with ExitStack() as stack:
-        stack.enter_context(patch.object(finder,'submit_magnet',side_effect=AssertionError('Validation must never enqueue')))
+        stack.enter_context(patch.object(workflow,'submit_magnet',side_effect=AssertionError('Validation must never enqueue')))
         if args.historical_cache:
             cache=json.loads(args.historical_cache.read_text(encoding='utf-8'))
             items=[i for e in cache['entries'].values() for i in e['items']]

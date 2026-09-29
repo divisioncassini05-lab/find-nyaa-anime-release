@@ -1,4 +1,5 @@
 from unittest.mock import patch
+import pytest
 
 from test_release_finder import candidate, search_args, core
 from failure_recovery import recovery_plan
@@ -71,9 +72,35 @@ def test_permission_denial_and_unknown_client_cause_do_not_schedule():
         assert plan['action'] == 'diagnose_client'
 
 
+@pytest.mark.parametrize('code', ['startup_exited_without_client', 'handoff_unverified'])
+def test_context_client_failure_requires_approved_full_command(code):
+    plan = recovery_plan({'status': 'available_enqueue_failed',
+                          'selected': {'title': 'episode'},
+                          'qbittorrent': {'error_code': code, 'retryable': None}})
+    assert plan['action'] == 'retry_full_resolver_in_approved_user_context'
+    assert plan['requires_execution_tool_approval'] is True
+    assert plan['recheck_acceptance_before_submission'] is True
+    assert plan['scheduled_retry_allowed'] is False
+
+
 def test_already_handled_and_future_boundaries_stop_recovery():
     for status in ('latest_already_handled', 'not_aired_yet', 'airing_schedule_break',
                    'long_break_unconfirmed', 'split_cour_break', 'part_finished', 'found'):
         plan = recovery_plan({'status': status})
         assert plan['action'] == 'stop'
         assert plan['retry_basis'] is None
+
+
+def test_exhausted_transport_does_not_tell_agent_to_repeat_resolver():
+    cases = {'tls_user_context_unavailable': 'request_approved_execution_context',
+             'permission_denied': 'request_approved_execution_context',
+             'tls_certificate_verification_failed': 'inspect_tls_trust_and_execution_context',
+             'timeout': 'diagnose_exhausted_transport'}
+    for code, action in cases.items():
+        plan = recovery_plan({'status': 'network_error', 'intent': 'latest_regular', 'target_episode': 12,
+                              'diagnostic': {'candidate_id_direct_failures': [
+                                  '{"code": "' + code + '", "attempts": []}']}})
+        assert plan['action'] == action
+        assert not plan['latest_confirmed']
+        if code != 'timeout':
+            assert plan['retry_basis'] is None

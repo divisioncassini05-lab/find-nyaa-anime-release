@@ -9,6 +9,10 @@
 
 Original package metadata, source and LICENSE files remain under `scripts/parser_dependencies`, including distribution `RECORD` hashes. `requirements-parsers.txt` pins versions. Our adapter is separate; no package source is patched. The installation manifest records deployed file SHA-256 hashes. MPL notices and source must be retained when redistributing these files.
 
+## Chinese search spelling conversion
+
+[opencc-python-reimplemented](https://pypi.org/project/opencc-python-reimplemented/0.1.7/), version 0.1.7, Apache-2.0, is bundled unmodified under `scripts/search_dependencies` with its distribution metadata and license. Its OpenCC dictionaries generate Simplified/Traditional search spellings only; these are not learned identity aliases or subtitle evidence. The wheel SHA-256 is pinned in `requirements-search.txt`.
+
 ## Shipped identity data
 
 The `data/identity_catalog.json` subset is derived from [anime-offline-database release 2026-27](https://github.com/manami-project/anime-offline-database/releases/tag/2026-27), source date 2026-07-04. Source payload SHA-256: `395be786fb2f98f1fca9e963911b9332110098a080e7e2569902bbc5641d1a41`. It contains identity/aliases for 13 pre-existing tracked AniList IDs, not release or schedule assertions.

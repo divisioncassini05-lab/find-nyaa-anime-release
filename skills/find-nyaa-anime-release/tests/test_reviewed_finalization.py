@@ -14,6 +14,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import find_anime_release as finder
+import anime_release.workflow as v2_workflow
+import anime_release.providers as v2_providers
 import release_search_core as core
 import search_nyaa_releases as nyaa
 from nyaa_client import NyaaClient, NyaaFileEntry, NyaaRelease, NyaaReleaseDetail, NyaaNotFoundError
@@ -62,10 +64,10 @@ def run_finder(tmp_path, releases, options, *, watched=4, tracked=True, failures
         network.get_description.return_value = "Subtitles: English"
     output = io.StringIO()
     with (
-        patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+        patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
         patch.object(core, "collect_raw_candidates", return_value=(releases, list(failures), "fixture")),
         patch.object(core, "DEFAULT_NYAA_CLIENT", network),
-        patch.object(finder, "submit_magnet", return_value=submission or {"ok": True, "status": "submitted"}) as submit,
+        patch.object(v2_workflow, "submit_magnet", return_value=submission or {"ok": True, "status": "submitted"}) as submit,
         contextlib.redirect_stdout(output),
     ):
         code = finder.main([
@@ -75,7 +77,7 @@ def run_finder(tmp_path, releases, options, *, watched=4, tracked=True, failures
             "--cache", str(tmp_path / "raw.json"), "--schedule-cache", str(tmp_path / "schedule.json"),
             *options,
         ])
-    after = json.loads(state_path.read_text()) if state_path.exists() else None
+    after = finder.load_state(state_path) if state_path.exists() else None
     return code, json.loads(output.getvalue()), submit, before, after
 
 
@@ -227,7 +229,7 @@ def test_pinned_enqueue_failure_does_not_advance_progress(tmp_path, error_code):
     ["--candidate-id", "101", "--episode", "5", "--latest"],
 ])
 def test_invalid_or_retired_options_stop_before_state_or_network(options):
-    with patch.object(finder, "load_state") as load, patch.object(finder, "submit_magnet") as submit:
+    with patch.object(v2_workflow, "load_state") as load, patch.object(v2_workflow, "submit_magnet") as submit:
         assert finder.main(["Example Anime", *options]) == 2
     load.assert_not_called()
     submit.assert_not_called()

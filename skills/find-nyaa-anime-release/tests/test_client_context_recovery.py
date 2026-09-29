@@ -16,6 +16,7 @@ def test_context_failure_preserves_evidence_and_requires_full_approved_retry(cod
     assert recovery['recheck_acceptance_before_submission']
     assert recovery['max_context_retries'] == 1
     assert recovery['cause_confirmed'] is False
+    assert recovery['scheduled_retry_allowed'] is False
 
 
 @pytest.mark.parametrize('code', ['permission_denied', 'executable_missing', 'client_busy'])

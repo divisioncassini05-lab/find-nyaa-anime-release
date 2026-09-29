@@ -1,0 +1,127 @@
+{
+  "captured_at": "2026-09-24T01:58:13.944591+00:00",
+  "provider": "anilist",
+  "response": {
+    "data": {
+      "Media": {
+        "id": 189046,
+        "format": "TV",
+        "status": "RELEASING",
+        "season": "SPRING",
+        "seasonYear": 2026,
+        "endDate": {
+          "year": 2026,
+          "month": 9,
+          "day": 30
+        },
+        "startDate": {
+          "year": 2026,
+          "month": 4,
+          "day": 8
+        },
+        "episodes": 19,
+        "duration": 24,
+        "nextAiringEpisode": {
+          "episode": 19,
+          "airingAt": 1790773200
+        },
+        "isAdult": false,
+        "title": {
+          "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season",
+          "english": "Re:ZERO -Starting Life in Another World- Season 4",
+          "native": "Re:ゼロから始める異世界生活 4th season"
+        },
+        "synonyms": [
+          "Re:ZERO รีเซทชีวิต ฝ่าวิกฤตต่างโลก ซีซั่น 4",
+          "Re:ZERO – Жизнь с нуля в альтернативном мире 4"
+        ],
+        "relations": {
+          "edges": [
+            {
+              "relationType": "PREQUEL",
+              "node": {
+                "id": 163134,
+                "type": "ANIME",
+                "format": "TV",
+                "status": "FINISHED",
+                "episodes": 16,
+                "startDate": {
+                  "year": 2024,
+                  "month": 10,
+                  "day": 2
+                },
+                "nextAiringEpisode": null,
+                "title": {
+                  "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season",
+                  "english": "Re:ZERO -Starting Life in Another World- Season 3",
+                  "native": "Re:ゼロから始める異世界生活 3rd season"
+                },
+                "synonyms": [
+                  "Re:ZERO – Жизнь с нуля в альтернативном мире 3"
+                ]
+              }
+            },
+            {
+              "relationType": "ADAPTATION",
+              "node": {
+                "id": 85737,
+                "type": "MANGA",
+                "format": "NOVEL",
+                "status": "RELEASING",
+                "episodes": null,
+                "startDate": {
+                  "year": 2014,
+                  "month": 1,
+                  "day": 24
+                },
+                "nextAiringEpisode": null,
+                "title": {
+                  "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu",
+                  "english": "Re:ZERO -Starting Life in Another World-",
+                  "native": "Re:ゼロから始める異世界生活"
+                },
+                "synonyms": [
+                  "ReZero",
+                  "Re: Life in a different world from zero",
+                  "Re:Zero - Życie w innym świecie od zera",
+                  "Re:Zero - Жизнь с нуля в альтернативном мире",
+                  "Re: Zero - Bắt đầu lại ở thế giới khác",
+                  "Re:Zero รีเซทชีวิต ฝ่าวิกฤตต่างโลก",
+                  "Re:Zero – Começando Uma Vida em Outro Mundo",
+                  "Re:Zero - Re:vivre dans un autre monde à partir de zéro"
+                ]
+              }
+            },
+            {
+              "relationType": "SPIN_OFF",
+              "node": {
+                "id": 210687,
+                "type": "ANIME",
+                "format": "ONA",
+                "status": "RELEASING",
+                "episodes": null,
+                "startDate": {
+                  "year": 2026,
+                  "month": 4,
+                  "day": 8
+                },
+                "nextAiringEpisode": {
+                  "episode": 19,
+                  "airingAt": 1790775000
+                },
+                "title": {
+                  "romaji": "Re:Zero kara Hajimeru Kyuukei Jikan (Break Time) 4th Season",
+                  "english": null,
+                  "native": "Re:ゼロから始める休憩時間(ブレイクタイム) 4th Season"
+                },
+                "synonyms": [
+                  "Re:ZERO ~Starting Break Time From Zero~ Season 4"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

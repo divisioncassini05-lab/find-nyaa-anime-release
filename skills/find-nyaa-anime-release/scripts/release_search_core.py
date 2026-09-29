@@ -20,6 +20,7 @@ from typing import Any
 import search_nyaa_releases as nyaa
 from nyaa_client import NyaaClient, NyaaRelease, NyaaSearchRequest
 from release_identity import Confidence, EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
+from chinese_search import exact_chinese_queries
 from retrieval_decisions import (ACTIVE_RUN, TITLE_CONTEXT, SearchRun, TargetDecision,
     EligibilityDecision, RecordingClient, REPORT_VERSION, plan_queries)
 
@@ -2373,6 +2374,61 @@ def _direct_candidate_from_page(
     return candidate, None
 
 
+def _supplement_strict_episode(report, args, intent, include_specials, cache_path,
+                               context, client, run):
+    """One exact-episode scan after a complete but unqualified strict search.
+
+    Latest must already be established by the ordinary lane. Neither the
+    target, the identity context nor the hard constraints may change here.
+    Pinned review/finalization and incomplete discovery never enter this lane.
+    """
+    if (not getattr(args, 'require_zh', False)
+            or getattr(args, 'candidate_id', None)
+            or getattr(args, 'trust_cjk_title_for_zh', False)
+            or getattr(args, '_zh_supplement_done', False)
+            or report.diagnostics.get('strict_zh_supplement')
+            or intent not in {SearchIntent.LATEST_REGULAR, SearchIntent.SPECIFIC_EPISODE,
+                              SearchIntent.NEXT_TRACKED}
+            or not isinstance(report.requested_episode, int)
+            or report.failures
+            or report.status not in {'subtitle_unqualified', 'release_unqualified',
+                                     'no_nyaa_release_for_target', 'no_rss_candidates'}):
+        return report
+    names = [args.query, *args.alias]
+    search_titles = [args.query]
+    if context:
+        names = [context.canonical_title, *context.aliases, *names]
+        search_titles = list(context.search_titles) or search_titles
+    queries = exact_chinese_queries(names, search_titles, report.requested_episode)
+    if not queries:
+        return report
+    supplement_args = argparse.Namespace(**vars(args))
+    supplement_args.query, supplement_args.alias = queries[0], queries[1:]
+    supplement_args.episode = report.requested_episode
+    supplement_args.intent = SearchIntent.SPECIFIC_EPISODE.value
+    supplement_args._zh_supplement_done = True
+    run.query_plan.extend({'query': q, 'lane': 'strict_zh_exact_supplement',
+                           'basis': 'chinese_script_variant_or_verified_latin_anchor'}
+                          for q in queries)
+    # Call the implementation directly to retain one evidence run and avoid
+    # resetting a latest target or recursively scheduling more supplements.
+    recovered = _search_release_impl(
+        supplement_args, SearchIntent.SPECIFIC_EPISODE, report.requested_episode,
+        include_specials, cache_path, True, context, client)
+    recovered.intent = intent
+    recovered.diagnostics['strict_zh_supplement'] = {
+        'attempted': True, 'target_episode': report.requested_episode,
+        'primary_status': report.status, 'primary_raw_count': report.diagnostics.get('raw_count'),
+        'primary_diagnostics': dict(report.diagnostics), 'queries': queries,
+        'status': recovered.status,
+    }
+    # A missing supplemental row cannot erase releases already observed.
+    if recovered.status in {'no_rss_candidates', 'no_nyaa_release_for_target'}:
+        report.diagnostics['strict_zh_supplement'] = recovered.diagnostics['strict_zh_supplement']
+        return report
+    return recovered
+
+
 def search_release_report(args, intent=SearchIntent.SEASON_BROWSE, requested_episode=None,
                           include_specials=False, cache_path=None, refresh_cache=False,
                           context=None, client=None):
@@ -2387,14 +2443,17 @@ def search_release_report(args, intent=SearchIntent.SEASON_BROWSE, requested_epi
                    requested_episode if requested_episode is not None else args.episode,normalize_season_number(args.season)))
     rt,tt = ACTIVE_RUN.set(run),TITLE_CONTEXT.set(titles)
     try:
+        recording_client = RecordingClient(client or DEFAULT_NYAA_CLIENT,run)
         report = _search_release_impl(args,intent,requested_episode,include_specials,cache_path,refresh_cache,
-                                      context,RecordingClient(client or DEFAULT_NYAA_CLIENT,run))
+                                      context,recording_client)
         if report.search_run is not None:
             # A cache-refresh subrun has its own context; retain both histories.
             child = report.search_run
             run.requests.extend(r for r in child.requests if r not in run.requests)
             run.identities.update(child.identities)
             run.eligibility.extend(child.eligibility)
+        report = _supplement_strict_episode(report,args,intent,include_specials,cache_path,
+                                             context,recording_client,run)
         run.ingest_requests()
         run.errors = list(report.failures)
         if report.failures:
@@ -2429,6 +2488,10 @@ def search_release_report(args, intent=SearchIntent.SEASON_BROWSE, requested_epi
                 decision = EligibilityDecision(rid,'not_selected',['outside_target_or_reviewed_candidate'])
             run.eligibility.append(decision)
         report.search_run = run
+        from failure_recovery import transport_diagnostic
+        transport = transport_diagnostic({"failures": report.failures, "search_run": run.as_dict()})
+        if transport:
+            report.diagnostics["network"] = transport
         return report
     finally:
         TITLE_CONTEXT.reset(tt)

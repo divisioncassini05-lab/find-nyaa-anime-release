@@ -7,6 +7,7 @@ import gzip
 import html
 import re
 import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +17,8 @@ from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any, Callable, Literal
+
+from http_transport import fetch_bytes, TransportError
 
 
 NYAA_BASE_URL = "https://nyaa.si/"
@@ -37,6 +40,13 @@ class NyaaNetworkError(NyaaClientError):
 
 class NyaaNotFoundError(NyaaNetworkError):
     """The requested Nyaa release does not exist."""
+
+
+class NyaaTLSVerificationError(NyaaNetworkError):
+    """Trust/hostname validation failed; an unchanged retry is not recovery."""
+
+    error_code = "tls_certificate_verify_failed"
+    retryable = False
 
 
 class NyaaParseError(NyaaClientError):
@@ -458,13 +468,13 @@ class NyaaClient:
 
     def __init__(self, *, opener: Opener | None = None) -> None:
         self._opener = opener or urllib.request.urlopen
+        self._native_fallback = opener is None
 
     def _request(self, url: str, timeout: float) -> bytes:
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
-            with self._opener(request, timeout=timeout) as response:
-                payload = response.read()
-                encoding = response.headers.get("Content-Encoding")
+            payload, encoding = fetch_bytes(request, timeout=timeout, opener=self._opener,
+                                            native_fallback=self._native_fallback)
         except urllib.error.HTTPError as exc:
             code = exc.code
             exc.close()
@@ -472,6 +482,13 @@ class NyaaClient:
                 raise NyaaNotFoundError(f"Nyaa release was not found: {url}", url=url) from exc
             raise NyaaNetworkError(f"Nyaa returned HTTP {code}: {url}", url=url) from exc
         except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+            cause = getattr(exc, "reason", exc)
+            if (isinstance(cause, ssl.SSLCertVerificationError)
+                    or isinstance(exc, TransportError) and exc.code == 'tls_certificate_verification_failed'):
+                raise NyaaTLSVerificationError(
+                    f"tls_certificate_verify_failed: Nyaa request failed for {url}: {exc}; "
+                    "inspect certificate trust, proxy and execution context; keep TLS verification enabled",
+                    url=url) from exc
             raise NyaaNetworkError(f"Nyaa request failed for {url}: {exc}", url=url) from exc
         try:
             decoded = decode_http_payload(payload, encoding)

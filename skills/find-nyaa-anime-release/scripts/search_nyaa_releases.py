@@ -1223,6 +1223,11 @@ def main(argv: list[str]) -> int:
             refresh_cache=args.refresh_cache,
             limit=20,
         )
+        from failure_recovery import recovery_plan, transport_diagnostic
+        transport = transport_diagnostic(discovery)
+        if transport:
+            discovery.setdefault("diagnostic", {})["network"] = transport
+        discovery["recovery"] = recovery_plan(discovery)
         print(json.dumps(discovery, ensure_ascii=False, indent=2))
         return {
             "network_error": 1,

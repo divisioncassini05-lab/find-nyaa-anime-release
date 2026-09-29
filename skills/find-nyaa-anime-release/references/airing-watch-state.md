@@ -1,52 +1,90 @@
-# Airing Watch State
+# Tracking identity and state
 
-Use this reference for vague repeat requests, state repair, latest/next behavior, or completion cleanup.
+Read before state changes or interpreting a latest/next boundary. The state belongs
+only to this skill; never synchronize desktop-app state, configuration or caches.
+`runtime_paths.py` selects the existing Windows tracking file, otherwise the user's
+Downloads directory. `ANIME_TRACKING_STATE` and `--state` override that location.
 
-State file:
+## Identity comes before progress
 
-By default the state lives at `~/Downloads/Anime_Tracking/airing_watch_state.json`.
-Set `ANIME_TRACKING_STATE` to use another location. Existing installations using
-the earlier Windows path continue to reuse it automatically.
+Explicit work/season/episode → unique current local match → other local records →
+external discovery. `re0` and registered translations therefore select the current
+tracked installment, not the first season returned by a provider. Multiple current
+matches are a genuine ambiguity. An explicit other season never inherits the old
+season's progress. Search-title variants aid retrieval, not record equivalence.
 
-Useful commands:
+Every v2 record has its own `track_id`, `revision` and `identity_revision`. Provider
+IDs are repairable bindings, never primary keys. Shared aliases/IDs never authorize
+deletion, deduplication or merging. Reports project the legacy fields alongside
+`work_identity.track_id`, stage records and binding-repair evidence.
 
-```bash
-python scripts/find_anime_release.py "TITLE" --tier browse --include-magnet --legal-ok --json
-python scripts/find_anime_release.py "TITLE" --latest --tier browse --json
-python scripts/find_anime_release.py "TITLE" --official-air-date --episode 4 --no-state-update --json
+The high-level workflow locks `WorkIdentity`. Metadata, cache, search results and
+downloads cannot replace it. On a binding conflict the program searches that same
+installment once. Repair needs the provider's own work/season/part/type evidence and
+an independent provider or reviewed official page. Scores, airing status, total
+episodes and discovered releases do not establish equivalence. Whole-season versus
+split-part provider entries are not interchangeable. Ambiguity returns a conflict;
+read-only runs return repair proposals without saving them.
+
+## State commands and delivery
+
+The repository is the only state writer. Operations explicitly create a track,
+record waiting, save broadcast evidence, repair a binding, journal delivery, mark
+delivered completion, or apply an intentional manual edit/removal. Updates address
+`track_id`; per-work locks and identity revision checks protect finalization. The
+existing qBittorrent profile lock and exact-hash check still serialize client sends.
+
+Prepared operations are saved before client handoff. Accepted receipts are saved
+before progress commit. `accepted_state_commit_failed` is not success: preserve the
+receipt and rerun the same verified hash for client reinspection, never blindly
+advance progress or substitute a different candidate. A launcher exit is not client
+acceptance. Accepted magnets count as handled; downloading need not finish.
+
+Only a qualified integer regular-episode magnet delivered to the user, verified
+client acceptance, or an explicit manual operation can advance handled progress.
+`watched_episode` retains this user's delivery-counts-as-handled meaning. Movie,
+batch, special, decimal episode, unqualified/discovery-only result and failed client
+handoff do not advance it. Latest at/below handled progress skips the client and is
+`latest_already_handled`, not `already_present`. Explicit old-episode retrieval
+leaves tracking state unchanged. Stale searches cannot regress progress or reopen
+completed records.
+
+Only confirmed current TV/TV_SHORT/ONA work can start tracking automatically.
+Completed tracks are retained. A confirmed finale is targeted under the same quality
+and subtitle constraints; completion requires its delivery, not merely its date.
+Read [completion.md](completion.md) for official attestations, split-cour boundaries
+and cleanup of the owning automation after persisted completion. Do not change a
+scheduler during maintenance migration/deployment.
+
+`--no-state-update` prohibits tracking writes AND client submission, even if enqueue
+was also supplied. Disposable evidence/RSS caches may still be written. A probe
+or v1 read does not migrate the state file.
+
+## Commands
+
+For an intentional scope edit to an existing record, use `update TITLE --track-id
+ID_FROM_PROBE` with the desired fields. A title-plus-new-season lookup can otherwise
+create a separate row. The ID does not authorize changing a work to fit a candidate.
+The reviewed-release path keeps source numbering separate and normally needs no
+local season edit.
+
+```powershell
 python scripts/airing_watch_state.py probe "TITLE"
 python scripts/airing_watch_state.py get "TITLE"
 python scripts/airing_watch_state.py record-found "TITLE" --episode 4
+python scripts/airing_watch_state.py update "TITLE" --season S04 --watched 4
 python scripts/airing_watch_state.py delete "TITLE"
+python scripts/migrate_tracking_state.py --state PATH --preview
+python scripts/migrate_tracking_state.py --state PATH --apply --expected-sha256 PREVIEW_HASH
 ```
 
-## Rules
+`record-found` is an explicit manual/verified-delivery operation, not a discovery
+shortcut. It does not create unknown tracks. Automated finalization must use the
+high-level command, which performs candidate review, identity, constraints, client
+acceptance and state submission together.
 
-- Only a current/still-airing TV, TV_SHORT, or ONA may enter state. Old shows, movies, completed shows, OVAs, and specials stay stateless.
-- Resolve the exact work before consulting progress. Match records by `bangumi_id` or `anilist_id` when available, then by title aliases for backward compatibility.
-- `search_titles` is an ordered list of English/romaji Nyaa query names. `verified_search_titles` contains names that actually produced a selected release. For a tracked search, use the verified titles as the ordinary Nyaa query lane and omit the broad Chinese display title from that lane; the display title is only a strict-Chinese supplemental query when subtitles are required. A Chinese-only tracked record is incomplete and must be enriched through Bangumi before Nyaa is queried.
-- New aliases and stable IDs are learned only when they bridge to an already tracked airing show or when a newly resolved airing show is added. Do not treat short technical cache entries as aliases or watch history.
-- A tracked title-only request is context-sensitive: an ordinary interactive request targets `next_episode`, while a Codex cron/automation run targets the latest regular episode already available through broad Nyaa discovery. An explicit episode, explicit continuation request, or explicit latest request always wins over this default.
-- A scheduled bare title is automatic-download intent unless the originating prompt explicitly says check only, magnet only, or no download. A qualified latest result must be passed through the high-level resolver with the reviewed `--candidate-id` and `--enqueue-qbittorrent`; accepting a result without enqueueing is an incomplete scheduled run.
-- For a scheduled bare title, treat stored progress as history rather than the target. Complete `latest_regular` discovery before exact verification, and require the selected episode to equal the latest episode established in that run before qBittorrent handoff. Do not ask for confirmation solely because this skips over stale `next_episode` values.
-- If scheduled latest discovery is incomplete because query coverage, network access, work identity, or season identity is unresolved, do not fall back to `next_episode`, enqueue anything, or update state. This narrow guard applies to automatic downloading only; ordinary interactive continuation remains unchanged.
-- The tracked record supplies the work identity, season, and trusted search titles; the intent rules above supply the target episode. Do not rediscover the work from a broad display-name query or accept a same-number release from a similarly named different work.
-- An explicit older or same-episode request is retrieval-only. Return the qualified release but leave the state file byte-for-byte unchanged.
-- Run `probe` before an ordinary title search. It is read-only and returns `watched_episode`, compact progress, and verified Nyaa search titles; a miss does not create state.
-- After a probe miss, ordinary Nyaa discovery remains read-only. Before returning the first result, route the exact work and episode through `find_anime_release.py` without `--no-state-update`. If metadata confirms a current/still-airing TV, TV_SHORT, or ONA, create the record automatically. A successful episode becomes watched and advances `next_episode`; a qualified current show whose target is unavailable or unqualified may enter `waiting` without advancing watched progress.
-- Treat `watched_episode` as the user's actual completed progress. For this user, successfully returning a fully qualified regular episode with its magnet means the episode has been watched.
-- Persist `mainline_scope` and `related_titles` for current shows when AniList supplies them. A sole mainline season may inherit missing release season labels; side stories and multi-season ambiguity may not.
-- When the user changes or selects only the season of a tracked show, preserve `next_episode`. Normalize the season to `SNN` and search that exact next episode; do not ask the user to repeat an episode number.
-- `--latest` records AniList schedule evidence separately and establishes the release target through episode-free ordinary searches. A future `nextAiringEpisode - 1` is an official airing observation, not a cap on published candidates. Metadata failure does not erase known work IDs/aliases or prevent resource discovery.
-- `--official-air-date --episode N` is a read-only failure-recovery query. It never updates tracking state and permits a Nyaa listing scan only for a currently releasing mainline anime whose official series start date is no more than 366 days old. Recent episodes scan from air date to today; older episodes scan only from the exact air date through seven days later. Finished new anime and long-running old anime are ineligible.
-- Do not infer a rescue start date from Nyaa upload timestamps when AniList has no exact `AiringSchedule` entry.
-- Keep availability cases distinct. `not_aired_yet` means the normal official target time is still in the future. `availability.state = aired_no_release` means it aired but no qualified release was delivered. An official same-series gap of 10.5–27.99 days is `airing_schedule_break`; 28 days or more without explicit part evidence is `long_break_unconfirmed`. If the current entry is finished at its authoritative episode count and an official mainline sequel is explicitly Part 2/2nd Cour, return `split_cour_break`; otherwise return `part_finished` with any known sequel date. Do not search Nyaa, return the previous episode, or update progress for any future/break/part-boundary case.
-- After a direct Nyaa verification succeeds for a tracked integer regular episode strictly ahead of completed progress, run `record-found`. It updates `watched_episode`, `latest_known_episode`, and `next_episode = watched_episode + 1`.
-- `record-found` returns `unchanged` and performs no file write when the requested episode is equal to or older than completed progress. Derive legacy completed progress from `watched_episode`, or from `next_episode - 1` when `watched_episode` is absent.
-- A latest-available request follows the same rule: return the latest qualified release, but advance only when its episode is strictly ahead of completed progress. If the latest is equal to or behind progress, return `latest_already_handled` with the current and next episode instead of presenting it as a new find.
-- A qualified link-only result advances progress only when its verified magnet is actually included in the output. An automatic-download result advances only after qBittorrent reports `already_present`, `submitted`, or `submitted_verified`.
-- Progress history does not prove that a qBittorrent task or downloaded file currently exists. When a scheduled latest run is already handled, do not call qBittorrent and report `qbittorrent.status = not_attempted` with reason `latest_already_handled`; never describe that skip as `already_present`.
-- The high-level resolver must apply the same forward-only, zero-write rule on a qualified regular-episode success.
-- Never update watched progress for discovery-only rows, failures, unqualified results, missing magnets, specials, decimal episodes, movies, or whole-season packages. Do not use low-level `record-found` to create an untracked title; use the high-level resolver so current-airing eligibility and stable identity are verified first.
-- Specials, decimal episodes, unknown candidates, and `needs_confirmation` never advance state.
-- Remove a record only when AniList reliably confirms the final regular episode or the user explicitly says the show is finished.
+Migration applies only during a quiet writer window: lock, verify preview hash,
+exclusive backup, assign independent IDs, preserve all rows/progress/completion,
+mark historical bindings pending verification and atomically replace the JSON.
+No alias-based deduplication. A changed preview hash requires a new preview.
+See [architecture-v2.md](architecture-v2.md) for internal contracts and maintenance.

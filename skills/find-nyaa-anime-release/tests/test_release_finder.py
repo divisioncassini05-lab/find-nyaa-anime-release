@@ -17,6 +17,13 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import find_anime_release as finder
+import anime_release.workflow as v2_workflow
+import anime_release.identity as v2_identity
+import anime_release.legacy_state as v2_legacy_state
+import anime_release.metadata as v2_metadata
+import anime_release.providers as v2_providers
+from anime_release.repository import StateRepository
+from anime_release.evidence import from_raw
 import airing_watch_state as watch_state
 import release_search_core as core
 import search_nyaa_releases as nyaa
@@ -44,7 +51,7 @@ def candidate(title: str, size: str, seeders: int) -> nyaa.Candidate:
         downloads=0,
         published="2026-07-10",
         category="Anime",
-        url=f"https://example.test/{seeders}",
+        url=f"https://nyaa.si/view/{seeders}",
         magnet=None,
         matched_queries=["fixture"],
         reasons=[],
@@ -1904,7 +1911,7 @@ class HybridWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             cache = Path(temp_dir) / "schedule.json"
             with (
-                patch.object(finder, "anilist_air_date_request", return_value=response) as request,
+                patch.object(v2_providers, "anilist_air_date_request", return_value=response) as request,
                 patch.object(finder.time, "time", return_value=1784810000),
             ):
                 found = finder.official_air_date_report(
@@ -1966,7 +1973,7 @@ class HybridWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
                 patch.object(
-                    finder,
+                    v2_providers,
                     "anilist_air_date_request",
                     return_value=response,
                 ),
@@ -2026,11 +2033,12 @@ class HybridWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = io.StringIO()
             with (
-                patch.object(finder, "load_state", return_value={"version": 1, "shows": []}),
-                patch.object(finder, "sanitize_state_aliases", return_value=["repair"]),
-                patch.object(finder, "save_state") as save_state,
-                patch.object(finder, "resolve_work_identity", return_value=identity),
-                patch.object(finder, "anilist_air_date_request", return_value=finished),
+                patch.object(v2_workflow, "load_state", return_value={"version": 1, "shows": []}),
+                patch.object(v2_legacy_state, "sanitize_state_aliases", return_value=["repair"]),
+                patch.object(StateRepository, "commit") as save_state,
+                patch.object(v2_identity, "resolve_work_identity", return_value=identity),
+                patch.object(v2_providers, "anilist_media_request", return_value=finished),
+                patch.object(v2_providers, "anilist_air_date_request", return_value=finished),
                 patch.object(finder.time, "time", return_value=1784810000),
                 contextlib.redirect_stdout(output),
             ):
@@ -2085,7 +2093,7 @@ class HybridWorkflowTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.object(
-                finder,
+                v2_providers,
                 "anilist_air_date_request",
                 return_value=response,
             ):
@@ -2139,12 +2147,12 @@ class HybridWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
                 patch.object(
-                    finder,
+                    v2_providers,
                     "anilist_air_date_request",
                     side_effect=missing_schedule,
                 ),
                 patch.object(
-                    finder,
+                    v2_providers,
                     "anilist_media_request",
                     return_value=media_response,
                 ) as media_request,
@@ -2194,7 +2202,7 @@ class HybridWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             cache = Path(temp_dir) / "schedule.json"
             with patch.object(
-                finder,
+                v2_providers,
                 "resolve_title",
                 return_value=("resolved", fresh),
             ) as resolve:
@@ -2834,72 +2842,6 @@ class HybridWorkflowTests(unittest.TestCase):
         self.assertEqual(details.call_count, 2)
         self.assertEqual({c.args[0] for c in details.call_args_list}, {'2135586','2134348'})
 
-    def test_skill_uses_one_candidate_fast_path_and_keeps_complex_shortlists(self) -> None:
-        skill_text = (SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn(
-            "Never select the first row merely because it is first.",
-            skill_text,
-        )
-        self.assertIn(
-            "verify exactly one ID",
-            skill_text,
-        )
-        self.assertIn(
-            "try exactly one distinct backup candidate",
-            skill_text,
-        )
-        self.assertIn(
-            "Build a representative shortlist of up to 3–5 IDs only",
-            skill_text,
-        )
-        self.assertIn("--fast-verify", skill_text)
-        self.assertIn(
-            "RSS/listing cache writes are disposable network caches",
-            skill_text,
-        )
-        self.assertIn(
-            "Never declare a latest episode from a CJK-only discovery.",
-            skill_text,
-        )
-        self.assertIn(
-            "Always run a read-only local-state probe",
-            skill_text,
-        )
-        self.assertIn(
-            "The default hard floor is 1 GiB",
-            skill_text,
-        )
-        self.assertIn(
-            "if a genuine simplified/traditional pair is independently available, try both in the same supplemental call",
-            skill_text.casefold(),
-        )
-        self.assertIn("the trustworthy Chinese-title supplemental exact-episode lane is mandatory", skill_text)
-        self.assertIn("a Japanese title containing kana is not a substitute", skill_text)
-        self.assertIn("Tracking state is not an answer cache", skill_text)
-        self.assertIn("Do not manufacture or persist a Traditional alias", skill_text)
-        self.assertIn(
-            "skips subtitle detail inspection",
-            skill_text,
-        )
-        self.assertIn(
-            "the Chinese lane is a supplement, not a replacement",
-            skill_text,
-        )
-        self.assertIn(
-            "let the ordinary broad Latin/romaji discovery determine the latest regular episode",
-            skill_text,
-        )
-        self.assertIn("--trust-cjk-title-for-zh", skill_text)
-        self.assertIn("references/failure-recovery.md", skill_text)
-        recovery_text = (SCRIPTS.parent / "references" / "failure-recovery.md").read_text(encoding="utf-8")
-        self.assertIn("--official-air-date", recovery_text)
-        self.assertIn("--recent-since", recovery_text)
-        self.assertIn("--recent-until", recovery_text)
-        self.assertIn("--current-new-anime", recovery_text)
-        self.assertIn("latest already available", skill_text.lower())
-        self.assertIn("Every pinned finalization reads `https://nyaa.si/view/ID`", skill_text)
-        self.assertNotIn("--min-gib-per-episode 0", skill_text)
-
     def test_candidate_id_rejects_multisub_only_and_hides_magnet(self) -> None:
         args = search_args()
         args.query = "Mushoku Tensei"
@@ -2986,8 +2928,8 @@ class HybridWorkflowTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch.object(core, "discover_release_candidates", return_value=payload),
-            patch.object(finder, "resolve_work_identity") as metadata,
-            patch.object(finder, "save_state") as save_state,
+            patch.object(v2_identity, "resolve_work_identity") as metadata,
+            patch.object(StateRepository, "commit") as save_state,
             contextlib.redirect_stdout(output),
         ):
             return_code = nyaa.main(
@@ -3040,8 +2982,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3114,14 +3056,14 @@ class HighLevelStateTests(unittest.TestCase):
             )
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_bangumi_title") as bangumi,
-                patch.object(finder, "resolve_title") as anilist,
+                patch.object(v2_providers, "resolve_bangumi_title") as bangumi,
+                patch.object(v2_providers, "resolve_title") as anilist,
                 patch.object(
-                    finder,
+                    v2_metadata,
                     "hydrate_airing_metadata",
                     side_effect=lambda resolved, *_: (resolved, "fixture"),
                 ),
-                patch.object(finder, "search_release_report", return_value=no_release) as search,
+                patch.object(v2_workflow, "search_release_report", return_value=no_release) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3204,11 +3146,11 @@ class HighLevelStateTests(unittest.TestCase):
             )
             output = io.StringIO()
             reports = [
-                found_report("Tenmaku no Jaadugar", 3, "magnet:?xt=urn:btih:witch"),
-                found_report("Grow Up Show", 2, "magnet:?xt=urn:btih:sunflower"),
+                found_report("Tenmaku no Jaadugar", 3, "magnet:?xt=urn:btih:f2902b9eaa13bacf8127a623aea6287d51b4b715"),
+                found_report("Grow Up Show", 2, "magnet:?xt=urn:btih:a678a63d6add51c38f698c580c77287215c4b5e5"),
             ]
             with (
-                patch.object(finder, "search_release_report", side_effect=reports) as search,
+                patch.object(v2_workflow, "search_release_report", side_effect=reports) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3228,8 +3170,8 @@ class HighLevelStateTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(payload["status"], "batch")
         self.assertEqual(len(payload["results"]), 2)
-        self.assertIn("magnet:?xt=urn:btih:witch", payload["reply_text"])
-        self.assertIn("magnet:?xt=urn:btih:sunflower", payload["reply_text"])
+        self.assertIn("magnet:?xt=urn:btih:f2902b9eaa13bacf8127a623aea6287d51b4b715", payload["reply_text"])
+        self.assertIn("magnet:?xt=urn:btih:a678a63d6add51c38f698c580c77287215c4b5e5", payload["reply_text"])
         self.assertTrue(payload["output_contract"]["ready"])
         self.assertEqual([call.args[0].query for call in search.call_args_list], ["Tenmaku no Jaadugar", "Grow Up Show"])
 
@@ -3263,8 +3205,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3319,7 +3261,7 @@ class HighLevelStateTests(unittest.TestCase):
             )
             output = io.StringIO()
             with (
-                patch.object(finder, "search_release_report", return_value=report) as search,
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3364,6 +3306,8 @@ class HighLevelStateTests(unittest.TestCase):
             status="RELEASING",
             bangumi_id=570583,
             anilist_id=999,
+            evidence=(from_raw('bangumi', {'id':570583, 'type':2, 'platform':'TV',
+                'name':'Grow Up Show: Himawari no Circus-dan', 'name_cn':'向日葵马戏团'}),),
         )
         selected_candidate = candidate(
             "[Erai-raws] Grow Up Show: Himawari no Circus-dan - 02 [1080p]",
@@ -3419,10 +3363,10 @@ class HighLevelStateTests(unittest.TestCase):
             output = io.StringIO()
             failed_anilist = finder.ResolvedAnime(title="fixture", source="anilist unavailable")
             with (
-                patch.object(finder, "resolve_bangumi_title", return_value=("resolved", bangumi)),
-                patch.object(finder, "resolve_title", return_value=("resolver_failed", failed_anilist)),
-                patch.object(finder, "hydrate_airing_metadata", return_value=(bangumi, "unavailable")),
-                patch.object(finder, "search_release_report", return_value=report) as search,
+                patch.object(v2_providers, "resolve_bangumi_title", return_value=("resolved", bangumi)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolver_failed", failed_anilist)),
+                patch.object(v2_metadata, "hydrate_airing_metadata", return_value=(bangumi, "unavailable")),
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3446,8 +3390,9 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertEqual(saved["search_titles"][0], "Grow Up Show Sunflower Circus")
         self.assertEqual(saved["verified_search_titles"], ["Grow Up Show Sunflower Circus"])
         self.assertEqual(saved["bangumi_id"], 570583)
-        self.assertEqual(len(saved_state["shows"]), 1)
-        self.assertIn("Grow Up Show: Himawari no Circus-dan", saved["aliases"])
+        self.assertEqual(len(saved_state["shows"]), 2)  # A shared provider ID never deduplicates local records.
+        self.assertEqual(saved_state["shows"][1]["title"], "Grow Up Show: Himawari no Circus-dan")
+        self.assertIn("Grow Up Show: Himawari no Circus-dan", saved["search_titles"])
         self.assertEqual(payload["identity_sources"][:2], ["state", "bangumi"])
 
     def test_authoritative_failure_requests_web_without_searching_chinese_nyaa(self) -> None:
@@ -3456,9 +3401,9 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_bangumi_title", return_value=("resolver_failed", failed)),
-                patch.object(finder, "resolve_title", return_value=("resolver_failed", failed)),
-                patch.object(finder, "search_release_report") as search,
+                patch.object(v2_providers, "resolve_bangumi_title", return_value=("resolver_failed", failed)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolver_failed", failed)),
+                patch.object(v2_workflow, "search_release_report") as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3491,9 +3436,9 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_bangumi_title") as bangumi,
-                patch.object(finder, "resolve_title") as anilist,
-                patch.object(finder, "search_release_report", return_value=report) as search,
+                patch.object(v2_providers, "resolve_bangumi_title") as bangumi,
+                patch.object(v2_providers, "resolve_title") as anilist,
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3539,8 +3484,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", return_value=no_rss),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=no_rss),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3592,8 +3537,8 @@ class HighLevelStateTests(unittest.TestCase):
             )
             output = io.StringIO()
             with (
-                patch.object(finder, "hydrate_airing_metadata", side_effect=lambda resolved, *_: (resolved, "hit")),
-                patch.object(finder, "search_release_report", return_value=no_rss),
+                patch.object(v2_metadata, "hydrate_airing_metadata", side_effect=lambda resolved, *_: (resolved, "hit")),
+                patch.object(v2_workflow, "search_release_report", return_value=no_rss),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3653,8 +3598,8 @@ class HighLevelStateTests(unittest.TestCase):
             state_path = root / "state.json"
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", return_value=report) as search,
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3696,7 +3641,7 @@ class HighLevelStateTests(unittest.TestCase):
             parse_release_identity("[Group] Example Anime - 04 [1080p]"),
             "match",
         )
-        item.candidate.magnet = "magnet:?xt=urn:btih:already-watched"
+        item.candidate.magnet = "magnet:?xt=urn:btih:8806d0a91bbb5b7a4e240bd2453682e52a899b88"
         report = core.ReleaseSearchReport(
             intent=core.SearchIntent.SPECIFIC_EPISODE,
             requested_season=1,
@@ -3735,7 +3680,7 @@ class HighLevelStateTests(unittest.TestCase):
             before = state_path.read_bytes()
             output = io.StringIO()
             with (
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3760,6 +3705,7 @@ class HighLevelStateTests(unittest.TestCase):
     def test_enqueue_success_advances_state_after_qbittorrent_accepts(self) -> None:
         release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
         release.magnet = "magnet:?xt=urn:btih:" + ("a" * 40)
+        release.url = "https://nyaa.si/view/123"
         item = core.ClassifiedCandidate(
             release,
             parse_release_identity(release.title),
@@ -3809,8 +3755,8 @@ class HighLevelStateTests(unittest.TestCase):
                 "info_hash": "a" * 40,
             }
             with (
-                patch.object(finder, "search_release_report", return_value=report),
-                patch.object(finder, "submit_magnet", return_value=accepted) as submit,
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "submit_magnet", return_value=accepted) as submit,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -3848,6 +3794,7 @@ class HighLevelStateTests(unittest.TestCase):
     def test_enqueue_failure_does_not_advance_state(self) -> None:
         release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
         release.magnet = "magnet:?xt=urn:btih:" + ("b" * 40)
+        release.url = "https://nyaa.si/view/123"
         item = core.ClassifiedCandidate(
             release,
             parse_release_identity(release.title),
@@ -3891,9 +3838,9 @@ class HighLevelStateTests(unittest.TestCase):
             before = state_path.read_bytes()
             output = io.StringIO()
             with (
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 patch.object(
-                    finder,
+                    v2_workflow,
                     "submit_magnet",
                     side_effect=finder.SubmissionError("fixture failure"),
                 ),
@@ -3957,13 +3904,14 @@ class HighLevelStateTests(unittest.TestCase):
             current=True,
             trackable=True,
             source="state",
-            status="FINISHED",
+            status="RELEASING",
             episodes=25,
             duration_min=24,
             anilist_id=123,
         )
         release = candidate("[Group] Example Season 4 - 14 [1080p]", "1.4 GiB", 30)
-        release.magnet = "magnet:?xt=urn:btih:example"
+        release.magnet = "magnet:?xt=urn:btih:c3499c2729730a7f807efb8676a92dcb6f8a3f8f"
+        release.url = "https://nyaa.si/view/123"
         item = core.ClassifiedCandidate(
             release,
             parse_release_identity(release.title),
@@ -4006,10 +3954,10 @@ class HighLevelStateTests(unittest.TestCase):
             )
             output = io.StringIO()
             with (
-                patch.object(finder, "hydrate_airing_metadata", return_value=(resolved, "hit")),
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_metadata, "hydrate_airing_metadata", return_value=(resolved, "hit")),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 patch.object(
-                    finder,
+                    v2_workflow,
                     "submit_magnet",
                     return_value={"status": "submitted_verified", "ok": True},
                 ),
@@ -4048,7 +3996,7 @@ class HighLevelStateTests(unittest.TestCase):
             current=True,
             trackable=True,
             source="state",
-            status="FINISHED",
+            status="RELEASING",
             episodes=25,
             anilist_id=123,
         )
@@ -4090,8 +4038,8 @@ class HighLevelStateTests(unittest.TestCase):
             before = state_path.read_bytes()
             output = io.StringIO()
             with (
-                patch.object(finder, "hydrate_airing_metadata", return_value=(resolved, "hit")),
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_metadata, "hydrate_airing_metadata", return_value=(resolved, "hit")),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4136,7 +4084,7 @@ class HighLevelStateTests(unittest.TestCase):
             parse_release_identity("[Group] Example Anime - 04 [1080p]"),
             "match",
         )
-        item.candidate.magnet = "magnet:?xt=urn:btih:already-watched"
+        item.candidate.magnet = "magnet:?xt=urn:btih:8806d0a91bbb5b7a4e240bd2453682e52a899b88"
         report = core.ReleaseSearchReport(
             intent=core.SearchIntent.LATEST_REGULAR,
             requested_season=1,
@@ -4177,12 +4125,12 @@ class HighLevelStateTests(unittest.TestCase):
             output = io.StringIO()
             with (
                 patch.object(
-                    finder,
+                    v2_metadata,
                     "hydrate_airing_metadata",
                     return_value=(scheduled, "hit"),
                 ),
-                patch.object(finder, "search_release_report", return_value=report),
-                patch.object(finder, "submit_magnet") as submit_magnet,
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "submit_magnet") as submit_magnet,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4273,7 +4221,7 @@ class HighLevelStateTests(unittest.TestCase):
             before = state_path.read_bytes()
             output = io.StringIO()
             with (
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4316,6 +4264,7 @@ class HighLevelStateTests(unittest.TestCase):
         )
         release = candidate("[Group] Example Anime - 08 [1080p]", "1.4 GiB", 30)
         release.magnet = "magnet:?xt=urn:btih:" + ("e" * 40)
+        release.url = "https://nyaa.si/view/123"
         item = core.ClassifiedCandidate(
             release,
             parse_release_identity(release.title),
@@ -4397,16 +4346,16 @@ class HighLevelStateTests(unittest.TestCase):
             outputs = []
             with (
                 patch.object(
-                    finder,
+                    v2_metadata,
                     "hydrate_airing_metadata",
                     side_effect=lambda *_: (scheduled, "hit"),
                 ),
                 patch.object(
-                    finder,
+                    v2_workflow,
                     "search_release_report",
                     side_effect=[missing, found, found],
                 ) as search,
-                patch.object(finder, "submit_magnet", return_value=accepted) as submit,
+                patch.object(v2_workflow, "submit_magnet", return_value=accepted) as submit,
             ):
                 for _ in range(3):
                     output = io.StringIO()
@@ -4472,8 +4421,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", side_effect=[primary, fallback]) as search,
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", side_effect=[primary, fallback]) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4537,8 +4486,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", return_value=report) as search,
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4617,8 +4566,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", side_effect=[primary, fallback]),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", side_effect=[primary, fallback]),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4672,8 +4621,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)) as resolve,
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)) as resolve,
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4722,8 +4671,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", old_resolved)),
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", old_resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4758,6 +4707,11 @@ class HighLevelStateTests(unittest.TestCase):
             next_airing_episode=13,
             next_airing_at=int(time.time()) + 3600,
         )
+        resolved.format = 'TV'
+        resolved.evidence = (from_raw('anilist', {'id': resolved.anilist_id,
+            'title': {'english': resolved.title}, 'format': 'TV', 'status':'RELEASING',
+            'episodes': resolved.episodes, 'duration': resolved.duration_min,
+            'nextAiringEpisode': {'episode': resolved.next_airing_episode, 'airingAt': resolved.next_airing_at}}),)
         item = core.ClassifiedCandidate(
             candidate("[Group] Example Season 4 - 12 [1080p]", "1.2 GiB", 10),
             parse_release_identity("[Group] Example Season 4 - 12 [1080p]"),
@@ -4778,8 +4732,8 @@ class HighLevelStateTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", return_value=report),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4814,16 +4768,20 @@ class HighLevelStateTests(unittest.TestCase):
             next_airing_episode=13,
             next_airing_at=int(time.time()) + 3600,
         )
+        fresh.format = 'TV'
+        fresh.evidence = (from_raw('anilist', {'id':123,'title':{'english':fresh.title},'format':'TV',
+            'status':'RELEASING','nextAiringEpisode':{'episode':13,'airingAt':fresh.next_airing_at}}),)
         with tempfile.TemporaryDirectory() as temp_dir:
             cache = Path(temp_dir) / "schedule.json"
-            with patch.object(finder, "resolve_title", return_value=("resolved", fresh)) as resolve:
-                _, first_status = finder.hydrate_airing_metadata(base, 1, cache, False, finder.date.today())
-                _, second_status = finder.hydrate_airing_metadata(base, 1, cache, False, finder.date.today())
+            with patch.object(v2_providers, "resolve_title", return_value=("resolved", fresh)) as resolve:
+                hydrated, first_status = finder.hydrate_airing_metadata(base, 1, cache, False, finder.date.today())
+                hydrated.evidence = ()
+                _, second_status = finder.hydrate_airing_metadata(hydrated, 1, cache, False, finder.date.today())
         self.assertEqual(first_status, "miss")
         self.assertEqual(second_status, "hit")
         self.assertEqual(resolve.call_count, 1)
 
-    def test_short_term_authoritative_cache_preserves_single_season_metadata(self) -> None:
+    def test_retired_authority_cache_cannot_supply_work_identity(self) -> None:
         cached = finder.ResolvedAnime(
             title="Cached Harbor Signals",
             aliases=["Harbor Signals"],
@@ -4854,12 +4812,12 @@ class HighLevelStateTests(unittest.TestCase):
                     str(root / "state.json"),
                 ]
             )
-            with patch.object(finder, "resolve_title", return_value=("unresolved", None)):
+            with patch.object(v2_providers, "resolve_title", return_value=("unresolved", None)):
                 identity = finder.resolve_work_identity(args, {"version": 1, "shows": []}, finder.date.today())
         self.assertEqual(identity.status, "resolved")
-        self.assertIn("metadata_cache", identity.sources)
-        self.assertEqual(identity.resolved.season, "S01")
-        self.assertEqual(identity.resolved.mainline_scope, "single")
+        self.assertNotIn("metadata_cache", identity.sources)
+        self.assertIsNone(identity.resolved.anilist_id)
+        self.assertIsNone(identity.resolved.season)
 
     def test_latest_before_first_episode_skips_rss(self) -> None:
         resolved = finder.ResolvedAnime(
@@ -4873,12 +4831,17 @@ class HighLevelStateTests(unittest.TestCase):
             next_airing_episode=1,
             next_airing_at=int(time.time()) + 3600,
         )
+        resolved.format = 'TV'
+        resolved.evidence = (from_raw('anilist', {'id': resolved.anilist_id,
+            'title': {'english': resolved.title}, 'format': 'TV', 'status':'RELEASING',
+            'episodes': resolved.episodes, 'duration': resolved.duration_min,
+            'nextAiringEpisode': {'episode': resolved.next_airing_episode, 'airingAt': resolved.next_airing_at}}),)
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report") as search,
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report") as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -4912,7 +4875,7 @@ class HighLevelStateTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch.object(
-                finder,
+                v2_metadata,
                 "official_air_date_report",
                 side_effect=[target, previous],
             ),
@@ -4986,17 +4949,17 @@ class HighLevelStateTests(unittest.TestCase):
             output = io.StringIO()
             with (
                 patch.object(
-                    finder,
+                    v2_metadata,
                     "hydrate_airing_metadata",
                     return_value=(scheduled, "hit"),
                 ),
                 patch.object(
-                    finder,
+                    v2_metadata,
                     "next_airing_context",
                     return_value=break_context,
                 ),
                 patch.object(finder.time, "time", return_value=1787889600),
-                patch.object(finder, "search_release_report") as search,
+                patch.object(v2_workflow, "search_release_report") as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -5032,7 +4995,7 @@ class HighLevelStateTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch.object(
-                finder,
+                v2_metadata,
                 "official_air_date_report",
                 side_effect=[target, previous],
             ),
@@ -5105,11 +5068,11 @@ class HighLevelStateTests(unittest.TestCase):
             output = io.StringIO()
             with (
                 patch.object(
-                    finder,
+                    v2_metadata,
                     "hydrate_airing_metadata",
                     return_value=(resolved, "hit"),
                 ),
-                patch.object(finder, "search_release_report") as search,
+                patch.object(v2_workflow, "search_release_report") as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -5167,7 +5130,7 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertTrue(resolved.continuation_parts[0]["explicit_split_cour"])
         self.assertEqual(resolved.continuation_parts[0]["start_date"], "2026-10-02")
 
-    def test_season_switch_preserves_tracked_next_episode(self) -> None:
+    def test_explicit_other_season_never_inherits_tracked_next_episode(self) -> None:
         report = core.ReleaseSearchReport(
             intent=core.SearchIntent.NEXT_TRACKED,
             requested_season=3,
@@ -5198,7 +5161,7 @@ class HighLevelStateTests(unittest.TestCase):
             )
             output = io.StringIO()
             with (
-                patch.object(finder, "search_release_report", return_value=report) as search,
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -5218,10 +5181,10 @@ class HighLevelStateTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         search_args = search.call_args.args[0]
         self.assertEqual(payload["season"], "S03")
-        self.assertEqual(payload["target_episode"], 3)
+        self.assertIsNone(payload["target_episode"])
         self.assertEqual(search_args.season, "S03")
-        self.assertEqual(search.call_args.kwargs["intent"], core.SearchIntent.NEXT_TRACKED)
-        self.assertEqual(search.call_args.kwargs["requested_episode"], 3)
+        self.assertEqual(search.call_args.kwargs["intent"], core.SearchIntent.SEASON_BROWSE)
+        self.assertIsNone(search.call_args.kwargs["requested_episode"])
 
 
 class SeasonBatchSelectionTests(unittest.TestCase):
@@ -5592,9 +5555,9 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
                 patch.object(
-                    finder,
+                    v2_workflow,
                     "search_release_report",
                     return_value=self.unavailable_batch_report(),
                 ) as search,
@@ -5633,9 +5596,9 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
                 patch.object(
-                    finder,
+                    v2_workflow,
                     "search_release_report",
                     return_value=self.unavailable_batch_report(),
                 ) as search,
@@ -5677,8 +5640,8 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report") as search,
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report") as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -5764,8 +5727,8 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
-                patch.object(finder, "search_release_report", side_effect=[primary, fallback]) as search,
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", side_effect=[primary, fallback]) as search,
                 contextlib.redirect_stdout(output),
             ):
                 finder.main(
@@ -5858,9 +5821,9 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
             root = Path(temp_dir)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
                 patch.object(
-                    finder,
+                    v2_workflow,
                     "search_release_report",
                     side_effect=[failed, failed, premium],
                 ) as search,

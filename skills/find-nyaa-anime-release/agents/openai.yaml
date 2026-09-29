@@ -1,4 +1,4 @@
 interface:
   display_name: "Find Nyaa Anime Release"
   short_description: "Find, track, and optionally enqueue anime releases."
-  default_prompt: "Use $find-nyaa-anime-release to find a qualified anime episode or movie, auto-track confirmed current anime, and verify the latest already-available regular episode before enqueueing a bare-title scheduled run."
+  default_prompt: "Use $find-nyaa-anime-release to read full chronological evidence, review identity and numbering as an Agent, then verify and deliver the qualified selection with receipt-based tracking."

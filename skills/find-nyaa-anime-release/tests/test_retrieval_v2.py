@@ -8,6 +8,7 @@ from test_reviewed_finalization import run_finder, release
 from test_release_finder import search_args
 import release_search_core as core
 import find_anime_release as finder
+import anime_release.providers as v2_providers
 from release_identity import parse_release_identity
 from offline_identity import import_aod, import_anime_lists, lookup, map_episode
 from benchmark_retrieval import benchmark
@@ -118,7 +119,7 @@ def test_schedule_failure_with_known_identity_does_not_prevent_search(tmp_path):
     from urllib.error import HTTPError
     resolved=finder.ResolvedAnime(title='Example Anime',search_titles=['Example Anime'],
                                  anilist_id=12,season='S01',current=True,trackable=True,status='RELEASING',format='TV')
-    with patch.object(finder,'anilist_media_request',side_effect=HTTPError('https://example.test',403,'Forbidden',{},None)):
+    with patch.object(v2_providers,'anilist_media_request',side_effect=HTTPError('https://example.test',403,'Forbidden',{},None)):
         hydrated,status=finder.hydrate_airing_metadata(resolved,1,tmp_path/'schedule.json',True,finder.date.today())
     assert hydrated.title==resolved.title
     assert status=='unavailable'

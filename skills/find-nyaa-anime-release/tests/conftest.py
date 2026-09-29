@@ -14,3 +14,9 @@ def block_unintended_nyaa_transport(request,monkeypatch):
     def blocked(*_,**__):
         pytest.fail('Unmocked live Nyaa transport attempted by an offline test')
     monkeypatch.setattr(nyaa._TRANSPORT_CLIENT,'_request',blocked)
+    import anime_release.workflow as workflow
+    def no_delivery(*_, **__):
+        pytest.fail('Unmocked client delivery attempted by a refactor test')
+    monkeypatch.setattr(workflow, 'submit_magnet', no_delivery)
+    import urllib.request
+    monkeypatch.setattr(urllib.request, 'urlopen', blocked)

@@ -18,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import airing_watch_state as watch_state
 import find_anime_release as finder
+import anime_release.providers as v2_providers
 import state_io
 
 
@@ -58,7 +59,7 @@ class CorruptStateTests(unittest.TestCase):
             path.write_bytes(original)
             output = io.StringIO()
             with (
-                patch.object(finder, "resolve_title") as resolve,
+                patch.object(v2_providers, "resolve_title") as resolve,
                 contextlib.redirect_stdout(output),
             ):
                 code = finder.main(["Example", "--state", str(path), "--json"])
@@ -87,7 +88,7 @@ class CorruptStateTests(unittest.TestCase):
             changed = {"version": 1, "shows": [show("A", 2, anilist_id=1)]}
             with patch.object(state_io.os, "replace", side_effect=OSError("disk full")):
                 with self.assertRaises(OSError):
-                    state_io.save_state(path, changed)
+                    state_io.save_state(path, changed, base=original)
             self.assertEqual(before, path.read_bytes())
             self.assertEqual([], list(path.parent.glob("state.json.*.tmp")))
 

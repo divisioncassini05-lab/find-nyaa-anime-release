@@ -1,16 +1,49 @@
 # Retrieval core v2
 
+The default workflow is now [Agent review of full evidence](agent-review.md).
+This reference describes the retained compatibility resolver and specialized
+movie/batch verification. Its scores, query planning and filtered summaries are
+advisory, not the primary discovery or selection authority.
+
 Use for latest/exact ambiguity, interpreting a report, maintaining parsers or replaying failures.
 
 ## Decision boundaries
 
-Resolve a work using reliable IDs and source-backed aliases → plan broad/exact queries → retain raw rows → interpret title spans and structural evidence → confirm target → evaluate quality → Agent review → refetch the reviewed ID's detail → deliver only if requested and qualified.
+Resolve the immutable local work/season/part identity first → validate provider bindings → plan broad/exact queries → retain raw rows → interpret title spans and structural evidence → confirm target → evaluate quality → Agent review → refetch the reviewed ID's detail → deliver only if requested and qualified. Provider IDs and search aliases cannot merge local records. See [architecture-v2.md](architecture-v2.md) for the workflow/state boundary.
 
 Aniparse 2.0.0 provides hypotheses through `identity_adapter.py`; it is not the identity authority. The adapter masks known full-title spans and records episode positions, seasonal evidence and conflicts. A title number such as `20 Seiki` does not become episode 20. Weak interpretations never inherit another candidate's explicit evidence. A lower, excluded conflict does not block a confirmed higher episode; an unresolved plausible higher episode does.
 
 Regular releases exclude specials, decimal episodes, previews and batches. Movie and season-package entrypoints retain their own checks. Source-numbering conversion requires both `--source-numbering` and `--target-numbering` and one unambiguous, source-stamped range. Missing mappings are unresolved; no guessed offsets.
 
 Latest is determined before size/subtitle eligibility or candidate pinning. If episode 10 exists but fails the floor, keep target 10 and its rejection; do not select episode 9. A detail failure does not erase an already established target. A conflicting newer detail causes latest to be reconsidered.
+
+## Chronological discovery before filtering
+
+For an eligible current/latest search, use a verified work-identifying title rather
+than a franchise-wide word or guessed season suffix. Inspect the original first
+page in newest-publication order. The existing native client supports this directly:
+
+```python
+from nyaa_client import NyaaClient, parse_listing
+page = NyaaClient().fetch_listing(
+    verified_title, "1_0", "0", 1, 20, sort="id", order="desc"
+)
+rows = parse_listing(page)
+```
+
+Run from the skill's scripts directory or add it to the import path. This is a
+read-only listing request using the existing verified transport. Read every row's
+full title, ID, size, publication time and seeders in that page; inspect relevant
+detail evidence after identifying plausible target candidates. Reuse equivalent
+complete raw results already obtained instead of fetching them again.
+
+The CLI automatically chooses size sorting when `--episode` is supplied, even in
+discovery mode. Check the reported ordering; do not describe it as chronological.
+The discovery `candidates` summary may exclude season mismatches before display,
+while `search_run.raw_candidates` retains them. Review plausible mismatches against
+the actual work and numbering evidence. Do not change a locked identity to fit a
+candidate. If the existing verifier cannot represent the established numbering,
+report that limitation rather than absence or bypassing verification.
 
 ## Reports and Agent use
 
@@ -24,7 +57,11 @@ Latest is determined before size/subtitle eligibility or candidate pinning. If e
 
 Legacy fields remain projections. Do not infer “only E07 exists” from two summary choices. Use raw title evidence and target decision; separate official schedule failures (including 403) from search failures and quality rejection.
 
-Scheduled workflow:
+Compatibility scheduled workflow (new runs use `--review` as in agent-review.md):
+
+First check [completion.md](completion.md). Completed delivery returns before Nyaa;
+a confirmed finished season with a missing finale performs an exact-finale search,
+which does not claim to establish latest from a broad release scan.
 
 ```powershell
 python scripts/find_anime_release.py "TITLE" --latest --want-zh --no-state-update --json --explain
@@ -33,6 +70,25 @@ python scripts/find_anime_release.py "TITLE" --latest --candidate-id 1234567 --w
 ```
 
 Use the effective accepted tier and original subtitle policy on finalization. Do not retry an unreviewed enqueue command: it returns `review_required`. A candidate pin is selection intent, not an override of work, latest, quality or detail checks. For maintenance tests, always omit enqueue and add `--no-state-update`.
+
+## Movie and whole-season finalization
+
+Use the raw evidence tool and model-led selection for these modes too. Keep a short
+selection record with work/version, selected ID, numbering or coverage, key evidence
+and search scope. Then pin the reviewed ID in the specialized validators:
+
+```powershell
+python scripts/search_nyaa_releases.py "VERIFIED MOVIE TITLE" --movie --min-total-gib 10 --want-zh --candidate-id 1234567 --include-magnets --legal-ok --report
+python scripts/find_anime_release.py "TRACKED TITLE" --whole-season --candidate-id 1234567 --want-zh --no-state-update --json
+```
+
+For whole-season delivery replace audit with the authorized `--include-magnet
+--legal-ok --enqueue-qbittorrent`. Add the verified season and original quality
+bounds when applicable. These retained endpoints still run compatibility identity
+checks as well as movie-size or batch/file-coverage checks. If a parser disagrees
+with established evidence, report that verifier limitation; never claim absence,
+change local identity to appease it, or bypass the size/coverage checks. Do not let
+their filtered output replace raw discovery. Movie link delivery remains stateless.
 
 ## Offline metadata
 

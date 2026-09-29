@@ -74,8 +74,8 @@ class FakeResponse:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def read(self) -> bytes:
-        return self.payload
+    def read(self, size: int = -1) -> bytes:
+        return self.payload if size < 0 else self.payload[:size]
 
 
 class NyaaClientTests(unittest.TestCase):
@@ -84,7 +84,8 @@ class NyaaClientTests(unittest.TestCase):
 
         def opener(request: object, timeout: float) -> FakeResponse:
             seen.append(getattr(request, "full_url"))
-            self.assertEqual(timeout, 7)
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, 7)
             return FakeResponse(RSS)
 
         client = NyaaClient(opener=opener)

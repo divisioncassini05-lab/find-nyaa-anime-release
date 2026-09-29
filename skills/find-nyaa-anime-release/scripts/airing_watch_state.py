@@ -13,6 +13,7 @@ from typing import Any
 
 from runtime_paths import DEFAULT_STATE
 from state_io import StateFileError, load_state, save_state
+from tracked_identity import find_tracked_show, tracked_matches
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -49,36 +50,21 @@ def strict_zh_title_variants(show: dict[str, Any]) -> list[str]:
 
 
 def find_show(data: dict[str, Any], query: str) -> dict[str, Any] | None:
-    q = norm(query)
-    if not q:
-        return None
-
-    exact_matches: list[dict[str, Any]] = []
-    for show in data.get("shows", []):
-        for name in names_for(show):
-            n = norm(name)
-            if q == n:
-                exact_matches.append(show)
-                break
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-    if exact_matches or len(q) < 4:
-        return None
-
-    partial_matches: list[dict[str, Any]] = []
-    for show in data.get("shows", []):
-        for name in names_for(show):
-            n = norm(name)
-            if n and (q in n or n in q):
-                partial_matches.append(show)
-                break
-    if len({id(show) for show in partial_matches}) == 1:
-        return partial_matches[0]
-    return None
+    return find_tracked_show(data, query)
 
 
 def upsert_show(data: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    show = find_show(data, args.title)
+    if getattr(args, 'track_id', None):
+        matches = [s for s in data['shows'] if s.get('track_id') == args.track_id]
+        if len(matches) != 1:
+            raise StateFileError('Exact track ID was not found; no record created')
+        if norm(args.title) not in {norm(n) for n in names_for(matches[0])}:
+            raise StateFileError('Title does not belong to the addressed track ID')
+    else:
+        matches = tracked_matches(data, args.title, args.season)
+    if len(matches) > 1:
+        raise StateFileError('Ambiguous tracked identity; specify the exact season before a manual update')
+    show = matches[0] if matches else None
     if show is None:
         show = {"title": args.title, "aliases": [], "airing": True, "created_at": now_iso()}
         data["shows"].append(show)
@@ -120,6 +106,10 @@ def probe_payload(show: dict[str, Any] | None) -> dict[str, Any]:
         "status": "tracked",
         "tracked": True,
         "title": show.get("title"),
+        "track_id": show.get("track_id"),
+        "revision": show.get("revision"),
+        "identity_revision": show.get("identity_revision"),
+        "part": show.get("part"),
         "aliases": show.get("aliases", []),
         "season": show.get("season"),
         "watched_episode": show.get("watched_episode"),
@@ -131,6 +121,8 @@ def probe_payload(show: dict[str, Any] | None) -> dict[str, Any]:
         "verified_search_titles": show.get("verified_search_titles", []),
         "strict_zh_title_variants": strict_zh_title_variants(show),
         "pending_download": show.get("pending_download"),
+        "completion": show.get("completion", {}),
+        "total_episodes": show.get("total_episodes"),
     }
 
 
@@ -275,6 +267,9 @@ def record_found_episode(
         }
 
     current_completed = completed_episode(show)
+    if show.get("status") == "completed":
+        return {"status": "unchanged", "tracked": True, "title": show.get("title"),
+                "reason": "season_completed", "next_episode": None}
     if current_completed is not None and episode <= current_completed:
         return {
             "status": "unchanged",
@@ -376,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_update = sub.add_parser("update", help="Create or update an airing show")
     p_update.add_argument("title")
+    p_update.add_argument('--track-id', help='Address an existing record exactly, including when filling unknown season metadata')
     p_update.add_argument("--alias", action="append")
     p_update.add_argument("--season")
     p_update.add_argument("--watched", type=int)
@@ -398,7 +394,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "get":
         print_show(find_show(data, args.title))
     elif args.cmd == "probe":
-        print(json.dumps(probe_payload(find_show(data, args.title)), ensure_ascii=False))
+        matches = tracked_matches(data, args.title)
+        payload = ({"status": "ambiguous", "tracked": True,
+                    "choices": [probe_payload(show) for show in matches]}
+                   if len(matches) > 1 else probe_payload(matches[0] if matches else None))
+        print(json.dumps(payload, ensure_ascii=False))
     elif args.cmd == "list":
         print(json.dumps(data.get("shows", []), ensure_ascii=False, indent=2))
     elif args.cmd == "record-found":

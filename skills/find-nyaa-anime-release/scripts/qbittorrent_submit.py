@@ -22,6 +22,11 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 
+from http_transport import fetch_bytes, TransportError
+from client_context import ClientContextError, require_context
+
+_DEFAULT_URLOPEN = urlopen
+
 
 DEFAULT_SAVE_PATH = Path(r"C:\User_data\Download\qBittorrent")
 DEFAULT_BACKUP_DIR = (
@@ -55,7 +60,7 @@ class SubmissionError(RuntimeError):
 
     def as_report(self) -> dict[str, Any]:
         recovery = {}
-        if self.code in {"startup_exited_without_client", "handoff_unverified"}:
+        if self.code in {"startup_exited_without_client", "handoff_unverified", "client_context_required"}:
             recovery = {"client_recovery": {
                 "action": "retry_full_resolver_in_approved_user_context",
                 "requires_execution_tool_approval": True,
@@ -64,10 +69,30 @@ class SubmissionError(RuntimeError):
                 "startup_only_is_insufficient": True,
                 "do_not_repeat_unchanged_context": True,
                 "max_context_retries": 1,
-                "cause_confirmed": False,
+                "cause_confirmed": self.code == "client_context_required",
+                "scheduled_retry_allowed": False,
             }}
         return {**self.diagnostics, **recovery, "status": "error", "ok": False, "error": str(self),
                 "error_code": self.code, "retryable": self.retryable}
+
+
+def require_client_context(executable: Path | None = None) -> dict[str, Any]:
+    try:
+        return require_context() if executable is None else require_context_for_executable(executable)
+    except ClientContextError as exc:
+        raise SubmissionError(str(exc), code=exc.report['status'], retryable=False,
+                              diagnostics={'stage': 'client_context',
+                                           'execution_context': exc.report,
+                                           'submission_attempts': 0,
+                                           'client_attempted': False}) from exc
+
+
+def require_context_for_executable(executable: Path) -> dict[str, Any]:
+    from client_context import inspect_context
+    report = inspect_context(executable=executable)
+    if not report['ok']:
+        raise ClientContextError(report)
+    return report
 
 
 @contextmanager
@@ -593,8 +618,13 @@ def download_torrent(
 ) -> bytes:
     request = Request(torrent_url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        with urlopen(request, timeout=max(1.0, timeout_seconds)) as response:
-            data = response.read(MAX_TORRENT_BYTES + 1)
+        data, _ = fetch_bytes(request, timeout=max(1.0, timeout_seconds),
+                              max_bytes=MAX_TORRENT_BYTES, opener=urlopen,
+                              native_fallback=urlopen is _DEFAULT_URLOPEN)
+    except TransportError as exc:
+        if exc.code == "response_too_large":
+            raise SubmissionError("The torrent metadata file is unexpectedly large.") from exc
+        raise SubmissionError(f"Failed to download torrent metadata: {exc}") from exc
     except OSError as exc:
         raise SubmissionError(f"Failed to download torrent metadata: {exc}") from exc
     if len(data) > MAX_TORRENT_BYTES:
@@ -668,6 +698,7 @@ def _submit_magnet_locked(
     magnet = magnet.strip()
     info_hash = extract_btih(magnet)
     exe = find_executable(executable)
+    require_client_context(exe)
     resume_file = backup_path(info_hash, backup_dir)
     metadata_file = torrent_backup_path(info_hash, backup_dir)
     resolved_torrent_url = torrent_url or nyaa_torrent_url(source_url)
@@ -841,7 +872,9 @@ def _submit_magnet_locked(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("magnet")
+    parser.add_argument("magnet", nargs='?')
+    parser.add_argument('--check-context', action='store_true',
+                        help='Inspect the execution token without network, client launch or state writes.')
     parser.add_argument("--source-url")
     parser.add_argument("--torrent-url")
     parser.add_argument("--exe", type=Path)
@@ -899,8 +932,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if not (args.check_context or args.inspect_info_hash or args.magnet):
+        build_parser().error('magnet is required unless inspecting context or an existing info hash')
     try:
-        if args.inspect_info_hash:
+        if args.check_context:
+            report = require_client_context()
+        elif args.inspect_info_hash:
             report = inspect_torrent(args.inspect_info_hash, args.backup_dir)
         else:
             report = submit_magnet(
