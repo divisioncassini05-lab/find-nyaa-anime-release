@@ -361,7 +361,9 @@ def run(args: argparse.Namespace) -> int:
         reasons = completion_policy.review_reasons(resolved, handled, date.today())
         if schedule_cache_status == "unavailable" and resolved.status is None and not completion_policy.confirmed(resolved):
             reasons.append("airing_metadata_unavailable")
-        if boundary is not None or reasons:
+        # A scheduled date is a request for evidence, not a retrieval veto.
+        blocking_reasons = [r for r in reasons if r != 'planned_end_date_due']
+        if boundary is not None or blocking_reasons:
             done = boundary is not None
             report_status = ("split_cour_break" if boundary and boundary["status"] == "split_cour_break"
                              else "completed") if done else "needs_completion_review"

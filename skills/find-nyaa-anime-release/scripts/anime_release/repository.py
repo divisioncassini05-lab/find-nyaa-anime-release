@@ -151,6 +151,7 @@ class StateRepository:
             for track_id in sorted({c.track_id for c in commands}):
                 stack.enter_context(self.work_lock(track_id))
             stack.enter_context(file_lock(self.path.with_suffix(self.path.suffix + '.lock')))
+            reject_v3_writer(self.path)
             state = self.read()
             for command in commands:
                 apply_command(state, command)
@@ -201,6 +202,13 @@ def merge_legacy(current, base, desired):
                 now['identity_revision'] += 1
     return current
 
+def reject_v3_writer(path):
+    import json
+    path = Path(path)
+    if path.exists() and json.loads(path.read_text(encoding='utf-8-sig')).get('version') == 3:
+        raise WorkflowError('state_commit', 'legacy_writer_rejected_v3', False,
+                            (str(path),), 'use_watch_v3_command')
+
 def save_legacy(path, data, *, base=None):
     normalized = adapt(data)
     data.clear()
@@ -215,6 +223,7 @@ def save_legacy(path, data, *, base=None):
         for track_id in sorted(track_ids):
             stack.enter_context(repo.work_lock(track_id))
         stack.enter_context(file_lock(Path(path).with_suffix(Path(path).suffix + '.lock')))
+        reject_v3_writer(path)
         current = load(path)
         if baseline is None:
             if current['shows']:

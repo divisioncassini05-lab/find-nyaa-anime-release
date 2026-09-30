@@ -147,6 +147,15 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     token = TRACE.set([])
     try:
+        import json
+        if args.state.exists():
+            try:
+                state_version = json.loads(args.state.read_text(encoding='utf-8-sig')).get('version')
+            except (OSError, ValueError, UnicodeError):
+                state_version = None
+            if state_version == 3:
+                from watch_v3.compat import run as run_v3
+                return run_v3(args)
         if args.review:
             from .reviewed import run as run_reviewed
             return run_reviewed(args)

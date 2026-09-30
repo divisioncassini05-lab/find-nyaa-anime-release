@@ -39,7 +39,13 @@ def main(argv=None):
         else:
             track = require_record(StateRepository(args.state).read(), args.track_id)
             result = evidence.draft(track, args.listing, args.detail, args.intent, args.episode)
-        evidence.save(args.output, result)
+        from evidence_artifacts import output_path, register, collect_expired
+        state_path = getattr(args,'state',DEFAULT_STATE)
+        target = output_path(args.output,state_path)
+        saved = evidence.save(target, result)
+        register(saved,state_path)
+        result['output_path'] = str(saved)
+        collect_expired(state_path)
         # All source rows/text are also kept in the file when a tool truncates stdout.
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

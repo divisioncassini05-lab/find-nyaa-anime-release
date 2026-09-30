@@ -86,19 +86,15 @@ def recovery_plan(report: dict[str, Any]) -> dict[str, Any]:
                   "part_finished"}:
         return result
     if status in {"download_enqueue_failed", "available_enqueue_failed"}:
-        client_code = client.get("error_code")
-        if client_code in {"startup_exited_without_client", "handoff_unverified", "client_context_required"}:
-            result.update(
-                stage="client_context",
-                action="retry_full_resolver_in_approved_user_context",
-                error_code=client_code,
-                retry_basis=None,
-                scheduled_retry_allowed=False,
-                requires_execution_tool_approval=True,
-                recheck_acceptance_before_submission=True,
-            )
+        code = client.get("error_code")
+        if code in {"startup_exited_without_client", "handoff_unverified", "client_context_required"}:
+            result.update(stage="client_context", action="retry_full_resolver_in_approved_user_context",
+                          error_code=code, requires_execution_tool_approval=True,
+                          recheck_acceptance_before_submission=True,
+                          scheduled_retry_allowed=False)
             return result
-        result.update(stage="client", action="diagnose_client", error_code=client_code)
+        result.update(stage="client", action="diagnose_client", error_code=code,
+                      scheduled_retry_allowed=False)
         if client.get("retryable") is True:
             result["retry_basis"] = "client_transient"
         # Do not silently equate a local client failure with a network outage.

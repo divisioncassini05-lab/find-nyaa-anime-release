@@ -386,6 +386,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        try:
+            state_version = json.loads(args.state.read_text(encoding='utf-8-sig')).get('version') if args.state.exists() else None
+        except (OSError, ValueError, UnicodeError):
+            state_version = None
+        if state_version == 3:
+            if args.cmd in {'probe', 'get'}:
+                from watch_v3.cli import run
+                return run(['--state', str(args.state), 'inspect', args.title])
+            print(json.dumps({'status':'legacy_writer_rejected_v3', 'next_action':'use watch domain commands'}))
+            return 6
         data = load_state(args.state)
     except StateFileError as exc:
         print(json.dumps({"status": "state_corrupt", "error": str(exc)}, ensure_ascii=False))

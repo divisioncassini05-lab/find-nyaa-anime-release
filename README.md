@@ -97,6 +97,8 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 定时任务可以确认最新正篇、验证发布、提交 qBittorrent，再按结果更新下一集。
 
+新建追番任务使用[定时追更模板](skills/find-nyaa-anime-release/references/scheduled-new-anime.md)：默认将合格资源加入 qBittorrent；临时未更新时在同一任务中每隔 4 小时补查，最多 3 次，随后恢复常规计划。明确只查资源或只要磁力时按你的要求执行。已存在的任务不会因安装更新而自动改写。
+
 ![以 Codex 为例的自动追番与 qBittorrent 提交](assets/readme/automation-submit.png)
 
 ![qBittorrent 中的任务](assets/readme/qbittorrent-task.png)
@@ -126,6 +128,8 @@ flowchart LR
 - 成功返回严格更新的正篇后，下一次只说动画名即可继续找下一集。
 - 指定旧集、重复集、电影、整季包和特典都不会推进观看进度。
 - 下一集未播、网络失败、身份不明确或资源不合格时不会错误推进。
+- 下载模式仅在客户端确认接受后推进进度；仅返回磁力不推进 v3 交付进度。中断后按原操作和资源 hash 恢复。
+- v3 状态统一保存作品身份、交付进度与恢复记录；首次变更旧版状态时会保留备份并迁移。完结记录保留，定时任务清理需要可信完结证据与全部目标范围确认。
 - 默认状态文件位于 `~/Downloads/Anime_Tracking/airing_watch_state.json`，可用 `ANIME_TRACKING_STATE` 指定其他位置。
 
 ## 运行条件
@@ -142,8 +146,11 @@ flowchart LR
 在仓库根目录运行：
 
 ```powershell
-python -m unittest discover -s skills/find-nyaa-anime-release/tests -p "test_*.py"
+python -m pip install pytest
+python -m pytest skills/find-nyaa-anime-release/tests -q -m "not live" -p no:cacheprovider
 ```
+
+测试使用模拟客户端和已保存的页面证据；真实网络与客户端集成测试需显式启用。
 
 ## 使用边界
 

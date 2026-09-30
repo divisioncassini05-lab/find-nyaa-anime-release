@@ -2045,6 +2045,8 @@ class HybridWorkflowTests(unittest.TestCase):
                 code = finder.main(
                     [
                         "Finished Example",
+                        "--state",
+                        str(Path(temp_dir) / "state.json"),
                         "--official-air-date",
                         "--episode",
                         "4",

@@ -12,7 +12,7 @@ from nyaa_client import NyaaClient, NyaaClientError, nyaa_id_from_url, magnet_fr
 from qbittorrent_submit import submit_magnet, extract_btih, DEFAULT_BACKUP_DIR, SubmissionError
 from . import raw_evidence as evidence
 from .delivery import finalize
-from .models import WorkIdentity, TargetDecision, VerifiedRelease, ReleaseRequest, WorkflowError
+from .models import WorkIdentity, TargetDecision, VerifiedRelease, ReleaseRequest, WorkflowError, StateCommand
 from .repository import StateRepository, require_record, handled
 
 
@@ -53,18 +53,21 @@ def listing_identity(report):
                      for row in report['rows']]}
 
 
-def audit(args, *, client=None):
+def audit(args, *, client=None, track=None):
     """No state writes or client submission. Semantic decisions come only from review."""
     client = client or NyaaClient()
-    review_path = Path(args.review)
+    from evidence_artifacts import input_path
+    review_path = input_path(args.review)
     try:
         review = json.loads(review_path.read_text(encoding='utf-8-sig'))
     except (ValueError, TypeError) as exc:
         raise WorkflowError('review', 'invalid_review', evidence=(str(exc),)) from exc
     need(isinstance(review, dict) and review.get('schema_version') == 1
          and review.get('reviewed') is True, 'agent_review_required')
-    state = StateRepository(args.state).read()
-    track = require_record(state, review.get('track_id'))
+    if track is None:
+        state = StateRepository(args.state).read()
+        track = require_record(state, review.get('track_id'))
+    need(track['track_id'] == review.get('track_id'), 'review_work_conflict')
     need(review.get('identity_revision') == track['identity_revision'], 'identity_revision_conflict')
     # No fuzzy title matching, remote title resolution, or inferred season.
     names = [track['title'], *track.get('aliases', [])]
@@ -88,6 +91,20 @@ def audit(args, *, client=None):
     need(not args.enqueue_qbittorrent or args.include_magnet and args.legal_ok, 'delivery_flags_required')
     need(not (args.latest and args.episode is not None), 'conflicting_target_flags')
     intent = 'latest_regular' if args.latest else 'specific_episode' if args.episode is not None else 'next_tracked'
+    # Completion is an independent reconciliation step.  A delivered finale
+    # may be followed by official evidence on a later run; do not force a
+    # second torrent submission merely to close the season.
+    completion = track.get('completion') or {}
+    if (completion.get('confirmed') is True and type(completion.get('final_episode')) is int
+            and handled(track) >= completion['final_episode']
+            and intent in {'latest_regular', 'next_tracked'}):
+        return ('reconcile_completion', track), {
+            'status': 'completed', 'target_episode': completion['final_episode'],
+            'state_update': 'none', 'qbittorrent': {'status': 'not_attempted'},
+            'progress': {'before_episode': handled(track), 'after_episode': handled(track),
+                         'next_episode': None, 'advanced': False},
+            'completion': completion,
+        }
     need(review.get('intent') == intent, 'review_intent_conflict')
     episode = review.get('target_episode')
     need(type(episode) is int and episode > 0, 'invalid_target_episode')
@@ -229,7 +246,18 @@ def audit(args, *, client=None):
 def run(args, *, client=None, submit=None):
     try:
         validated, result = audit(args, client=client)
-        if validated and not args.no_state_update and args.include_magnet:
+        if validated and validated[0] == 'reconcile_completion':
+            _, track = validated
+            if not args.no_state_update:
+                StateRepository(args.state).commit(StateCommand(
+                    track['track_id'], 'completed',
+                    expected_identity_revision=track['identity_revision'],
+                    fields={'completion': track['completion']}))
+                after = require_record(StateRepository(args.state).read(), track['track_id'])
+                result['state_update'] = 'completed'
+                result['progress'].update(after_episode=handled(after), next_episode=None)
+                result['completion'] = after.get('completion', track['completion'])
+        elif validated and not args.no_state_update and args.include_magnet:
             release, track = validated
             request = ReleaseRequest(title=args.title, season=release.identity.season,
                                      episode=release.target.episode, intent=release.target.intent,

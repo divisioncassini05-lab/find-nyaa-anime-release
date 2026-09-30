@@ -86,19 +86,26 @@ def details(candidate_id, *, client=None, timeout=20):
 
 
 def read(path, kind=None):
-    value = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    from evidence_artifacts import input_path
+    value = json.loads(input_path(path).read_text(encoding='utf-8-sig'))
     if value.get('schema_version') != 1 or kind and value.get('kind') != kind:
         raise ValueError('Unsupported evidence report')
     return value
 
 
 def save(path, value):
-    path = Path(path)
+    from evidence_artifacts import output_path, register
+    path = output_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    register(path)
+    return path
 
 
 def draft(track, listings, detail_path, intent, episode):
+    from evidence_artifacts import input_path
+    listings = [input_path(p) for p in listings]
+    detail_path = input_path(detail_path)
     reports = [read(p, 'nyaa_listing') for p in listings]
     selected = read(detail_path, 'nyaa_detail')
     if not any(r['nyaa_id'] == selected['release']['nyaa_id'] for report in reports for r in report['rows']):

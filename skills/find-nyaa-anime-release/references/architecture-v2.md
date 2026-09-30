@@ -1,5 +1,34 @@
 # Local architecture and maintenance
 
+## v3 local workflow
+
+The current state authority is `scripts/watch_v3/store.py`. A track has one
+identity, broadcast/completion evidence, `progress.handled_episode`,
+`progress.latest_release_episode`, and a nullable `progress.target_episode`.
+Its lifecycle is `airing`, `finale_pending_evidence`, `completed` or `blocked`.
+The old flat fields remain readable only for one-time migration and reporting;
+they are not a second write model.
+
+The workflow boundary is explicit:
+
+```text
+normalize → lock/load → reconcile state → plan target → discover → review
+→ preflight client → submit one delivery → commit receipt → reconcile completion
+→ drain outbox → report
+```
+
+`watch deliver` writes a prepared operation before a client call. A successful
+client receipt is the pivot; the receipt, progress update and outbox entry are
+committed under the same repository lock. Outbox actions are retried by ID and
+never submit a torrent again. `watch recover` only reuses the stored operation
+and hash. Download clients implement the common `DownloadClient` port, with
+desktop launcher and qBittorrent Web API adapters.
+
+Completion is compensatable: final delivery can precede official completion
+evidence. Until evidence is confirmed, a known final count produces
+`finale_pending_evidence` with no fabricated next episode. Conflicting
+completion evidence produces `blocked` while preserving accepted progress.
+
 ## Agent-reviewed entrypoint
 
 Default discovery uses `inspect_anime_evidence.py` and `anime_release/raw_evidence.py`
