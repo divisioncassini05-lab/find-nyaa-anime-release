@@ -346,7 +346,8 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # Check the season boundary before BOTH scheduled latest and tracked-next.
-    # A retained completed record makes repeated automation runs network-free.
+    # A completed record is network-free while the v3 finalizer is finishing
+    # scheduler and evidence cleanup.
     if state_show and args.episode is None and not args.whole_season:
         if not completion_policy.confirmed(resolved) and not args.no_web_resolve and not args.completion_evidence:
             resolved, schedule_cache_status = hydrate_airing_metadata(

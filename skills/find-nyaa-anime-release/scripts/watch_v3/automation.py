@@ -1,7 +1,7 @@
 """Automation cleanup port. Deletion is exclusively a scheduler API operation."""
 from dataclasses import dataclass
 from typing import Protocol, Callable
-from .store import digest, require, SUCCESS_STATUSES
+from .store import require
 
 @dataclass(frozen=True)
 class AutomationSnapshot:
@@ -47,11 +47,49 @@ def verify_cleanup(repo, action, adapter):
         require(set(snapshot.target_track_ids) == set(owner['target_track_ids']), 'automation_targets_changed')
         require(not snapshot.pending_retry_children, 'pending_retry_child')
     data = repo.read()
+    from .finalization import completion_blockers
     for tid in owner['target_track_ids']:
         show = next((s for s in data['shows'] if s['track_id'] == tid), None)
-        require(show is not None and show['lifecycle']['phase'] == 'completed', 'automation_targets_incomplete')
+        require(show is not None and not completion_blockers(show), 'automation_targets_incomplete')
         require(owner in show['automation_owners'], 'automation_owner_changed')
-        require(not any(not op.get('committed') and op.get('status') in {'prepared','recovering','accepted'} for op in show['operations'].values()), 'pending_delivery_recovery')
-        final = show['broadcast']['completion']['final_episode']
-        require(any(r.get('accepted') is True and r['status'] in SUCCESS_STATUSES and show['operations'][r['operation_id']].get('episode') == final for r in show['deliveries']), 'finale_receipt_required')
     return snapshot
+
+
+def local_inventory(data, directory=None):
+    """Read saved configs; a possible unbound title match blocks deletion.
+
+    This is conservative detection, not semantic ownership inference. Actual
+    deletion still requires the bound automation's host-tool receipt.
+    """
+    import os
+    import re
+    import tomllib
+    from pathlib import Path
+    base = Path(directory) if directory is not None else Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex') / 'automations'
+    entries, errors = [], []
+    try:
+        configs = sorted(base.glob('*/automation.toml'))
+    except OSError as exc:
+        return {'automations': [], 'errors': [str(exc)]}
+    for path in configs:
+        try:
+            config = tomllib.loads(path.read_text(encoding='utf-8-sig'))
+            aid, prompt = config['id'], config['prompt']
+            require(isinstance(aid, str) and isinstance(prompt, str), 'invalid_automation_config')
+            text = (prompt + '\n' + config.get('name', '')).casefold()
+            matches = []
+            for show in data['shows']:
+                tid = show['track_id']
+                names = [show['identity']['title'], *show['identity'].get('aliases', [])]
+                explicit = re.search(r'(?<![\w-])' + re.escape(tid.casefold()) + r'(?![\w-])', text)
+                named = any(name and (re.search(r'(?<!\w)' + re.escape(name.casefold()) + r'(?!\w)', text)
+                                      if name.isascii() else name.casefold() in text) for name in names)
+                if explicit or named:
+                    matches.append(tid)
+            entries.append({'automation_id': aid, 'scope_hash': scope_hash(prompt),
+                            'referenced_track_ids': matches})
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+            errors.append({'path': str(path), 'error': str(exc)})
+    if len({e['automation_id'] for e in entries}) != len(entries):
+        errors.append({'error': 'duplicate_automation_id'})
+    return {'automations': entries, 'errors': errors}

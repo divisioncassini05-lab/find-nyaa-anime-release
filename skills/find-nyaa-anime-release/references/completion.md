@@ -22,6 +22,8 @@ Save a reviewed attestation under the managed run directory. It contains:
   `evidence_text`, and the actual timezone-aware `checked_at`.
 - Optional `end_date` (YYYY, YYYY-MM or YYYY-MM-DD), never a future completed date.
   Explain late-night dates and preserve the source's original broadcast-day label.
+- `scope_complete:true` is required for a multi-part mainline scope; confirm all
+  covered stages/cours rather than treating a split-cour break as completion.
 
 The v3 attestation validator requires confirmed evidence. A merely planned/revised
 schedule is not passed to `reconcile --completion-evidence`; report/cache it as
@@ -42,9 +44,9 @@ state and evidence without attaching or reconciling it.
 
 - Confirmed finale plus `progress.handled_episode >= final_episode` atomically
   sets `lifecycle.phase=completed`, clears `progress.target_episode`, preserves
-  attestation/history and queues eligible automation cleanup.
+  attestation/history while cleanup is pending and queues eligible automation cleanup.
 - Final delivery can precede the attestation: later reconcile completes it without
-  another download. If already completed, drain outstanding outbox actions.
+  another download. If already completed, finish scoped outbox and local deletion.
 - If the finale remains undelivered, preserve its pending delivery target and use
   the reviewed delivery workflow with the same quality rules. A scheduled end date
   cannot block that delivery. An exact-finale retrieval must not be mislabeled as
@@ -90,13 +92,15 @@ cleanup until its exact ownership and authorized cancellation are resolved.
 
 ## Execute and acknowledge deletion
 
-This user's default is deletion, with completed records retained. Explicit retention
+This user's default is deletion of both the owning automation and the completed
+local tracking record, including progress, deliveries, completion evidence, bindings
+and outbox history. Do not create a completed archive or tombstone. Explicit retention
 or read-only requests override it. No deletion until all scoped tracks are completed,
 all final episodes have matching accepted receipts, no uncommitted delivery remains,
 and no pending retry child or unfinished extra scope remains. Check current exact ID,
 prompt hash and targets again immediately before the external action.
 
-`watch outbox` reports `cleanup_pending` / `required_tool=automation_update` when the
+`watch outbox --track-id TRACK_ID` reports `cleanup_pending` / `required_tool=automation_update` when the
 host action has not run. That is not successful deletion. Use the app's
 `automation_update` with mode delete and that exact ID; never erase scheduler files
 or substitute PAUSED. If the tool response is uncertain, read back the exact ID.
@@ -110,11 +114,48 @@ Build a receipt using the actual tool result: automation_id, scope_hash and stat
 python scripts/watch.py ack-outbox --track-id TRACK_ID --outbox-id OUTBOX_ID --receipt "RUN_DIR/CLEANUP_RECEIPT.json"
 ```
 
-Keep the completed record and outbox receipt. Do not recreate a deleted automation's
-memory directory. Deletion failure leaves cleanup_pending; later runs only retry
+Successful acknowledgement attempts final local deletion automatically; it removes
+the record and its receipt together once all cleanup conditions hold. Do not recreate
+a deleted automation's memory directory. Deletion failure leaves cleanup_pending; later runs only retry
 cleanup, with no torrent submission. If deletion succeeded but acknowledgement
 failed, recover by verifying absence and acknowledging the same outbox ID.
 
 Register temporary owner/attestation/receipt files with evidence_artifacts.register
 when created outside an evidence CLI, and close the run after durable acknowledgement.
 Never clean the only unpersisted receipt needed to recover an external action.
+
+## Local finalization and read-only inspection
+
+```powershell
+python scripts/watch.py finalize --track-id TRACK_ID
+python scripts/watch.py finalize --track-id TRACK_ID --apply
+```
+
+Preview reads state and saved automation configs without writing, migrating or
+creating actions. It lists exact target IDs, revisions and blocking reasons. Apply
+rechecks under the worker, target and state locks and atomically removes the whole
+eligible owner group. A revision guard is available as `--expected-revision N`.
+
+Matching official/broadcaster evidence and a committed accepted finale receipt are
+required even for an existing completed flag. Metadata-only completion, missing
+receipts, unfinished scope, pending delivery or retry children block deletion. A
+saved task that mentions an unbound work blocks removal until the Agent reviews and
+binds its actual complete scope; config mentions never infer ownership automatically.
+For known owners, a real deleted/already_absent tool receipt and absence of the saved
+task are required. Multiple targets sharing an owner are removed together.
+
+Ownerless completed works can be removed independently after the saved-config check.
+Delivery, recovery, late completion reconciliation and cleanup acknowledgement all
+use the same finalizer for their own track and connected owner group. Unrelated old
+completed records are not swept. Global `outbox` alone does not delete local records.
+
+`local_record_deleted` means this invocation removed records; `track_absent` means
+the record is currently missing, not that this invocation deleted it. `cleanup_pending`
+keeps recovery information and gives the blockers. An absent record never authorizes
+recreation or a new delivery from an old schedule. Capture report information before
+deletion; no later report may assume the track still exists.
+
+Remove only exclusive registered evidence within the managed cache. Shared or foreign
+files are preserved; an artifact failure retains the record for retry. Historical
+whole-state backups are not traversed or rewritten. qBittorrent jobs, videos and
+subtitles are unaffected. Close the current managed run after consuming its result.

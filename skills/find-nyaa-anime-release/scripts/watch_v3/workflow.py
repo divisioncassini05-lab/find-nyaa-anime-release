@@ -24,12 +24,13 @@ class TargetPlan:
 @dataclass(frozen=True)
 class WorkflowResult:
     status: str
-    track_id: str
+    track_id: str | None
     operation_id: str | None = None
     receipt: dict | None = None
     recovery: dict | None = None
     report: dict | None = None
     post_commit: dict | None = None
+    tracking_snapshot: dict | None = None
 
 
 def normalize_request(request):
@@ -63,14 +64,18 @@ def reconcile_completion(repo, track_id):
     return repo.command(track_id, 'reconcile_completion')
 
 
-def drain_outbox(repo, automation=None):
-    return drain(repo, automation=automation)
+def drain_outbox(repo, automation=None, track_id=None):
+    return drain(repo, automation=automation, track_id=track_id)
 
 
 def render_report(repo, result):
-    show = repo.find(track_id=result.track_id)
-    return {**asdict(result), 'progress':show['progress'], 'lifecycle':show['lifecycle'],
-            'outbox':show['outbox']}
+    current = repo.find(track_id=result.track_id) if result.track_id else None
+    show = current or result.tracking_snapshot
+    report = asdict(result)
+    report.pop('tracking_snapshot', None)
+    return {**report, 'progress':show['progress'] if show else None,
+            'lifecycle':show['lifecycle'] if show else None,
+            'outbox':current['outbox'] if current else [], 'local_record_exists':current is not None}
 
 
 class Workflow:
@@ -94,11 +99,17 @@ class Workflow:
 
     def _finish(self, result):
         from dataclasses import replace
+        if result.track_id is None:
+            return result
+        snapshot = self.repo.find(track_id=result.track_id)
+        result = replace(result, tracking_snapshot=snapshot)
         try:
-            actions = drain_outbox(self.repo, self.automation)
+            actions = drain_outbox(self.repo, self.automation, result.track_id)
             from evidence_artifacts import cleanup
+            finalization = self.repo.finalize(result.track_id, apply=True)
             housekeeping = cleanup(self.repo, expired=True)
-            return replace(result, post_commit={'actions': actions, 'expired_artifacts':housekeeping})
+            return replace(result, post_commit={'actions': actions, 'finalization':finalization,
+                                               'expired_artifacts':housekeeping})
         except Exception as exc:
             # The delivery pivot remains successful if the worker or its ACK fails.
             return replace(result, post_commit={'status':'outbox_pending', 'error':str(exc)})
@@ -107,6 +118,8 @@ class Workflow:
         request, manifest = normalize_request(request)
         tid = manifest.content['track_id']
         with self.repo.work_lock(tid):
+            if self.repo.find(track_id=tid) is None:
+                return WorkflowResult('track_absent', tid)
             show = load_metadata_snapshot(self.repo, tid)
             if request.title:
                 require(request.title.casefold() in {s.casefold() for s in [show['identity']['title'], *show['identity'].get('aliases', [])]}, 'review_work_conflict')
@@ -170,10 +183,14 @@ class Workflow:
 
     def _recover(self, operation_id):
         matches = [(s, s['operations'][operation_id]) for s in self.repo.read()['shows'] if operation_id in s['operations']]
+        if not matches:
+            return WorkflowResult('track_absent', None, operation_id)
         require(len(matches) == 1, 'operation_not_found')
         tid = matches[0][0]['track_id']
         with self.repo.work_lock(tid):
             show = self.repo.find(track_id=tid)
+            if show is None:
+                return WorkflowResult('track_absent', tid, operation_id)
             op = show['operations'][operation_id]
             if op.get('committed'):
                 return WorkflowResult('already_accepted', tid, operation_id)

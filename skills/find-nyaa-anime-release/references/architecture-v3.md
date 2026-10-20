@@ -37,6 +37,14 @@ idempotent by action ID; it never submits torrents. Scheduler deletion goes thro
 adapter and a successful receipt. Scope, target, retry-child or ID changes leave the
 action pending.
 
+The shared scoped finalizer removes complete records only after validated whole-scope
+official evidence, matching committed finale receipts and actual scheduler cleanup
+receipts. Ownerless tracks also check saved configs for possible unbound tasks. Shared
+owners connect a group: all records must qualify and are atomically removed together.
+Failure leaves recoverable state. No completed archive or tombstone is written.
+Preview is strictly read-only. Deliver, recover, reconcile and ack-outbox invoke apply
+only for their own track/group, and reports use an in-memory snapshot after removal.
+
 ## Migration
 
 Migration is previewable and apply requires the preview SHA-256. It locks, fsyncs a

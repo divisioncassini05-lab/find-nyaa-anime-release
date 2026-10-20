@@ -21,6 +21,7 @@ that template. Existing tasks retain their explicit rules unless the user change
 | available_enqueue_failed / recovery_failed | Preserve the operation and exact hash. Recover it; do not restart title search. |
 | accepted_receipt_commit_failed | Client accepted but v3 commit failed. Retain ledger/evidence and use recover for the same operation. Never manually advance progress. |
 | Permission or automatic approval rejection | Report the exact action/reason. No scheduler/config/shell workaround or ordinary network retry. |
+| Windows firewall or first-run confirmation prompt | Follow [client-readiness.md](client-readiness.md). Inspect the actual executable and network profile; this is environment setup, not release absence. Preserve any original operation/hash and accepted receipt. Do not repeatedly launch, re-enqueue or schedule a resource retry to dismiss the prompt. |
 | completed / cleanup_pending | Follow completion.md; only outbox cleanup remains. No new discovery or torrent submission. |
 
 ## Discover and review using current v3 commands

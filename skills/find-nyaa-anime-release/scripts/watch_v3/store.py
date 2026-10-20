@@ -153,9 +153,13 @@ def _reconcile(show):
         p['target_episode'] = p['handled_episode'] + 1
 
 
-def _cleanup_actions(data):
+def _cleanup_actions(data, track_id):
+    from .finalization import related_tracks, completion_blockers
+    selected = set(related_tracks(data, track_id))
     owners = {}
     for show in data['shows']:
+        if show['track_id'] not in selected:
+            continue
         for owner in show.get('automation_owners', []):
             owners[(owner['automation_id'], owner['scope_hash'])] = owner
     by_id = {s['track_id']: s for s in data['shows']}
@@ -164,7 +168,7 @@ def _cleanup_actions(data):
         if not targets or owner.get('pending_retry_children') or owner.get('cleanup_policy') != 'delete_when_all_targets_completed':
             continue
         records = [by_id.get(t) for t in targets]
-        if any(s is None or s['lifecycle']['phase'] != 'completed' for s in records):
+        if any(s is None or completion_blockers(s) for s in records):
             continue
         if any(any(not op.get('committed') and op.get('status') in {'prepared','recovering','accepted'} for op in s['operations'].values()) for s in records):
             continue
@@ -181,8 +185,19 @@ def _cleanup_actions(data):
 
 
 class StateRepository:
-    def __init__(self, path):
+    def __init__(self, path, *, automation_inventory=None):
         self.path = Path(path)
+        self._automation_inventory = automation_inventory
+
+    def automation_inventory(self, data):
+        if self._automation_inventory is not None:
+            return self._automation_inventory(data)
+        from .automation import local_inventory
+        return local_inventory(data)
+
+    def finalize(self, track_id, *, apply=False, expected_revision=None):
+        from .finalization import finalize
+        return finalize(self, track_id, apply=apply, expected_revision=expected_revision)
 
     def read(self):
         if not self.path.exists():
@@ -247,7 +262,7 @@ class StateRepository:
             before_all = {s['track_id']: copy.deepcopy(s) for s in data['shows']}
             self._apply(show, kind, fields)
             _reconcile(show)
-            _cleanup_actions(data)
+            _cleanup_actions(data, track_id)
             for changed in data['shows']:
                 if changed != before_all[changed['track_id']] or kind == 'create_track' and changed['track_id'] == track_id:
                     changed['revision'] += 1
@@ -359,9 +374,16 @@ def _validate_completion(show, evidence):
     from urllib.parse import urlsplit
     require(evidence.get('reviewed') is True and evidence.get('confirmed') is True, 'completion_review_required')
     require(evidence.get('source_kind') in {'official','broadcaster'}, 'completion_source_required')
+    broadcast = show['broadcast']
+    require(not broadcast.get('split_cour_pending') and evidence.get('scope_complete') is not False,
+            'broadcast_scope_incomplete')
+    if broadcast.get('mainline_scope') == 'multi':
+        require(evidence.get('scope_complete') is True, 'full_broadcast_scope_confirmation_required')
     require(type(evidence.get('final_episode')) is int and evidence['final_episode'] > 0, 'invalid_final_episode')
     require(urlsplit(evidence.get('source_url', '')).scheme == 'https' and urlsplit(evidence['source_url']).hostname and evidence.get('evidence_text'), 'completion_source_required')
     identity = show['identity']
+    require(evidence.get('track_id') in {None, show['track_id']}
+            and evidence.get('identity_revision') in {None, show['identity_revision']}, 'completion_identity_conflict')
     matched = evidence.get('track_id') == show['track_id'] and evidence.get('identity_revision') == show['identity_revision']
     for provider, binding in identity.get('provider_bindings', {}).items():
         supplied = evidence.get(provider + '_id')

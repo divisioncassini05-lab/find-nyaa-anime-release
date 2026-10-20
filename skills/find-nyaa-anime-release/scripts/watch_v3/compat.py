@@ -21,11 +21,13 @@ def run(args):
         repo.attach_completion(show['track_id'], json.loads(Path(args.completion_evidence).read_text(encoding='utf-8-sig')))
         show = repo.find(track_id=show['track_id'])
     if show['lifecycle']['phase'] in {'completed','blocked'} or show['progress']['target_episode'] is None:
-        from .cli import report
+        from .cli import report, finish_record
         if not args.no_state_update:
             repo.command(show['track_id'], 'reconcile_completion')
-            drain(repo)
-        result = report(repo.find(track_id=show['track_id']))
+            actions = drain(repo, track_id=show['track_id'])
+            result = finish_record(repo, show['track_id'], repo.find(track_id=show['track_id']), actions=actions)
+        else:
+            result = report(show)
     elif not args.review:
         result = {'status':'agent_review_required', 'track_id':show['track_id'],
                   'next_action':'watch discover, review, then deliver', 'state_update':'none'}

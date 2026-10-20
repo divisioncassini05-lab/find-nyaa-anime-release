@@ -75,20 +75,51 @@ Use the effective accepted tier and original subtitle policy on finalization. Do
 
 Use the raw evidence tool and model-led selection for these modes too. Keep a short
 selection record with work/version, selected ID, numbering or coverage, key evidence
-and search scope. Then pin the reviewed ID in the specialized validators:
+and search scope. For a package, assess the **entire file list together** before
+accepting or rejecting coverage:
+
+- Compare the release title, parent directories and every video basename. Identify
+  the shared naming pattern and separate season/episode labels, episode titles,
+  resolution, codec and other technical numbers.
+- Map each regular video to its season and episode using that context. Check the
+  resulting set against the independently verified expected episodes; explicitly
+  account for missing numbers, duplicates, alternate encodes, other seasons and
+  extras. Ten videos alone do not prove that episodes 1 through 10 are present.
+- When one file parses differently from its neighbours, inspect its full name and
+  matching pattern before excluding it. For example, E01, E02, E03.021, E04 ... E10
+  in matching S02 files can indicate episode 3 with a numeric title, rather than
+  episode 3.021. Corroborate with the detail description or official episode titles
+  when needed; continuity is supporting evidence, not permission to invent an
+  episode or reinterpret a genuine decimal special.
+- Record the episode-to-file mapping and the evidence resolving any outlier in the
+  selection record. If context remains contradictory, report the exact ambiguous
+  file instead of declaring the whole season absent or complete. If Agent evidence
+  conflicts with the validator, retain that diagnosis for repair and revalidation;
+  neither silently skip the file nor bypass the validator.
+
+Then pin the reviewed ID in the specialized validators:
 
 ```powershell
 python scripts/search_nyaa_releases.py "VERIFIED MOVIE TITLE" --movie --min-total-gib 10 --want-zh --candidate-id 1234567 --include-magnets --legal-ok --report
-python scripts/find_anime_release.py "TRACKED TITLE" --whole-season --candidate-id 1234567 --want-zh --no-state-update --json
+python scripts/search_nyaa_releases.py "VERIFIED TITLE" --whole-season --episodes 10 --season S02 --candidate-id 1234567 --tier watch --allow-upward-compatibility --want-zh --include-magnets --legal-ok --report
 ```
 
-For whole-season delivery replace audit with the authorized `--include-magnet
---legal-ok --enqueue-qbittorrent`. Add the verified season and original quality
-bounds when applicable. These retained endpoints still run compatibility identity
-checks as well as movie-size or batch/file-coverage checks. If a parser disagrees
-with established evidence, report that verifier limitation; never claim absence,
-change local identity to appease it, or bypass the size/coverage checks. Do not let
-their filtered output replace raw discovery. Movie link delivery remains stateless.
+The v3 `find_anime_release.py` compatibility entrypoint is for reviewed regular
+single episodes, not packages. Use the specialized `search_nyaa_releases.py`
+report above for batches; the count, season and ID in the example must be replaced
+with the actual reviewed values. Supply source season only when independently verified;
+never change the stored work identity to fit a filename label.
+
+After Agent review of the complete raw listing/detail, require a fresh pinned
+report with status `found`, exactly the reviewed candidate/hash, complete regular
+coverage and passing quality. A rejection must be diagnosed, never skipped.
+Persist the reviewed selection, validated report and intended hash before delivery.
+Then use `qbittorrent_submit.py MAGNET --source-url REVIEWED_URL --json`, taking
+MAGNET from that validated report. Save the returned matching accepted receipt
+before scheduling cleanup. On uncertain acceptance inspect/recover that same hash;
+never substitute candidates or treat a launcher exit as success. Package receipts
+live with the task's durable memory; do not forge regular-episode v3 progress.
+
 
 ## Offline metadata
 

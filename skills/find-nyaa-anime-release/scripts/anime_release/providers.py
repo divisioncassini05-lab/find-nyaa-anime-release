@@ -304,7 +304,8 @@ def resolved_from_state(show: dict[str, Any], fallback_title: str, source: str =
     from .legacy_models import ResolvedAnime
     completion = copy.deepcopy(show.get('completion', {}))
     # Historical active metadata is not proof of completion after v1 adaptation.
-    # Retained completed records are delivery history and remain network-free.
+    # The v3 finalizer removes completed records after delivery and scheduler
+    # cleanup; legacy adapters stay network-free while a record is still present.
     pending = show.get('binding_evidence', {})
     if show.get('status') != 'completed' and completion.get('source_kind') == 'metadata' and not any(
         b.get('status') == 'verified' for b in pending.values()

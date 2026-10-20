@@ -133,22 +133,23 @@ python scripts/watch.py discover "English or Romaji Title" --latest --output "ru
 python scripts/watch.py recover --operation "OPERATION_ID"
 ```
 
-`inspect` 查看状态和证据，`discover` 保存本次原始检索证据，`recover` 恢复未完成的交付。完整参数与审核流程见 `skills/find-nyaa-anime-release/references/`。
+`inspect` 查看状态和证据，`discover` 保存本次原始检索证据，`recover` 恢复未完成的交付。交互检索见[检索与交付流程](skills/find-nyaa-anime-release/references/retrieval-workflow.md)，定时执行见[定时运行流程](skills/find-nyaa-anime-release/references/scheduled-run.md)。首次配置无人值守下载时，请让 Agent 按[客户端就绪检查](skills/find-nyaa-anime-release/references/client-readiness.md)确认运行环境。
 
 ## 追番规则
 
 - 仅当前在播的 TV、短篇 TV 或 ONA 会进入追番状态。
 - 交互式场景下，已追踪动画直接说动画名默认找下一集；定时任务或明确说“最新”则找最新已发布的正篇。
-- 只有成功返回合格正篇后才更新交互式追番进度；下载模式还必须等客户端确认接受。
+- v3 进度代表已交付，不代表已观看；只有客户端确认接受且进度成功提交后才推进。
 - 指定旧集、重复集、电影、整季包和特典都不会推进观看进度。
 - 下一集未播、网络失败、身份不明确或资源不合格时不会错误推进。
 - 仅返回磁力不推进 v3 交付进度；中断后按原操作和资源 hash 恢复。
-- v3 状态统一保存作品身份、交付进度与恢复记录；首次变更旧版状态时会保留备份并迁移。完结记录保留，定时任务清理需要可信完结证据与全部目标范围确认。
+- v3 状态统一保存作品身份、交付进度与恢复记录；首次变更旧版状态时会保留备份并迁移。只有可信的整个目标范围完结证据、最终集接受回执及所属定时任务清理均确认后，才删除对应本地记录；条件不足时保留恢复信息，不影响视频、字幕和客户端任务。
 - 默认状态文件位于 `~/Downloads/Anime_Tracking/airing_watch_state.json`，可用 `ANIME_TRACKING_STATE` 指定其他位置。
 
 ## 更新与本地数据
 
 - 更新 Skill 或重新安装仓库不会自动改写已有定时任务；新建任务才会读取当前的定时追更模板。
+- 定时任务默认允许体积向上兼容；交互检索需明确允许。两者都不能突破用户明确的体积上限或中文字幕硬要求。
 - 追番状态、原始页面证据、审核清单和交付恢复记录保存在本机，仓库只提供代码、规则和测试。
 - 普通检索不需要 qBittorrent；定时下载需要 Agent 提供调度能力，并需要本机 qBittorrent 接口可用。
 

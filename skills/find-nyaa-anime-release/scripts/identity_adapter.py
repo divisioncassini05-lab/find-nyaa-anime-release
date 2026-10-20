@@ -50,6 +50,20 @@ def parse_identity(title, known_titles=()):
         masked[start:end] = ' ' * (end-start)
         evidence.append({'field':'title', 'span':[start,end], 'value':alias, 'basis':'verified_alias'})
     text = ''.join(masked)
+    # A zero-padded three-digit title between a scene SxxExx label and
+    # resolution is a separate dot-delimited token (e.g. E03.021.1080p).
+    # Keep real fractional labels such as E03.5 and E03.125 untouched.
+    numeric_titles = list(re.finditer(
+        r'(?<![a-z0-9])s\d{2}e\d{2}\.(0\d{2})(?=\.(?:480|576|720|1080|2160)p(?:\.|$))',
+        text, re.I))
+    if numeric_titles:
+        chars = list(text)
+        for match in numeric_titles:
+            a, b = match.span(1)
+            chars[a:b] = ' ' * (b - a)
+            evidence.append({'field': 'episode_title', 'span': [a, b],
+                             'value': match.group(1), 'basis': 'scene_numeric_title_token'})
+        text = ''.join(chars)
     season, season_conf, season_span = _season_from_title(text)
     alias_seasons = {s for _,_,alias in spans for s,c,_ in [_season_from_title(alias)]
                      if s is not None and c is Confidence.EXPLICIT}

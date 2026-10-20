@@ -58,6 +58,10 @@ def parser():
     client_args(q)
     q = sub.add_parser('reconcile')
     q.add_argument('title'); q.add_argument('--completion-evidence', type=Path)
+    q = sub.add_parser('finalize', help='Preview completed-record deletion; --apply executes scoped cleanup')
+    q.add_argument('--track-id', required=True)
+    q.add_argument('--apply', action='store_true')
+    q.add_argument('--expected-revision', type=int)
     q = sub.add_parser('migrate')
     q.add_argument('--apply', action='store_true')
     q.add_argument('--expected-sha256')
@@ -117,6 +121,14 @@ def report(show):
             'message':'等待完结确认' if show['lifecycle']['phase'] == 'finale_pending_evidence' and show['progress']['target_episode'] is None else None}
 
 
+def finish_record(repo, track_id, snapshot, *, actions=None):
+    finalization = repo.finalize(track_id, apply=True)
+    current = repo.find(track_id=track_id)
+    result = report(current or snapshot) if current or snapshot else {'track_id':track_id}
+    return {**result, 'status':finalization['status'], 'finalization':finalization,
+            'actions':actions or [], 'local_record_exists':current is not None}
+
+
 def run(argv=None):
     args = parser().parse_args(argv)
     repo = StateRepository(args.state)
@@ -142,7 +154,7 @@ def run(argv=None):
         else:
             # New entry accepts only v3. Mutating commands perform the one-time
             # hash-guarded migration; read commands report migration_required.
-            if args.command in {'create','deliver','recover','reconcile','bind-automation'}:
+            if args.command in {'create','deliver','recover','reconcile','bind-automation'} or (args.command == 'finalize' and args.apply):
                 raw = args.state.read_bytes() if args.state.exists() else b'{}'
                 if json.loads(raw.decode('utf-8-sig')).get('version') != 3:
                     repo.migrate(expected_sha256=hashlib.sha256(raw).hexdigest())
@@ -194,13 +206,25 @@ def run(argv=None):
             elif args.command == 'recover':
                 result = render_report(repo, Workflow(repo, client(args)).recover(args.operation))
             elif args.command == 'reconcile':
-                show = repo.find(title=args.title); require(show is not None, 'not_tracked')
+                show = repo.find(title=args.title)
+                if show is None:
+                    result = {'status':'track_absent', 'title':args.title, 'local_record_exists':False}
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                    return 0
                 if args.completion_evidence:
-                    repo.attach_completion(show['track_id'], read_json(args.completion_evidence))
+                    completion = read_json(args.completion_evidence)
+                    completion['completion_report'] = str(args.completion_evidence.resolve())
+                    register(args.completion_evidence, args.state)
+                    repo.attach_completion(show['track_id'], completion)
                 else:
                     repo.command(show['track_id'], 'reconcile_completion')
-                drain(repo)
-                result = report(repo.find(track_id=show['track_id']))
+                actions = drain(repo, track_id=show['track_id'])
+                result = finish_record(repo, show['track_id'], repo.find(track_id=show['track_id']), actions=actions)
+            elif args.command == 'finalize':
+                actions = drain(repo, track_id=args.track_id) if args.apply else []
+                result = repo.finalize(args.track_id, apply=args.apply, expected_revision=args.expected_revision)
+                if args.apply:
+                    result['actions'] = actions
             elif args.command == 'bind-automation':
                 owner = read_json(args.owner)
                 import tomllib
@@ -217,9 +241,22 @@ def run(argv=None):
                     repo.command(tid, 'append_outbox_action', owner=owner)
                 result = {'status':'automation_bound', 'owner':owner}
             elif args.command == 'outbox':
-                result = {'status':'outbox_drained', 'actions':drain(repo, track_id=args.track_id)}
+                snapshot = repo.find(track_id=args.track_id) if args.track_id else None
+                actions = drain(repo, track_id=args.track_id)
+                result = (finish_record(repo, args.track_id, snapshot, actions=actions) if args.track_id
+                          else {'status':'outbox_drained', 'actions':actions,
+                                'message':'Use --track-id to finalize a specific completed record.'})
             elif args.command == 'ack-outbox':
-                result = repo.ack_outbox(args.track_id, args.outbox_id, success=True, receipt=read_json(args.receipt))
+                snapshot = repo.find(track_id=args.track_id)
+                if snapshot is None:
+                    result = {'status':'track_absent', 'track_id':args.track_id, 'local_record_exists':False}
+                else:
+                    cleanup_receipt = read_json(args.receipt)
+                    cleanup_receipt['cleanup_receipt_path'] = str(args.receipt.resolve())
+                    register(args.receipt, args.state)
+                    repo.ack_outbox(args.track_id, args.outbox_id, success=True, receipt=cleanup_receipt)
+                    actions = drain(repo, track_id=args.track_id)
+                    result = finish_record(repo, args.track_id, repo.find(track_id=args.track_id), actions=actions)
         if getattr(args, 'output', None) and args.output.is_file():
             register(args.output,args.state)
             result['output_path'] = str(args.output)

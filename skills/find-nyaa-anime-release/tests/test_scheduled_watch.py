@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -147,12 +148,15 @@ def test_template_creation_and_override_contract():
     reference = (root/'references/scheduled-new-anime.md').read_text(encoding='utf-8-sig')
     assert 'references/scheduled-new-anime.md' in entry
     prompt = reference.split('```text\n',1)[1].split('\n```',1)[0]
-    assert prompt.count('{{') == 5
-    for phrase in ('最多补查 3 次', '4 小时', '不虚构下一集', 'cleanup_pending',
-                   '--enqueue-qbittorrent', '--allow-upward-compatibility', '恢复原 operation_id',
-                   'watch cleanup --run RUN_DIR', '不创建第二个任务', '身份未解决时停止创建',
-                   '相同目标和用途优先复用', 'read_only_done', '首次交付前修复'):
-        assert phrase in reference
+    # A runnable short prompt must resolve to the runtime, not embed its manual.
+    assert len(prompt) < 600
+    runtime = root/'references/scheduled-run.md'
+    assert 'references/scheduled-run.md' in prompt and runtime.is_file()
+    for source in (root/'SKILL.md', root/'references/scheduled-new-anime.md',
+                   runtime, root/'references/scheduled-retry.md',
+                   root/'references/retrieval-workflow.md'):
+        for target in re.findall(r'\]\(([^)]+\.md)\)', source.read_text(encoding='utf-8-sig')):
+            assert (source.parent/target).is_file(), (source, target)
     for filename in ('completion.md','failure-recovery.md'):
         text = (root/'references'/filename).read_text(encoding='utf-8-sig')
         assert 'scripts/find_anime_release.py' not in text

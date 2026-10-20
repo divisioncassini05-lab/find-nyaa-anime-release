@@ -85,7 +85,7 @@ def _paths(value, base):
     found = set()
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in {'review_path','detail_report','torrent_path'} and isinstance(item,str):
+            if key in {'review_path','detail_report','torrent_path','completion_report','cleanup_receipt_path'} and isinstance(item,str):
                 p = Path(item)
                 found.add((p if p.is_absolute() else base / p).resolve())
             elif key == 'listing_reports' and isinstance(item,list):
@@ -100,15 +100,23 @@ def _paths(value, base):
     return found
 
 
-def cleanup(repo, *, review=None, run=None, expired=False):
+def cleanup(repo, *, review=None, run=None, expired=False, purge_tracks=None):
     base = root(repo.path).resolve()
     if not base.is_dir():
         return {'deleted':0, 'retained':0}
-    deleted = retained = 0
+    deleted = retained = retained_owned = 0
     # State lock prevents preparing a delivery while its inputs are being removed.
     with file_lock(repo.path.with_suffix(repo.path.suffix + '.lock')), file_lock(base / '.artifacts.lock'):
         state = repo.read()
         protected = set()
+        purge_tracks = set(purge_tracks or ())
+        owned_refs, other_refs = set(), set()
+        for show in state['shows']:
+            refs = _paths(show, base)
+            (owned_refs if show['track_id'] in purge_tracks else other_refs).update(refs)
+        if purge_tracks:
+            # Completed operations belonging to other tracks may share a run.
+            protected.update(other_refs)
         pending_without_paths = False
         for show in state['shows']:
             for operation in show.get('operations',{}).values():
@@ -117,8 +125,16 @@ def cleanup(repo, *, review=None, run=None, expired=False):
                     protected.update(refs)
                     pending_without_paths |= not bool(refs)
         if pending_without_paths:
-            return {'deleted':0, 'retained':'pending_operation_without_paths'}
+            return {'deleted':0, 'retained':'pending_operation_without_paths',
+                    'retained_owned': bool(owned_refs)}
         targets = set()
+        targets.update(owned_refs)
+        exclusive_runs = set()
+        for path in owned_refs:
+            run_owner = _owner(path, repo.path)
+            if (run_owner and (run_owner / '.run.json').is_file()
+                    and not any(_inside(p, run_owner) for p in other_refs)):
+                exclusive_runs.add(run_owner)
         owner = None
         if review:
             review = input_path(review,repo.path)
@@ -144,13 +160,16 @@ def cleanup(repo, *, review=None, run=None, expired=False):
                     remaining.append(name); retained += 1; continue
                 if not path.exists():
                     continue
-                requested = path in targets or owner is not None and _inside(path,owner)
+                requested = (path in targets or owner is not None and _inside(path,owner)
+                             or any(_inside(path, folder) for folder in exclusive_runs))
                 stale = expired and time.time() - path.stat().st_mtime > 48 * 3600
                 if path in protected or not (requested or stale):
+                    retained_owned += bool(purge_tracks and requested)
                     remaining.append(name); retained += 1; continue
                 # Leave everything in a run alone when another operation needs it.
                 run_owner = _owner(path,repo.path)
                 if run_owner and (run_owner / '.run.json').is_file() and any(_inside(p,run_owner) for p in protected):
+                    retained_owned += bool(purge_tracks and requested)
                     remaining.append(name); retained += 1; continue
                 path.unlink()
                 deleted += 1
@@ -168,12 +187,12 @@ def cleanup(repo, *, review=None, run=None, expired=False):
             folder = marker.parent.resolve()
             if marker.is_symlink() or not _inside(folder,base):
                 continue
-            ended = owner == folder
+            ended = owner == folder or folder in exclusive_runs
             stale = expired and time.time() - marker.stat().st_mtime > 48 * 3600
             if (ended or stale) and set(folder.iterdir()) == {marker}:
                 marker.unlink()
                 folder.rmdir()
-    return {'deleted':deleted, 'retained':retained}
+    return {'deleted':deleted, 'retained':retained, 'retained_owned':retained_owned}
 
 
 def collect_expired(state=DEFAULT_STATE):

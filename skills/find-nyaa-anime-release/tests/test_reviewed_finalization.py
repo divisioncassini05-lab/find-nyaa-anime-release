@@ -236,7 +236,10 @@ def test_invalid_or_retired_options_stop_before_state_or_network(options):
 
 
 def test_documented_search_commands_parse_with_the_named_entrypoint():
-    text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    # The entrypoint now routes to the references containing executable examples.
+    paths = [ROOT / "SKILL.md", ROOT / "references/retrieval-workflow.md",
+             ROOT / "references/retrieval-core-v2.md"]
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
     commands = re.findall(r"^python scripts/(find_anime_release|search_nyaa_releases)\.py (.+)$", text, re.M)
     assert commands
     for script, command in commands:
