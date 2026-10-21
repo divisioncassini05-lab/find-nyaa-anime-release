@@ -93,12 +93,12 @@ def test_launch_permission_error_preserves_target_and_evidence(tmp_path):
     executable.touch()
     with (patch.object(qbt, "ensure_qbittorrent_ready", return_value={"client_was_running": True}),
           patch.object(qbt, "qbittorrent_process_running", return_value=True),
-          patch.object(qbt.subprocess, "Popen", side_effect=PermissionError("denied"))):
+          patch.object(qbt, "_launch", side_effect=qbt.SubmissionError("denied", code="client_independent_launch_failed", retryable=False))):
         with pytest.raises(qbt.SubmissionError) as error:
             qbt.submit_magnet(MAGNET, executable=executable, save_path=None,
                               backup_dir=tmp_path / "backup", wait_seconds=0)
     report = error.value.as_report()
-    assert report["error_code"] == "permission_denied"
+    assert report["error_code"] == "client_independent_launch_failed"
     assert report["retryable"] is False
     assert report["info_hash"] == INFO_HASH
     assert report["submission_attempts"] == 0
@@ -106,6 +106,7 @@ def test_launch_permission_error_preserves_target_and_evidence(tmp_path):
     assert report["client_process_running"] is True
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows desktop broker has no inherited stderr stream")
 def test_launch_stderr_is_available_without_pipe_deadlock():
     process = qbt._launch([sys.executable, "-c", "import sys; sys.stderr.write('fixture launch error'); sys.exit(3)"])
     try:

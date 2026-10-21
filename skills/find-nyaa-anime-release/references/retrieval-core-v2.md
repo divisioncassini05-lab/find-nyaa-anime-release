@@ -9,7 +9,7 @@ Use for latest/exact ambiguity, interpreting a report, maintaining parsers or re
 
 ## Decision boundaries
 
-Resolve the immutable local work/season/part identity first → validate provider bindings → plan broad/exact queries → retain raw rows → interpret title spans and structural evidence → confirm target → evaluate quality → Agent review → refetch the reviewed ID's detail → deliver only if requested and qualified. Provider IDs and search aliases cannot merge local records. See [architecture-v2.md](architecture-v2.md) for the workflow/state boundary.
+Resolve the immutable local work/season/part identity first → validate provider bindings → plan broad/exact queries → retain raw rows → interpret title spans and structural evidence → confirm target → evaluate quality → Agent review → refetch the reviewed ID's detail → deliver only if requested and qualified. Provider IDs and search aliases cannot merge local records. See [architecture-v3.md](architecture-v3.md) for the current workflow/state boundary; [architecture-v2.md](architecture-v2.md) describes retained resolver internals.
 
 Aniparse 2.0.0 provides hypotheses through `identity_adapter.py`; it is not the identity authority. The adapter masks known full-title spans and records episode positions, seasonal evidence and conflicts. A title number such as `20 Seiki` does not become episode 20. Weak interpretations never inherit another candidate's explicit evidence. A lower, excluded conflict does not block a confirmed higher episode; an unresolved plausible higher episode does.
 
@@ -57,7 +57,7 @@ report that limitation rather than absence or bypassing verification.
 
 Legacy fields remain projections. Do not infer “only E07 exists” from two summary choices. Use raw title evidence and target decision; separate official schedule failures (including 403) from search failures and quality rejection.
 
-Compatibility scheduled workflow (new runs use `--review` as in agent-review.md):
+Compatibility inspection (read-only):
 
 First check [completion.md](completion.md). Completed delivery returns before Nyaa;
 a confirmed finished season with a missing finale performs an exact-finale search,
@@ -65,11 +65,14 @@ which does not claim to establish latest from a broad release scan.
 
 ```powershell
 python scripts/find_anime_release.py "TITLE" --latest --want-zh --no-state-update --json --explain
-# Agent reviews full titles, conflicting evidence, constraints and same-episode alternatives.
-python scripts/find_anime_release.py "TITLE" --latest --candidate-id 1234567 --want-zh --include-magnet --legal-ok --enqueue-qbittorrent --json
 ```
 
-Use the effective accepted tier and original subtitle policy on finalization. Do not retry an unreviewed enqueue command: it returns `review_required`. A candidate pin is selection intent, not an override of work, latest, quality or detail checks. For maintenance tests, always omit enqueue and add `--no-state-update`.
+Regular-episode delivery uses the reviewed v3 commands in
+[agent-review.md](agent-review.md), not an enqueue command with only a candidate ID.
+Keep the accepted tier and original subtitle policy throughout validation and
+delivery. An ID pin does not replace work, latest, quality or detail evidence.
+Recover an interrupted delivery by its original operation ID. For maintenance
+inspection, always omit enqueue and add `--no-state-update`.
 
 ## Movie and whole-season finalization
 

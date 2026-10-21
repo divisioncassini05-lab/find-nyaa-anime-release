@@ -43,74 +43,26 @@ class FakeResponse:
 
 
 class QbittorrentSubmitTests(unittest.TestCase):
-    def test_tasklist_denied_falls_back_to_process_enumeration(self) -> None:
-        executable = Path("qbittorrent.exe")
-        with (
-            patch.object(qbt.os, "name", "nt"),
-            patch.object(qbt.subprocess, "run", side_effect=[
-                Mock(returncode=1, stdout="", stderr="Access denied"),
-                Mock(returncode=0),
-            ]) as run,
-        ):
-            self.assertTrue(qbt.qbittorrent_process_running(executable))
-        self.assertEqual(run.call_count, 2)
-        self.assertIn("GetProcessesByName('qbittorrent')", run.call_args.args[0][-1])
+    def test_exact_installation_is_running(self):
+        exe = Path("qbittorrent.exe")
+        with patch.object(qbt, "_desktop_processes", return_value=[{"path": str(exe)}]):
+            self.assertTrue(qbt.qbittorrent_process_running(exe))
 
-    def test_fallback_can_confirm_process_absent(self) -> None:
-        executable = Path("qbittorrent.exe")
-        with (
-            patch.object(qbt.os, "name", "nt"),
-            patch.object(qbt.subprocess, "run", side_effect=[
-                Mock(returncode=1, stdout=""), Mock(returncode=1),
-            ]),
-        ):
-            self.assertFalse(qbt.qbittorrent_process_running(executable))
+    def test_other_installation_is_not_reused(self):
+        with patch.object(qbt, "_desktop_processes", return_value=[{"path": "other/qbittorrent.exe"}]):
+            with self.assertRaises(qbt.SubmissionError) as error:
+                qbt.qbittorrent_process_running(Path("qbittorrent.exe"))
+        self.assertEqual(error.exception.code, "client_installation_conflict")
 
-    def test_failed_process_probes_are_not_reported_as_absent(self) -> None:
-        executable = Path("qbittorrent.exe")
-        with (
-            patch.object(qbt.os, "name", "nt"),
-            patch.object(qbt.subprocess, "run", side_effect=[
-                Mock(returncode=1, stdout=""), Mock(returncode=2),
-            ]),
-            patch.object(qbt, "_launch") as launch,
-        ):
-            with self.assertRaises(qbt.SubmissionError) as raised:
-                qbt.ensure_qbittorrent_ready(executable)
-        self.assertEqual(raised.exception.code, "process_probe_failed")
+    def test_absence_is_distinct_from_failed_probe(self):
+        exe = Path("qbittorrent.exe")
+        with patch.object(qbt, "_desktop_processes", return_value=[]):
+            self.assertFalse(qbt.qbittorrent_process_running(exe))
+        with (patch.object(qbt, "_desktop_processes", side_effect=qbt.SubmissionError(
+                "denied", code="process_probe_failed")), patch.object(qbt, "_launch") as launch):
+            with self.assertRaises(qbt.SubmissionError):
+                qbt.ensure_qbittorrent_ready(exe)
         launch.assert_not_called()
-
-    def test_tasklist_timeout_uses_fallback(self) -> None:
-        executable = Path("qbittorrent.exe")
-        with (
-            patch.object(qbt.os, "name", "nt"),
-            patch.object(qbt.subprocess, "run", side_effect=[
-                qbt.subprocess.TimeoutExpired("tasklist", 5), Mock(returncode=0),
-            ]),
-        ):
-            self.assertTrue(qbt.qbittorrent_process_running(executable))
-
-    def test_successful_tasklist_does_not_use_fallback(self) -> None:
-        executable = Path("qbittorrent.exe")
-        with (
-            patch.object(qbt.os, "name", "nt"),
-            patch.object(qbt.subprocess, "run", return_value=Mock(
-                returncode=0, stdout='"qbittorrent.exe","1234"',
-            )) as run,
-        ):
-            self.assertTrue(qbt.qbittorrent_process_running(executable))
-        run.assert_called_once()
-        self.assertEqual(run.call_args.kwargs["errors"], "replace")
-
-    def test_missing_tasklist_output_does_not_crash_failure_diagnostics(self) -> None:
-        executable = Path("qbittorrent.exe")
-        with (
-            patch.object(qbt.os, "name", "nt"),
-            patch.object(qbt.subprocess, "run", side_effect=[
-                Mock(returncode=0, stdout=None), Mock(returncode=1),
-            ]),
-        ):
-            self.assertFalse(qbt.qbittorrent_process_running(executable))
 
     def test_zero_exit_without_client_is_diagnostic_not_generic_timeout(self) -> None:
         elapsed = [0.0]
@@ -140,11 +92,13 @@ class QbittorrentSubmitTests(unittest.TestCase):
             report = qbt.ensure_qbittorrent_ready(Path("qbittorrent.exe"), settle_seconds=0)
         self.assertTrue(report["client_started"])
 
-    def test_permission_denial_is_not_a_transient_network_failure(self) -> None:
-        with patch.object(qbt.subprocess, "Popen", side_effect=PermissionError("denied")):
+    def test_permission_denial_is_not_a_transient_network_failure(self):
+        import windows_client_runtime as runtime
+        with patch.object(runtime, "launch", side_effect=runtime.RuntimeErrorWithCode(
+                "denied", "client_independent_launch_failed")):
             with self.assertRaises(qbt.SubmissionError) as raised:
                 qbt._launch(["qbittorrent.exe"])
-        self.assertEqual(raised.exception.code, "permission_denied")
+        self.assertEqual(raised.exception.code, "client_independent_launch_failed")
         self.assertFalse(raised.exception.retryable)
 
     def test_extracts_hex_and_base32_btih(self) -> None:
@@ -226,7 +180,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     "ensure_qbittorrent_ready",
                     return_value={"client_was_running": True, "client_started": False},
                 ),
-                patch.object(qbt.subprocess, "Popen", return_value=process),
+                patch.object(qbt, "_launch", return_value=process),
                 patch.object(qbt, "qbittorrent_process_running", return_value=True),
             ):
                 with self.assertRaises(qbt.SubmissionError) as raised:
@@ -297,7 +251,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     "ensure_qbittorrent_ready",
                     return_value={"client_was_running": True, "client_started": False},
                 ),
-                patch.object(qbt.subprocess, "Popen", side_effect=accept_torrent),
+                patch.object(qbt, "_launch", side_effect=accept_torrent),
             ):
                 report = qbt.submit_magnet(
                     TORRENT_MAGNET,
@@ -340,7 +294,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     "ensure_qbittorrent_ready",
                     return_value={"client_was_running": True, "client_started": False},
                 ),
-                patch.object(qbt.subprocess, "Popen", return_value=process),
+                patch.object(qbt, "_launch", return_value=process),
                 patch.object(qbt.time, "monotonic", side_effect=monotonic),
                 patch.object(qbt.time, "sleep", side_effect=sleep),
             ):

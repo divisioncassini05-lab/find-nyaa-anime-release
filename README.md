@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Agent Skill" src="https://img.shields.io/badge/Agent-Skill-111827?style=flat-square">
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white">
   <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square">
 </p>
 
@@ -14,16 +14,16 @@
 
 你只需要用自然语言说明动画、季度、集数、画质或字幕要求。Skill 会解析作品身份，比较 Nyaa 候选，检查季集、体积、字幕和磁力，再把合格结果交给你。
 
-本项目以 **Codex 作为设计基准和完整测试环境**，下文也以 Codex 演示安装与使用。核心由 `SKILL.md`、Python 脚本和随附解析器组成，不依赖 Codex 私有 API；其他能够读取自定义指令、运行本地命令并访问网络的 Agent 通常可以直接使用，或只需做少量路径与调用方式的兼容调整。
+本项目以 **Codex 作为设计基准和主要验证环境**，下文也以 Codex 演示安装与使用。交互检索、证据验证和下载由 Markdown 指令与本地 Python 脚本配合完成。其他具备相应工具能力的 Agent 可以尝试直接使用，或按其路径、权限与调用方式做少量调整；定时任务还需要适配宿主的调度和配置接口。
 
 ## 能做什么
 
 - 识别中文名、简称、英文名和罗马字名，区分季度、正篇、特典、剧场版与合集。
 - 支持最新一集、指定集、追番下一集、整季包和电影。
-- 先执行作品、季集、画质和体积硬过滤，再比较活跃度与字幕信号。
+- Agent 阅读完整的时间顺序列表与候选详情，判断作品、季集和版本；脚本复核体积、字幕和资源标识。
 - 默认偏好中文字幕；只有明确提出“必须有中文字幕”时才将其作为硬条件验证。
 - 返回最终推荐前验证磁力，不把失败或不合格候选暴露给用户。
-- 只为当前在播动画维护进度；老番、电影、特典和失败检索不会污染追番记录。
+- 为新番维护交付进度，也可按明确要求为尚未开播的新番建定时任务；老番、电影、特典和失败检索不推进追番记录。
 - 可选将最终结果提交到本机 qBittorrent，也可用于定时追番任务；下文以 Codex Automations 为例。
 
 ## 安装（以 Codex 为例）
@@ -52,7 +52,9 @@ $skill-installer install https://github.com/divisioncassini05-lab/find-nyaa-anim
 - 调用目录内的 Python 脚本；
 - 访问本地状态文件和网络。
 
-不同 Agent 的 Skill 目录、命令权限和触发语法并不统一，因此可能需要调整安装路径或脚本调用方式。Codex 是当前完整验证的平台，其他 Agent 的兼容程度以其工具能力为准。
+不同 Agent 的 Skill 目录、命令权限和触发语法并不统一。交互检索可从 `SKILL.md` 的对应入口开始；自动追番还需调度工具提供创建、读回、更新和删除能力，并适配现有任务配置、归属绑定及完结清理。当前配置读取以 Codex 的 `automation.toml` 为基础，其他宿主尚未逐一验证。
+
+发布模板默认使用安装者的当前聊天或其明确指定的追番聊天，不包含作者个人的聊天 ID；模型沿用宿主默认设置或用户选择。
 
 ## 直接这样说
 
@@ -60,7 +62,7 @@ $skill-installer install https://github.com/divisioncassini05-lab/find-nyaa-anim
 $find-nyaa-anime-release Re0
 $find-nyaa-anime-release 穹庐下的魔女，必须有中文字幕
 $find-nyaa-anime-release 零之使魔第二季，高画质
-$find-nyaa-anime-release clannd,全系列
+$find-nyaa-anime-release CLANNAD，全系列
 $find-nyaa-anime-release 魔法少女小圆：叛逆的物语，高画质
 $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 ```
@@ -76,7 +78,9 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 | 高画质 / 极致画质 / 最高画质 | ≥6 GiB/集 | 可接受有证据的 BDMV、Remux 或同级无损来源；兼容范围需要明确允许 |
 | 电影 | ≥10 GiB 总大小 | 用户明确给出的范围优先 |
 
-默认不会返回低于 `1 GiB/集` 的普通正篇。明确写出的体积范围是硬条件。如果有其他需求，如找不到1-2G，希望允许自动下调等需求，直接告诉ai就可以。
+未指定画质时默认轻量观看。体积是筛选条件，不等于对实际观感的保证；还会结合片源、编码和发布证据判断。普通正篇默认不低于 `1 GiB/集`，电影默认不低于 `10 GiB`。自定义上下限请明确说明，字幕要求或检索失败不会自动降低门槛。
+
+“允许向上兼容”表示在当前档位没有合格结果时，可以接受更大的资源；显式上限仍然有效。定时任务默认允许向上兼容，交互检索需明确允许。整季包另按文件列表核验覆盖和逐集最低线，不能仅凭总大小判断。
 
 ## 实际效果
 
@@ -103,25 +107,44 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 ![qBittorrent 中的任务](assets/readme/qbittorrent-task.png)
 
-qBittorrent 提交是可选功能。普通搜索不要求安装 qBittorrent。
+qBittorrent 提交是可选功能。普通搜索不要求安装 qBittorrent。“已加入客户端”表示客户端接受了该任务；实际传输、下载完成和已观看是不同状态。
+
+Windows 桌面提交会比较已发现安装的文件版本，优先选择可核验的较新版本；显式路径优先。若另一套安装仍在运行，会报告冲突。新启动通过本地 WMI 创建独立进程，以避免客户端随命令执行器退出；更新 Skill 不会改变已运行进程的启动方式。配置和传输问题按[客户端诊断流程](skills/find-nyaa-anime-release/references/client-readiness.md)处理。
 
 ## 工作方式
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[自然语言需求] --> B[解析作品、季度和集数]
-    B --> C[读取或迁移 v3 追番状态]
+    B --> C[读取追番状态与目标范围]
     C --> D[建立本次证据工作目录]
     D --> E[读取完整列表与详情证据]
     E --> F[Agent 审核作品、季集与版本]
     F --> G[脚本复核体积、字幕与磁力]
-    G --> H{需要交付?}
+    G --> H{已要求下载?}
     H -- 否 --> I[返回推荐或诊断]
     H -- 是 --> J[确认 qBittorrent 接受]
-    J --> K[提交进度与恢复记录]
+    J --> K[提交交付进度与回执]
 ```
 
-脚本负责确定性的检索、解析和验证；Agent 负责阅读完整发布标题并判断作品版本、季度、正篇/特典以及最终候选。需要交付时，只有 qBittorrent 明确接受任务后才推进下载进度；失败会按原操作和资源 hash 恢复，不会偷偷换成另一个候选。本文截图与操作示例使用 Codex。
+Agent 决定选哪一个候选，脚本验证审核结论与页面证据是否一致。下载时，匹配的客户端接受回执和成功提交的状态共同构成交付结果；失败后按原操作和资源 hash 恢复。查资源或只返回磁力时不推进交付进度。本文截图与操作示例使用 Codex。
+
+### 结构与入口
+
+`SKILL.md` 负责选择流程，共用规则保持简短；具体步骤按需加载。
+
+| 场景或模块 | 入口 |
+| --- | --- |
+| 交互检索、指定集、下一集或最新集 | [retrieval-workflow.md](skills/find-nyaa-anime-release/references/retrieval-workflow.md) |
+| 填写候选审核、验证和交付 | [agent-review.md](skills/find-nyaa-anime-release/references/agent-review.md) |
+| 创建或修改定时任务 | [scheduled-new-anime.md](skills/find-nyaa-anime-release/references/scheduled-new-anime.md) |
+| 定时执行与按需补查 | [scheduled-run.md](skills/find-nyaa-anime-release/references/scheduled-run.md)、[scheduled-retry.md](skills/find-nyaa-anime-release/references/scheduled-retry.md) |
+| 客户端环境与下载异常 | [client-readiness.md](skills/find-nyaa-anime-release/references/client-readiness.md) |
+| 恢复与完结清理 | [failure-recovery.md](skills/find-nyaa-anime-release/references/failure-recovery.md)、[completion.md](skills/find-nyaa-anime-release/references/completion.md) |
+| 当前状态、审核、交付命令 | `scripts/watch.py` 和 `scripts/watch_v3/` |
+| 保留的兼容入口与电影/整季校验 | `scripts/find_anime_release.py`、[retrieval-core-v2.md](skills/find-nyaa-anime-release/references/retrieval-core-v2.md) |
+
+v3 是追番状态的唯一写入入口。`anime_release/` 等共用模块和兼容入口仍有调用方；它们不代表第二套可独立推进的追番记录。
 
 ### 高级命令行入口
 
@@ -129,18 +152,20 @@ flowchart LR
 
 ```powershell
 python scripts/watch.py inspect "作品名"
-python scripts/watch.py discover "English or Romaji Title" --latest --output "run/listing.json"
+python scripts/qbittorrent_submit.py --client-status --json
 python scripts/watch.py recover --operation "OPERATION_ID"
 ```
 
-`inspect` 查看状态和证据，`discover` 保存本次原始检索证据，`recover` 恢复未完成的交付。交互检索见[检索与交付流程](skills/find-nyaa-anime-release/references/retrieval-workflow.md)，定时执行见[定时运行流程](skills/find-nyaa-anime-release/references/scheduled-run.md)。首次配置无人值守下载时，请让 Agent 按[客户端就绪检查](skills/find-nyaa-anime-release/references/client-readiness.md)确认运行环境。
+前两条只读：`inspect` 查看追番状态，`--client-status` 查看客户端选择和运行状态。`recover` 会恢复已授权的原下载操作并可能提交进度，应使用实际报告中的操作 ID。
+
+原始检索先执行 `python scripts/watch.py workspace`，将其返回的绝对 `run_dir` 用作 `discover`、`detail` 和 `review` 的输出目录。完整示例见上面的检索流程；不要直接批量运行文档中的占位符命令。
 
 ## 追番规则
 
-- 仅当前在播的 TV、短篇 TV 或 ONA 会进入追番状态。
+- 新番 TV、短篇 TV 或 ONA 可以进入追番状态；明确安排未来追番时可先建档，实际交付仍需发布证据。
 - 交互式场景下，已追踪动画直接说动画名默认找下一集；定时任务或明确说“最新”则找最新已发布的正篇。
 - v3 进度代表已交付，不代表已观看；只有客户端确认接受且进度成功提交后才推进。
-- 指定旧集、重复集、电影、整季包和特典都不会推进观看进度。
+- 指定旧集、重复集、电影、整季包和特典都不会推进正篇交付进度。
 - 下一集未播、网络失败、身份不明确或资源不合格时不会错误推进。
 - 仅返回磁力不推进 v3 交付进度；中断后按原操作和资源 hash 恢复。
 - v3 状态统一保存作品身份、交付进度与恢复记录；首次变更旧版状态时会保留备份并迁移。只有可信的整个目标范围完结证据、最终集接受回执及所属定时任务清理均确认后，才删除对应本地记录；条件不足时保留恢复信息，不影响视频、字幕和客户端任务。
@@ -155,8 +180,8 @@ python scripts/watch.py recover --operation "OPERATION_ID"
 
 ## 运行条件
 
-- 能读取自定义 Markdown 指令、运行本地命令并访问网络的 Agent（设计与完整测试以 Codex 为标准）
-- Python 3.10 或更高版本
+- 能读取自定义 Markdown 指令、运行本地命令并访问网络的 Agent（设计与主要验证以 Codex 为标准）
+- Python 3.11 或更高版本，v3 调度配置读取使用标准库 `tomllib`
 - 能够访问 Nyaa 的网络环境
 - qBittorrent 仅在启用自动提交时需要；该部分主要在 Windows 上测试
 - 开发或自行回归测试需要额外安装 `pytest`
@@ -172,7 +197,9 @@ python -m pip install pytest
 python -m pytest skills/find-nyaa-anime-release/tests -q -m "not live" -p no:cacheprovider
 ```
 
-测试使用模拟客户端和已保存的页面证据；真实网络与客户端集成测试需显式启用。
+测试使用模拟客户端和已保存的页面证据；真实网络与客户端集成测试需显式启用。Windows 独立进程生命周期测试也需要单独启用；离线测试通过不表示每种系统环境都完成了真实下载验证。
+
+从个人安装同步更新时，只发布 Skill 代码、规则、依赖和测试；检查并移除个人聊天 ID、凭据和运行状态。宿主专用偏好与实际定时任务保留在使用者本机。
 
 ## 使用边界
 

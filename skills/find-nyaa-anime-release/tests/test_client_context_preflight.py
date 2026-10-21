@@ -19,6 +19,7 @@ def test_sandbox_identity_fails_closed_before_client_launch():
 
 
 def test_submit_preflight_runs_before_profile_lock_or_launch(tmp_path):
+    (tmp_path / 'qbittorrent.exe').touch()
     with patch.object(qbt, 'require_client_context', side_effect=qbt.SubmissionError(
             'wrong context', code='client_context_required', retryable=False)):
         try:

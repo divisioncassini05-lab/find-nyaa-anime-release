@@ -1,8 +1,10 @@
 # v3 completion evidence and owning-automation cleanup
 
 Use this when the final episode may have aired, delivery preceded completion
-confirmation, or a completed track still has pending cleanup. Scheduled creation
-and bounded same-task retries use [scheduled-new-anime.md](scheduled-new-anime.md).
+confirmation, or a completed track still has pending cleanup. Create schedules via
+[scheduled-new-anime.md](scheduled-new-anime.md); existing runs and bounded
+same-task retries use [scheduled-run.md](scheduled-run.md) and
+[scheduled-retry.md](scheduled-retry.md).
 
 ## Confirm the exact finale independently
 

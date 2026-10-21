@@ -73,7 +73,9 @@ attestations, external files, locks and downloaded media are outside this collec
 
 ## Scheduled new-anime template
 
-Creation and execution use [scheduled-new-anime.md](scheduled-new-anime.md). The prompt
+Creation uses [scheduled-new-anime.md](scheduled-new-anime.md); execution uses
+[scheduled-run.md](scheduled-run.md), with bounded retries in
+[scheduled-retry.md](scheduled-retry.md). The prompt
 pins verified scope, original schedule and quality policy; actual app ID and saved
 prompt SHA-256 are bound after creation. Runtime memory holds only schedule windows,
 attempts and external-update intents; progress stays in v3. The read-only

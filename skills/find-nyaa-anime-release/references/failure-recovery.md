@@ -2,9 +2,10 @@
 
 Preserve the originating work/season/part, episode intent, quality limits, subtitle
 policy and download mode. A retry reason or Chinese display title never adds hard
-Chinese. Scheduled defaults and memory/rrule recovery are defined once in
-[scheduled-new-anime.md](scheduled-new-anime.md); do not create retry child tasks for
-that template. Existing tasks retain their explicit rules unless the user changes them.
+Chinese. Scheduled execution follows [scheduled-run.md](scheduled-run.md); load
+[scheduled-retry.md](scheduled-retry.md) only for retry or schedule reconciliation.
+The creation template is not needed during recovery. Do not create retry child
+tasks. Existing tasks retain their explicit rules unless the user changes them.
 
 ## Identify the failed stage
 
@@ -86,6 +87,12 @@ can advance progress; downloading to completion is unnecessary.
   recovery is enough to establish whether it works; stop and retain diagnostics if it
   fails. A zero exit code or running process is not receipt evidence.
 - `client_busy`: await/inspect the existing command or client lock; no parallel enqueue.
+- `client_installation_conflict`, `process_probe_failed`,
+  `executable_version_unverified`,
+  `client_independent_launch_failed`, `client_runtime_unverified`: follow
+  client-readiness.md. Verify the installation/current-user runtime and preserve the
+  same operation/hash. A lost broker response may still have created the client;
+  re-inspect before recovery. No direct-child launch fallback or resource retry.
 - `permission_denied`, authentication failure, missing executable, unknown/permanent
   errors: diagnose/report, never relabel as temporary resource/network absence.
 - Inspect exact matching metadata/fastresume or authenticated API evidence. Do not

@@ -19,7 +19,7 @@ step needs them; do not preload this folder or read the implementation by defaul
 | A scheduled run or retry | [scheduled-run.md](references/scheduled-run.md) |
 | Interactive search/download, next/latest/exact release | [retrieval-workflow.md](references/retrieval-workflow.md) |
 | Only recovery or completion/cleanup | [completion.md](references/completion.md); recover the existing operation with `python scripts/watch.py recover --operation ID` when applicable |
-| First unattended-download setup, Windows firewall prompt, or repeated manual confirmation | [client-readiness.md](references/client-readiness.md) |
+| Client closes with Codex, slow/stalled downloads, multiple installations, first setup or Windows prompts | [client-readiness.md](references/client-readiness.md) |
 
 ## Shared constraints
 
@@ -42,7 +42,7 @@ step needs them; do not preload this folder or read the implementation by defaul
 
 ## Execution style
 
-Schedules use the application's default Luna family unless the user chooses
+Schedules use the host application's default model unless the user chooses
 otherwise. Keep the saved prompt to scope, schedule, overrides and workflow link.
 Use existing CLI results for state, validation and retry decisions. Do not duplicate
 their checks in improvised scripts. When evidence is ambiguous, report the missing

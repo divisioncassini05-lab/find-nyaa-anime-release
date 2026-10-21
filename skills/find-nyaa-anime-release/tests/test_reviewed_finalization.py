@@ -236,15 +236,28 @@ def test_invalid_or_retired_options_stop_before_state_or_network(options):
 
 
 def test_documented_search_commands_parse_with_the_named_entrypoint():
-    # The entrypoint now routes to the references containing executable examples.
+    from watch_v3.cli import parser as watch_parser
+    from qbittorrent_submit import build_parser as client_parser
+
     paths = [ROOT / "SKILL.md", ROOT / "references/retrieval-workflow.md",
-             ROOT / "references/retrieval-core-v2.md"]
+             ROOT / "references/retrieval-core-v2.md", ROOT / "references/agent-review.md",
+             ROOT / "references/client-readiness.md"]
     text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
-    commands = re.findall(r"^python scripts/(find_anime_release|search_nyaa_releases)\.py (.+)$", text, re.M)
+    commands = re.findall(
+        r"^python scripts/(find_anime_release|search_nyaa_releases|watch|qbittorrent_submit)\.py (.+)$",
+        text, re.M,
+    )
     assert commands
     for script, command in commands:
         argv = shlex.split(command)
+        # Substitute the documented episode placeholder; parse only, never execute.
+        argv = ["1" if token == "N" and i > 0 and argv[i - 1] == "--episode" else token
+                for i, token in enumerate(argv)]
         if script == "find_anime_release":
             finder.build_parser().parse_args(argv)
-        else:
+        elif script == "search_nyaa_releases":
             nyaa.parse_args(argv)
+        elif script == "watch":
+            watch_parser().parse_args(argv)
+        else:
+            client_parser().parse_args(argv)

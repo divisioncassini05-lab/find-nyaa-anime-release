@@ -35,9 +35,9 @@ DEFAULT_BACKUP_DIR = (
     / "BT_backup"
 )
 KNOWN_EXECUTABLES = (
-    Path(r"C:\Apps\Tools\qBittorrent\qbittorrent.exe"),
     Path(r"C:\Program Files\qBittorrent\qbittorrent.exe"),
     Path(r"C:\Program Files (x86)\qBittorrent\qbittorrent.exe"),
+    Path(r"C:\Apps\Tools\qBittorrent\qbittorrent.exe"),
 )
 SUCCESS_STATUSES = {"already_present", "submitted", "submitted_verified"}
 MAX_TORRENT_BYTES = 16 * 1024 * 1024
@@ -211,111 +211,98 @@ def _registry_executables() -> list[Path]:
 
 
 def find_executable(explicit: Path | None = None) -> Path:
-    candidates: list[Path] = []
-    if explicit:
-        candidates.append(explicit)
     configured = os.environ.get("QBITTORRENT_EXE")
-    if configured:
-        candidates.append(Path(configured))
+    requested = explicit if explicit is not None else Path(configured) if configured else None
+    if requested is not None:
+        if requested.is_file():
+            return requested.resolve()
+        raise SubmissionError(
+            "The configured qBittorrent executable is missing; refusing to switch installations.",
+            code="executable_missing", retryable=False,
+        )
+    running_paths = {}
+    if os.name == "nt":
+        paths = {str(Path(row["path"]).resolve()).casefold(): Path(row["path"])
+                 for row in _desktop_processes()}
+        if len(paths) > 1:
+            raise SubmissionError("Multiple qBittorrent installations are running in this session.",
+                                  code="client_installation_conflict", retryable=False)
+        running_paths = paths
+    candidates: list[Path] = list(running_paths.values()) + _registry_executables()
     discovered = shutil.which("qbittorrent") or shutil.which("qbittorrent.exe")
     if discovered:
         candidates.append(Path(discovered))
     candidates.extend(KNOWN_EXECUTABLES)
-    candidates.extend(_registry_executables())
 
+    available = {}
     for candidate in candidates:
         try:
             if candidate.is_file():
-                return candidate.resolve()
+                resolved = candidate.resolve()
+                available[str(resolved).casefold()] = resolved
         except OSError:
             continue
+    if available:
+        if os.name == "nt":
+            from windows_client_runtime import executable_versions, RuntimeErrorWithCode
+            try:
+                versions = executable_versions(list(available.values()))
+            except RuntimeErrorWithCode as exc:
+                raise SubmissionError("Cannot compare installed qBittorrent versions.",
+                                      code="executable_version_unverified", retryable=False) from exc
+            # Numeric version first; current installation only breaks equal-version ties.
+            winner = max(available, key=lambda key: (versions[key], key in running_paths))
+            return available[winner]
+        return next(iter(available.values()))
     raise SubmissionError(
         "qBittorrent executable was not found; set QBITTORRENT_EXE or pass --exe.",
         code="executable_missing", retryable=False,
     )
 
 
-def _windows_process_probe_fallback(executable: Path) -> bool:
-    """Use .NET process enumeration when tasklist is unavailable or denied."""
-    process_name = executable.stem.replace("'", "''")
-    powershell = os.path.join(
-        os.environ.get("SystemRoot", r"C:\Windows"),
-        "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
-    )
-    script = (
-        "$ErrorActionPreference='Stop'; try { "
-        f"if ([System.Diagnostics.Process]::GetProcessesByName('{process_name}').Length -gt 0) "
-        "{ exit 0 }; exit 1 } catch { exit 2 }"
-    )
+def _desktop_processes() -> list[dict[str, Any]]:
+    from windows_client_runtime import processes, RuntimeErrorWithCode
     try:
-        result = subprocess.run(
-            [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
-            timeout=5, check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SubmissionError(
-            "Cannot inspect qBittorrent processes: tasklist and the .NET fallback failed; "
-            "check process-query permissions before retrying.",
-            code="process_probe_failed", retryable=None,
-        ) from exc
-    if result.returncode not in (0, 1):
-        raise SubmissionError(
-            "Cannot inspect qBittorrent processes: tasklist and the .NET fallback failed; "
-            "check process-query permissions before retrying.",
-            code="process_probe_failed", retryable=None,
-        )
-    return result.returncode == 0
+        return processes()
+    except RuntimeErrorWithCode as exc:
+        raise SubmissionError(str(exc), code="process_probe_failed", retryable=False,
+                              diagnostics=exc.diagnostics) from exc
 
 
 def qbittorrent_process_running(executable: Path) -> bool:
-    """Return whether the local qBittorrent GUI process is already running."""
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    try:
-        if os.name == "nt":
-            result = subprocess.run(
-                [
-                    "tasklist",
-                    "/FI",
-                    f"IMAGENAME eq {executable.name}",
-                    "/FO",
-                    "CSV",
-                    "/NH",
-                ],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=5,
-                check=False,
-                creationflags=creationflags,
+    """Check the exact installation in this session, not merely a process name."""
+    if os.name == "nt":
+        rows = _desktop_processes()
+        expected = os.path.normcase(str(executable.resolve()))
+        if any(os.path.normcase(str(Path(row["path"]).resolve())) != expected for row in rows):
+            raise SubmissionError(
+                "A different qBittorrent installation is running; close it normally before "
+                "using the selected installation. No version fallback or forced restart.",
+                code="client_installation_conflict", retryable=False,
             )
-            if result.returncode != 0 or result.stdout is None:
-                return _windows_process_probe_fallback(executable)
-            return f'"{executable.name.casefold()}"' in result.stdout.casefold()
+        return bool(rows)
+    try:
         result = subprocess.run(
-            ["pgrep", "-x", executable.name],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-            check=False,
+            ["pgrep", "-x", executable.name], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False,
         )
+        if result.returncode not in (0, 1):
+            raise OSError("process query failed")
         return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        if os.name == "nt":
-            return _windows_process_probe_fallback(executable)
-        return False
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SubmissionError("Cannot inspect qBittorrent processes.",
+                              code="process_probe_failed", retryable=False) from exc
 
 
 def _launch(command: list[str]) -> subprocess.Popen[bytes]:
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    startupinfo = None
     if os.name == "nt":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
+        from windows_client_runtime import launch, RuntimeErrorWithCode
+        try:
+            return launch(command)
+        except RuntimeErrorWithCode as exc:
+            raise SubmissionError(str(exc), code=exc.code, retryable=False,
+                                  diagnostics={"stage": "independent_launch",
+                                               **exc.diagnostics}) from exc
     error_stream = tempfile.TemporaryFile()
     try:
         process = subprocess.Popen(
@@ -323,8 +310,7 @@ def _launch(command: list[str]) -> subprocess.Popen[bytes]:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=error_stream,
-            creationflags=creationflags,
-            startupinfo=startupinfo,
+            start_new_session=True,
         )
         process._qbt_error_stream = error_stream
         return process
@@ -351,6 +337,12 @@ def _launch_diagnostics(process: subprocess.Popen[bytes], *, close: bool = False
         finally:
             if close:
                 stream.close()
+    from windows_client_runtime import BrokerProcess
+    if isinstance(process, BrokerProcess):
+        report["launch_transport"] = "local_wmi"
+        report["client_lifetime"] = "independent_of_command_job"
+        if close:
+            process.close()
     return report
 
 
@@ -382,13 +374,15 @@ def ensure_qbittorrent_ready(
             if return_code not in (None, 0):
                 raise SubmissionError(f"qBittorrent exited with code {return_code} during startup.",
                                       code="startup_process_failed")
-            running = return_code is None or qbittorrent_process_running(executable)
+            running = (qbittorrent_process_running(executable) if profile_path is None
+                       else return_code is None and bool(getattr(process, "_handle", True)))
             now = time.monotonic()
             if running:
                 if stable_since is None:
                     stable_since = now
                 if now - stable_since >= effective_settle:
-                    return {"client_was_running": False, "client_started": True}
+                    return {"client_was_running": False, "client_started": True,
+                            **_launch_diagnostics(process)}
             else:
                 stable_since = None
                 if now - started_at >= max(1.0, effective_settle):
@@ -926,17 +920,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect local completion evidence for an existing 40-character info-hash without submitting it.",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--client-status", action="store_true",
+                        help="Read the selected installation and current-session process state; never launch.")
     parser.add_argument("--json", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if not (args.check_context or args.inspect_info_hash or args.magnet):
+    if not (args.check_context or args.client_status or args.inspect_info_hash or args.magnet):
         build_parser().error('magnet is required unless inspecting context or an existing info hash')
     try:
         if args.check_context:
             report = require_client_context()
+        elif args.client_status:
+            executable = find_executable(args.exe)
+            report = {"status": "client_status", "ok": True,
+                      "executable": str(executable),
+                      "running": qbittorrent_process_running(executable),
+                      "cold_start_transport": "local_wmi" if os.name == "nt" else "new_session",
+                      "client_attempted": False,
+                      "transfer_state": "not_observed"}
         elif args.inspect_info_hash:
             report = inspect_torrent(args.inspect_info_hash, args.backup_dir)
         else:

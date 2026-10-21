@@ -64,7 +64,7 @@ not a new delivery; distinguish it from a new client's already_present acceptanc
 A known total reached without confirmed finale evidence has target=null and reports
 “等待完结确认”; completed records cannot be reopened by waiting or stale delivery.
 Use [completion.md](completion.md) for independent finale reconcile and owning-task
-cleanup; use [scheduled-new-anime.md](scheduled-new-anime.md) for schedule windows.
+cleanup; use [scheduled-retry.md](scheduled-retry.md) for schedule windows.
 Completed is a temporary terminal state while cleanup is unfinished. Whole-scope
 confirmation, accepted finale delivery and verified scheduler cleanup allow the
 scoped finalizer to remove the entire local record, without an archive. Missing
