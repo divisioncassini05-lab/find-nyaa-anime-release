@@ -21,12 +21,29 @@ MAX_PAGE_BYTES = 32 * 1024 * 1024
 _CA_OVERRIDES = ("SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE")
 
 
+def scheduled_outcome(code, attempts):
+    """Connection interruption does not itself establish a certificate failure."""
+    codes = {code} | {item.get('code') for item in attempts}
+    if codes & {'permission_denied', 'http_407'}:
+        return 'permission_denied'
+    if codes & {'tls_certificate_verification_failed', 'tls_certificate_verify_failed',
+                'tls_user_context_unavailable'}:
+        return 'tls_failure'
+    if code in {'tls_unexpected_eof', 'tls_handshake_failed', 'timeout', 'dns_failed',
+                'connection_failed', 'response_incomplete', 'proxy_dns_failed',
+                'http_502', 'http_503', 'http_504'}:
+        return 'network_transient'
+    return 'permanent_failure'
+
+
 class TransportError(urllib.error.URLError):
     def __init__(self, code: str, attempts: list[dict], host: str | None):
         self.code = code
         self.attempts = attempts
+        self.scheduled_outcome = scheduled_outcome(code, attempts)
         # No exception text, URLs with credentials, proxy credentials, or curl stderr.
-        super().__init__(json.dumps({"code": code, "host": host, "attempts": attempts}))
+        super().__init__(json.dumps({"code": code, "host": host, "attempts": attempts,
+                                    "scheduled_outcome": self.scheduled_outcome}))
 
 
 def error_code(exc: BaseException) -> str:

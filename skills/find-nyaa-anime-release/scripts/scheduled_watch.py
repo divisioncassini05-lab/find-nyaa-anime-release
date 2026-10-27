@@ -9,6 +9,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 
@@ -41,6 +42,35 @@ def weekly_fields(rrule):
     if not 0 <= hour < 24 or not 0 <= minute < 60:
         raise ValueError('invalid_schedule_time')
     return DAYS.index(fields['BYDAY']), hour, minute
+
+
+def trigger_gate(rrule, now, due_at=None):
+    """Read-only arrival check. A short early wake waits; never counts as a check.
+
+    due_at is the verified retry_due when a temporary retry is in effect.
+    Weekly arrivals within five minutes of the next tick belong to that tick.
+    This gate does not replace operation recovery or per-window deduplication.
+    """
+    current = timestamp(now)
+    weekday, hour, minute = weekly_fields(rrule)
+    if due_at is not None:
+        due = timestamp(due_at)
+        if (due.weekday(), due.hour, due.minute, due.second, due.microsecond) != (weekday, hour, minute, 0, 0):
+            raise ValueError('due_must_match_current_schedule')
+    else:
+        due = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        due -= timedelta(days=(current.weekday() - weekday) % 7)
+        if due > current:
+            due -= timedelta(days=7)
+        upcoming = due + timedelta(days=7)
+        if 0 < (upcoming - current).total_seconds() <= 300:
+            due = upcoming
+    remaining = max(0, math.ceil((due - current).total_seconds()))
+    action = 'wait_until_due' if 0 < remaining <= 300 else 'not_due' if remaining else 'due'
+    return {'action': action, 'due_at': due.isoformat(), 'observed_at': current.isoformat(),
+            'wait_seconds': min(60, remaining) if action == 'wait_until_due' else 0,
+            'remaining_seconds': remaining,
+            'schedule_mutation_required': False, 'counts_as_attempt': False}
 
 
 def plan_retry(data):
@@ -144,6 +174,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     plan = commands.add_parser('plan'); plan.add_argument('--input', type=Path, required=True)
+    gate = commands.add_parser('gate')
+    gate.add_argument('--rrule', required=True)
+    gate.add_argument('--due-at')
+    gate.add_argument('--now', help='Test/replay clock; omit for the live current time.')
     for command in ('prepare', 'verify'):
         sub = commands.add_parser(command)
         for name in ('plan', 'snapshot', 'saved-intent'):
@@ -154,7 +188,9 @@ def main(argv=None):
     def read(path):
         return json.loads(path.read_text(encoding='utf-8-sig'))
     try:
-        if args.command == 'plan':
+        if args.command == 'gate':
+            result = trigger_gate(args.rrule, args.now or datetime.now(SHANGHAI).isoformat(), args.due_at)
+        elif args.command == 'plan':
             result = plan_retry(read(args.input))
         else:
             values = (read(args.plan), read(args.snapshot), read(args.saved_intent))

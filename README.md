@@ -103,6 +103,8 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 新建追番任务使用[定时追更模板](skills/find-nyaa-anime-release/references/scheduled-new-anime.md)：默认将合格资源加入 qBittorrent；临时未更新时在同一任务中每隔 4 小时补查，最多 3 次，随后恢复常规计划。明确只查资源或只要磁力时按你的要求执行。已存在的任务不会因安装更新而自动改写。
 
+调度器若提前不超过 5 分钟唤醒，会在本轮等待到计划时间再检查，不消耗补查次数。临时连接中断可按既有规则有限补查；证书、权限或执行环境问题需要先排查，不会盲目重试。
+
 ![以 Codex 为例的自动追番与 qBittorrent 提交](assets/readme/automation-submit.png)
 
 ![qBittorrent 中的任务](assets/readme/qbittorrent-task.png)

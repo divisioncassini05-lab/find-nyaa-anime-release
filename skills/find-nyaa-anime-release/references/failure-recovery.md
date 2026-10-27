@@ -62,8 +62,13 @@ and ordinary transient network failures separately.
 
 For an execution-context failure use the execution tool's permitted approval route
 for the same read-only diagnostic or original-operation recovery. Never repeatedly
-retry an unchanged restricted context. Report trust/context failures without scheduling
-resource retries. Preserve diagnostics without credentials in the run memory.
+retry an unchanged restricted context. Report certificate trust/context failures without
+scheduling resource retries. `tls_unexpected_eof` and `tls_handshake_failed` alone do
+not prove a trust failure: use `transport.scheduled_outcome` (or TransportError's same
+field). `network_transient` permits existing bounded four-hour supplementation, with
+TLS verification and the original proxy retained. Certificate/context/permission
+failure anywhere in the attempt chain takes precedence over a later generic handshake
+interruption. Unknown errors require diagnosis. Preserve diagnostics without credentials.
 
 ## Recover the exact delivery operation
 

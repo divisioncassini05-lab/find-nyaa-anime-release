@@ -264,6 +264,15 @@ def run(argv=None):
         return 6 if result.get('status') in {'available_enqueue_failed','accepted_receipt_commit_failed','recovery_failed','recovery_required','blocked'} else 0
     except Exception as exc:
         failure = {'status':'workflow_error', 'error_type':type(exc).__name__, 'error':str(exc)}
+        from http_transport import TransportError
+        cause, seen = exc, set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            if isinstance(cause, TransportError):
+                failure['transport'] = {'code':cause.code, 'attempts':cause.attempts,
+                                        'scheduled_outcome':cause.scheduled_outcome}
+                break
+            cause = cause.__cause__
         if hasattr(exc, 'recovery'):
             failure['recovery'] = asdict(exc.recovery)
         print(json.dumps(failure, ensure_ascii=False))

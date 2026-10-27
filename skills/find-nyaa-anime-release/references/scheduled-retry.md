@@ -9,8 +9,15 @@ retry_due、intent 和 applied_receipt；不保存另一份追番进度。
 每次入口先校对记忆与当前 scheduler 配置。window_start 是常规主检查的实际计划
 时点，不是补查时点；窗口终点为其后 7 天。新窗口开始时重置 attempt=0，旧窗口
 成功不沿用；待恢复 operation 和 outbox 不随窗口重置。补查以保存的 retry_due
-和 next_attempt 识别；相同执行重入不再次加次数。提前/重复触发且尚未到 retry_due
-时只校对调度后退出。工具不支持本模板的单个每周时点时，保留常规计划并报告，
+和 next_attempt 识别；相同执行重入不再次加次数。提前触发先运行
+`python scripts/scheduled_watch.py gate --rrule "当前实际规则" --due-at "已核实的 retry_due"`。
+提前不超过 5 分钟返回 wait_until_due，按返回的 wait_seconds 分段等待并用真实
+当前时间重查（每段最多 60 秒）；不能丢弃本轮，也不能靠假设将来再次触发。
+更早的补查返回 not_due，保留原计划和意图，不增加次数，不伪造已检查结果。
+常规时点 gate 不传 --due-at，临近下一时点会归入下一窗口，不能用上周成功跳过。
+等待结束后重读配置，人工暂停/改时/范围变化先重新校对；再按原 operation 和
+本窗口记忆去重。无法继续等待需明确报告本轮未执行，不静默称无需处理。
+工具不支持本模板的单个每周时点时，保留常规计划并报告，
 不另造子任务或 shell 定时器。
 
 调用 `python scripts/scheduled_watch.py plan --input RUN_DIR/SCHEDULE_INPUT.json`。
@@ -22,6 +29,8 @@ retry_due、intent 和 applied_receipt；不保存另一份追番进度。
 - window_start、now：带时区 ISO 时间；now 取实际当前时间。
 - attempt：本次实际检查编号，主检查 0、补查 1–3。
 - outcome：not_updated / release_unqualified / network_transient / detail_incomplete；
+  检索连接失败优先采用工具的 transport.scheduled_outcome，不根据 TLS 字样一概停止。
+  握手中断/EOF 可归 network_transient；证书、身份上下文和权限失败仍不可盲目补查。
   latest_already_handled 只有 current_window_release_verified=true 才结束窗口。
   该布尔值需要本窗口目标已发布并处理的证据，不能只看 handled progress 或
   新上传了旧集；缺乏证据视为仍未更新。
