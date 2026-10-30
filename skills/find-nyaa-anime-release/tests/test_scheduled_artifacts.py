@@ -42,7 +42,7 @@ def test_failed_operation_protects_evidence_then_recovery_cleans(tmp_path):
     assert cleanup(repo,run=run)['deleted'] == 0 and review.exists()
     assert repo.find(track_id='t')['progress']['handled_episode'] == 0
     recovered = mock_client()
-    done = Workflow(repo,recovered).recover(result.operation_id)
+    done = Workflow(repo,recovered,fake_validator()).recover(result.operation_id)
     assert done.status in {'delivery_recorded','recovered'}
     assert not run.exists() and repo.find(track_id='t')['progress']['handled_episode'] == 13
 

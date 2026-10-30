@@ -66,6 +66,7 @@ class VerifiedRelease:
     source_url: str
     kind: str
     evidence_json: str
+    permit: Any = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

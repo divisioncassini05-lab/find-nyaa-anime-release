@@ -26,13 +26,29 @@ and do not represent handled episodes.
 Run the v3 review entrypoint to create the form:
 
 ```powershell
-python scripts/watch.py review --track-id TRACK_ID --listing "RUN_DIR/LISTING.json" --detail "RUN_DIR/DETAIL.json" --intent latest_regular --episode N --output "RUN_DIR/REVIEW.json"
+python scripts/watch.py review --track-id TRACK_ID --listing "RUN_DIR/LISTING.json" --detail "RUN_DIR/DETAIL.json" --intent latest_regular --episode N --tier browse --want-zh --output "RUN_DIR/REVIEW.json"
 ```
 
 Repeat `--listing` for more pages or queries. Use `specific_episode` for an exact
 request or `next_tracked` for next. `RUN_DIR` is the workspace's absolute path.
 The draft starts `reviewed:false` and makes no semantic decisions. Read all rows,
-then fill these fields:
+then fill these fields. Draft with the actual policy flags; the example is browse
+with soft Chinese. Audit and delivery must carry the identical flags:
+
+- `quality_policy`: the draft records the tier, explicit bounds, upward permission,
+  subtitle/audio/source requirements and group preference. Do not weaken it to make
+  a candidate pass; an old form missing this field requires re-review.
+- `quality_comparison`: `result` is `clear_advantage`, `comparable`, `unknown` or
+  `only_eligible`; provide `reason`, `limitations` and `alternatives` (can be `[]`
+  when no relevant comparison exists). Unknown quality needs an explicit limitation.
+  Each alternative has `detail_report`, `relation`, `reason` and exact `quotes`.
+  `relation: better` means the selected resource has the demonstrated advantage;
+  other relations are `comparable`, `unknown`, `ineligible`. A clear advantage also
+  needs `selected_quotes` and at least one comparative alternative. Only use detail
+  pages and file lists; no sample downloads/external reviews. Missing evidence is
+  not permission to rank by size/codec. Read quality-ranking.md for the tie-breaks.
+  Alternative evidence used in the decision is also checked for freshness.
+
 
 - `coverage.complete_for_target` and `reason`: why the scope establishes the target.
   Explain the relevant release-window boundary even if later pages exist. Newest
@@ -81,8 +97,8 @@ These flags must agree with the form. Work/season scope comes from the bound tra
 this entrypoint does not accept `--candidate-id` or `--season`.
 
 An existing track ID is required. Create a new record only when authorized and its
-current regular-series identity is confirmed. Old works, movies, specials and
-packages follow [specialized verification](retrieval-core-v2.md#movie-and-whole-season-finalization)
+current regular-series identity is confirmed. Complete seasons and movies
+follow [reviewed package delivery](package-review.md)
 without creating regular-series tracking records. The retained
 `find_anime_release.py --review` syntax delegates to v3 for existing callers.
 
@@ -103,6 +119,15 @@ kind and numbering. The actual video must meet the hard size range; unknown size
 or multiple videos cannot pass. Hard Chinese also requires an actual language
 signal. The live info hash must produce a valid magnet. Premium source exceptions
 and collections stay with their specialized validator.
+
+For old-work interactive choices, the candidate is not “available” merely because
+its detail page lists subtitles. Before presenting it, confirm that the saved
+detail has a complete 40-character info hash and that the reviewed path can derive
+a valid magnet from that hash. Do not test availability by opening the Nyaa
+`.torrent` endpoint or by launching a browser. If a later delivery retry cannot
+refetch the same detail evidence, keep the original candidate and operation
+unchanged; report the transport failure and ask before selecting a different
+candidate.
 
 Delivery uses `watch_v3.Workflow` and `StateRepository`: track/profile locks,
 prepared operations, matching accepted receipts and monotonic progress remain in
@@ -125,3 +150,12 @@ historical releases. Store complete evidence and print each fact once. Additiona
 tokens are justified by a decision they can change. Stop when target and selection
 are supported, or report the actual unresolved boundary. More reading tokens do
 not authorize repeated downloads or endless retries.
+
+For `re_review_required`, stale or changed evidence, refresh and review the same
+candidate/episode, then use `watch.py recover --operation ID --review NEW_REVIEW`.
+Recovery preserves the saved original policy and refuses a different hash/episode.
+Legacy operations without a complete saved policy additionally require
+`--original-policy POLICY_JSON`, reconstructed from the original user request,
+with every `quality_policy` field present. Never fill unknown requirements with
+current CLI defaults; report the missing original condition if it cannot be recovered.
+Do not edit operation state or create a replacement operation to bypass this check.

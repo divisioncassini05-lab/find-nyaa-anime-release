@@ -63,7 +63,8 @@ def manifest(tmp_path, tid='t'):
 
 def fake_validator(episode=13, tid='t'):
     result = SimpleNamespace(info_hash=HASH, magnet='magnet:?xt=urn:btih:'+HASH,
-        source_url='https://nyaa.si/view/1', target=SimpleNamespace(episode=episode), candidate_id='1')
+        source_url='https://nyaa.si/view/1', target=SimpleNamespace(episode=episode), candidate_id='1',
+        permit=__import__('quality_helpers').permit(HASH, 'https://nyaa.si/view/1'))
     validator = Mock()
     validator.validate.return_value = SelectionResult(result, {'status':'found'})
     return validator

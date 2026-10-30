@@ -81,16 +81,14 @@ def run_finder(tmp_path, releases, options, *, watched=4, tracked=True, failures
     return code, json.loads(output.getvalue()), submit, before, after
 
 
-def test_audited_id_is_submitted_even_when_another_candidate_ranks_higher(tmp_path):
+def test_pinned_id_without_review_cannot_submit(tmp_path):
     audited, other = release(), release(202, score=200)
     code, report, submit, _, state = run_finder(tmp_path, [other, audited], [
         "--episode", "5", "--candidate-id", audited.url, "--enqueue-qbittorrent",
     ])
-    assert code == 0
-    assert report["status"] == "found"
-    assert report["diagnostic"]["candidate_id_filter"] == ["101"]
-    assert submit.call_args.args[0].split('&')[0] == audited.magnet
-    assert state["shows"][0]["watched_episode"] == 5
+    assert code != 0 and report['status'] == 'reviewed_delivery_required'
+    submit.assert_not_called()
+    assert state['shows'][0]['watched_episode'] == 4
 
 
 @pytest.mark.parametrize("title,size,tier,extra", [
@@ -113,13 +111,13 @@ def test_pin_rechecks_constraints_without_replacement_or_downgrade(tmp_path, tit
     assert state["shows"][0]["watched_episode"] == 4
 
 
-def test_pinned_first_delivery_creates_current_tracking(tmp_path):
+def test_unreviewed_pin_does_not_create_tracking(tmp_path):
     _, report, submit, _, state = run_finder(tmp_path, [release()], [
         "--episode", "5", "--candidate-id", "101", "--enqueue-qbittorrent",
     ], tracked=False)
-    assert report["state_update"] == "advanced"
-    assert state["shows"][0]["next_episode"] == 6
-    submit.assert_called_once()
+    assert report['status'] == 'reviewed_delivery_required'
+    assert state is None
+    submit.assert_not_called()
 
 
 def test_latest_pin_cannot_turn_an_older_release_into_latest(tmp_path):
@@ -197,9 +195,9 @@ def test_candidate_absent_from_search_uses_its_detail_page(tmp_path, missing):
         submit.assert_not_called()
         assert state["shows"][0]["watched_episode"] == 4
     else:
-        assert code == 0
-        assert f"{101:040x}" in submit.call_args.args[0]
-        assert report["diagnostic"]["candidate_id_direct_fetched"] == ["101"]
+        assert code != 0 and report['status'] == 'reviewed_delivery_required'
+        submit.assert_not_called()
+        assert state['shows'][0]['watched_episode'] == 4
 
 
 def test_latest_target_is_independent_of_candidate_quality(tmp_path):
@@ -216,10 +214,9 @@ def test_pinned_enqueue_failure_does_not_advance_progress(tmp_path, error_code):
         "--episode", "5", "--candidate-id", "101", "--enqueue-qbittorrent",
     ], submission={"ok": False, "status": "error", "error_code": error_code})
     assert code == 6
-    assert report["status"] == "download_enqueue_failed"
-    assert report["qbittorrent"]["error_code"] == error_code
-    submit.assert_called_once()
-    assert (tmp_path / "state.json").read_bytes() == before
+    assert report['status'] == 'reviewed_delivery_required'
+    submit.assert_not_called()
+    assert (tmp_path / 'state.json').read_bytes() == before
 
 
 @pytest.mark.parametrize("options", [

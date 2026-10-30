@@ -132,13 +132,11 @@ def final_report():
 
 @pytest.mark.parametrize('client,done', [({'status': 'submitted_verified', 'ok': True}, True),
     ({'status': 'already_present', 'ok': True}, True), ({'status': 'handoff_unverified', 'ok': False}, False)])
-def test_final_delivery_boundary(tmp_path, client, done):
+def test_legacy_unreviewed_final_delivery_is_blocked(tmp_path, client, done):
     flags = ['--latest', '--candidate-id', '123', '--include-magnet', '--legal-ok', '--enqueue-qbittorrent']
     result, saved, *_ = run(tmp_path, show(11), flags, evidence(), final_report(), client)
-    assert (saved['status'] == 'completed') == done
-    assert saved['watched_episode'] == (12 if done else 11)
-    assert result['progress']['next_episode'] == (None if done else 12)
-    assert result['status'] == ('completed' if done else 'download_enqueue_failed')
+    assert saved['status'] != 'completed' and saved['watched_episode'] == 11
+    assert result['status'] == 'reviewed_delivery_required'
 
 
 def test_manual_old_episode_is_retrieval_only(tmp_path):

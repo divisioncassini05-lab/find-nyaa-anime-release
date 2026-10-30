@@ -41,6 +41,14 @@ def finalize(release, request, state_path, submit, *, client_options, create_rec
         raise WorkflowError('delivery', 'verified_release_required')
     if request.read_only:
         return {'status': 'not_attempted', 'ok': True, 'reason': 'read_only'}, None
+    from submission_gate import require
+    validation = None
+    if request.enqueue:
+        from submission_gate import ValidationRequired
+        try:
+            validation = require(release.permit, release.info_hash, release.source_url)
+        except ValidationRequired as exc:
+            raise WorkflowError('delivery', 'reviewed_delivery_required') from exc
     repo = StateRepository(state_path)
     identity = release.identity
     operation_id = hashlib.sha256(f'{identity.track_id}:{identity.revision}:{release.info_hash}'.encode()).hexdigest()
@@ -69,6 +77,9 @@ def finalize(release, request, state_path, submit, *, client_options, create_rec
             'candidate_id': release.candidate_id, 'episode': release.target.episode,
             'kind': release.kind, 'identity_revision': identity.revision,
             'status': 'prepared', 'created_at': timestamp()}
+        if validation:
+            operation.update(quality_policy=validation['policy'], review_digest=validation['review_digest'],
+                             detail_digest=validation['detail_digest'])
         previous = None
         if journal.exists():
             try:
@@ -78,13 +89,27 @@ def finalize(release, request, state_path, submit, *, client_options, create_rec
         if previous and any(previous.get(key) != operation[key] for key in
             ('operation_id', 'info_hash', 'episode', 'kind', 'identity_revision')):
             raise WorkflowError('delivery', 'journal_target_conflict', False, (previous,), 'inspect_delivery_journal')
+        already_accepted = previous and previous.get('receipt', {}).get('accepted') is True
+        if previous and request.enqueue and not already_accepted:
+            if not previous.get('quality_policy'):
+                raise WorkflowError('delivery', 're_review_required')
+            if previous['quality_policy'] != operation['quality_policy']:
+                raise WorkflowError('delivery', 'quality_policy_mismatch')
         if not previous:
             atomic_json(journal, operation)
         try:
-            if request.enqueue:
+            if already_accepted:
+                prior = previous['receipt']
+                from qbittorrent_submit import SUCCESS_STATUSES
+                if (prior.get('operation_id') != operation_id or prior.get('track_id') != identity.track_id
+                        or prior.get('info_hash') != release.info_hash or prior.get('status') not in SUCCESS_STATUSES):
+                    raise WorkflowError('delivery', 'invalid_acceptance_receipt')
+                result = json.loads(prior['evidence_json'])
+                accepted = True
+            elif request.enqueue:
                 # The existing profile-level submitter checks the exact hash under
                 # its own interprocess lock BEFORE any send, including on recovery.
-                result = submit(release.magnet, source_url=release.source_url, **client_options)
+                result = submit(release.magnet, source_url=release.source_url, validation=release.permit, **client_options)
                 from qbittorrent_submit import SUCCESS_STATUSES
                 accepted = bool(result.get('ok') and result.get('status') in SUCCESS_STATUSES)
             else:

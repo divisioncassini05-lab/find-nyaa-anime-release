@@ -1,3 +1,5 @@
+
+from quality_helpers import permit
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -26,7 +28,7 @@ def test_submit_preflight_runs_before_profile_lock_or_launch(tmp_path):
             qbt.submit_magnet(
                 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
                 executable=tmp_path / 'qbittorrent.exe', backup_dir=tmp_path / 'BT_backup',
-                save_path=tmp_path / 'downloads')
+                save_path=tmp_path / 'downloads', validation=permit(qbt.extract_btih('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'), None))
         except qbt.SubmissionError as exc:
             assert exc.code == 'client_context_required'
             assert exc.diagnostics.get('info_hash') == '0123456789abcdef0123456789abcdef01234567'

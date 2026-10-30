@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quality_helpers import permit
+
 import multiprocessing
 import sys
 import time
@@ -30,7 +32,7 @@ def test_empty_corrupt_or_wrong_hash_resume_never_proves_acceptance(tmp_path, ra
           patch.object(qbt, "qbittorrent_process_running", return_value=True),
           patch.object(qbt, "_launch", return_value=process_result()) as launch):
         with pytest.raises(qbt.SubmissionError) as error:
-            qbt.submit_magnet(MAGNET, executable=executable, save_path=None, backup_dir=backup, wait_seconds=0)
+            qbt.submit_magnet(MAGNET, executable=executable, save_path=None, backup_dir=backup, wait_seconds=0, validation=permit(qbt.extract_btih(MAGNET), None))
     assert error.value.code == "handoff_unverified"
     assert not error.value.as_report()["acceptance_evidence"]["fastresume_valid"]
     launch.assert_called_once()
@@ -45,7 +47,8 @@ def test_metadata_download_fallback_still_requires_magnet_acceptance(tmp_path):
           patch.object(qbt, "_launch", return_value=process_result())):
         with pytest.raises(qbt.SubmissionError) as error:
             qbt.submit_magnet(MAGNET, source_url="https://nyaa.si/view/123", executable=executable,
-                              save_path=None, backup_dir=tmp_path / "backup", wait_seconds=0)
+                              torrent_url="https://nyaa.si/download/123.torrent",
+                              save_path=None, backup_dir=tmp_path / "backup", wait_seconds=0, validation=permit(qbt.extract_btih(MAGNET), "https://nyaa.si/view/123"))
     report = error.value.as_report()
     assert report["error_code"] == "handoff_unverified"
     assert report["submission_source"] == "magnet"
@@ -64,10 +67,39 @@ def test_magnet_acceptance_can_precede_torrent_metadata(tmp_path):
 
     with (patch.object(qbt, "ensure_qbittorrent_ready", return_value={}),
           patch.object(qbt, "_launch", side_effect=launch)):
-        report = qbt.submit_magnet(MAGNET, executable=executable, save_path=None, backup_dir=backup, wait_seconds=0)
+        report = qbt.submit_magnet(MAGNET, executable=executable, save_path=None, backup_dir=backup, wait_seconds=0, validation=permit(qbt.extract_btih(MAGNET), None))
     assert report["status"] == "submitted_verified"
     assert not report["download_complete"]
     assert not report["acceptance_evidence"]["torrent_exists"]
+
+
+def test_nyaa_provenance_never_fetches_torrent_and_recovery_does_not_readd(tmp_path):
+    from watch_v3.clients import DesktopLauncherClient
+    executable = tmp_path / "qbt.exe"
+    executable.touch()
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    source = "https://nyaa.si/view/123"
+
+    def launch(command):
+        assert command[-1] == MAGNET
+        (backup / f"{INFO_HASH}.fastresume").write_bytes(resume_data(INFO_HASH))
+        return process_result()
+
+    with (patch.object(qbt, "download_torrent", side_effect=AssertionError("No torrent HTTP request")) as download,
+          patch.object(qbt, "ensure_qbittorrent_ready", return_value={}),
+          patch.object(qbt, "_launch", side_effect=launch) as launcher):
+        options = dict(source_url=source, executable=executable, save_path=None,
+                       backup_dir=backup, wait_seconds=0, validation=permit(INFO_HASH, source))
+        first = qbt.submit_magnet(MAGNET, **options)
+        assert first["status"] == "submitted_verified"
+        assert first["submission_source"] == "magnet"
+        assert first["source_fallback_error"] is None
+        assert DesktopLauncherClient(backup_dir=backup).inspect(INFO_HASH).verified
+        second = qbt.submit_magnet(MAGNET, **options)
+        assert second["status"] == "already_present"
+        launcher.assert_called_once()
+        download.assert_not_called()
 
 
 @pytest.mark.parametrize("raw", [b"", b"de", TORRENT_DATA.replace(b"fixture", b"changed"), TORRENT_DATA + b"junk"])
@@ -84,7 +116,8 @@ def test_torrent_handoff_requires_valid_matching_torrent_metadata(tmp_path, raw)
           patch.object(qbt, "_launch", return_value=process_result())):
         with pytest.raises(qbt.SubmissionError) as error:
             qbt.submit_magnet(TORRENT_MAGNET, source_url="https://nyaa.si/view/123", executable=executable,
-                              save_path=None, backup_dir=backup, wait_seconds=0)
+                              torrent_url="https://nyaa.si/download/123.torrent",
+                              save_path=None, backup_dir=backup, wait_seconds=0, validation=permit(qbt.extract_btih(TORRENT_MAGNET), "https://nyaa.si/view/123"))
     assert error.value.code == "handoff_unverified"
 
 
@@ -96,7 +129,7 @@ def test_launch_permission_error_preserves_target_and_evidence(tmp_path):
           patch.object(qbt, "_launch", side_effect=qbt.SubmissionError("denied", code="client_independent_launch_failed", retryable=False))):
         with pytest.raises(qbt.SubmissionError) as error:
             qbt.submit_magnet(MAGNET, executable=executable, save_path=None,
-                              backup_dir=tmp_path / "backup", wait_seconds=0)
+                              backup_dir=tmp_path / "backup", wait_seconds=0, validation=permit(qbt.extract_btih(MAGNET), None))
     report = error.value.as_report()
     assert report["error_code"] == "client_independent_launch_failed"
     assert report["retryable"] is False
@@ -149,7 +182,7 @@ def _concurrent_submit(root_string, info_hash, ready, start, results):
         with (patch.object(qbt, "ensure_qbittorrent_ready", return_value={}),
               patch.object(qbt, "_launch", side_effect=launch)):
             report = qbt.submit_magnet(f"magnet:?xt=urn:btih:{info_hash}", executable=root / "qbt.exe",
-                                      save_path=None, backup_dir=backup, wait_seconds=0)
+                                      save_path=None, backup_dir=backup, wait_seconds=0, validation=permit(qbt.extract_btih(f"magnet:?xt=urn:btih:{info_hash}"), None))
         results.put(report["status"])
     except Exception as error:
         results.put("error: " + repr(error))

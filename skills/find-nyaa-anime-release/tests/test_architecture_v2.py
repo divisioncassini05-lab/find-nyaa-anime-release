@@ -33,7 +33,7 @@ def release_for(identity, episode=18, kind='regular'):
     target = TargetDecision(identity, 'latest_regular', episode, 'nyaa_candidates', True)
     info_hash = f'{episode:040x}'
     return VerifiedRelease(identity, target, str(episode), f'Example S04E{episode}',
-        'magnet:?xt=urn:btih:'+info_hash, info_hash, f'https://nyaa.si/view/{episode}', kind, '{}')
+        'magnet:?xt=urn:btih:'+info_hash, info_hash, f'https://nyaa.si/view/{episode}', kind, '{}', __import__('quality_helpers').permit(info_hash, f'https://nyaa.si/view/{episode}'))
 
 def request(read_only=False):
     return ReleaseRequest('Example', season='S04', intent='latest_regular', enqueue=True, read_only=read_only)
@@ -195,7 +195,7 @@ def test_acceptance_then_state_failure_recovers_exact_hash(tmp_path, monkeypatch
         seen.append(magnet)
         return {'ok':True,'status':'already_present'}
     finalize(release, request(), path, check_existing, client_options={})
-    assert seen == [release.magnet]
+    assert seen == []  # A durable acceptance receipt restores state without another send.
     assert handled(StateRepository(path).read()['shows'][0]) == 18
 
 def test_stale_identity_prevents_client_call(tmp_path):

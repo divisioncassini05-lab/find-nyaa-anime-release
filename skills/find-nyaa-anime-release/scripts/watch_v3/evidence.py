@@ -15,6 +15,11 @@ class QualityPolicy:
     min_gib: float | None = None
     max_gib: float | None = None
     allow_upward: bool = False
+    min_total_gib: float | None = None
+    max_total_gib: float | None = None
+    require_audio: tuple = ()
+    require_source: tuple = ()
+    prefer_groups: tuple = ()
 
 @dataclass(frozen=True)
 class ReviewManifest:
@@ -56,8 +61,8 @@ class DiscoveryService:
     def detail(self, candidate_id):
         return raw_evidence.details(candidate_id, client=self.client)
 
-    def draft(self, show, listings, detail, intent, episode):
-        return raw_evidence.draft(validation_snapshot(show), listings, detail, intent, episode)
+    def draft(self, show, listings, detail, intent, episode, policy=None):
+        return raw_evidence.draft(validation_snapshot(show), listings, detail, intent, episode, policy)
 
 class ReviewValidator:
     def __init__(self, client=None):
@@ -72,7 +77,9 @@ class ReviewValidator:
             latest=intent == 'latest_regular', episode=manifest.content['target_episode'] if intent == 'specific_episode' else None,
             candidate_id=None, tier=policy.tier, min_gib_per_episode=policy.min_gib,
             max_gib_per_episode=policy.max_gib, allow_upward_compatibility=policy.allow_upward,
-            require_zh=policy.require_zh, want_zh=policy.want_zh, timeout=20)
+            require_zh=policy.require_zh, want_zh=policy.want_zh, timeout=20,
+            min_total_gib=policy.min_total_gib, max_total_gib=policy.max_total_gib,
+            require_audio=policy.require_audio, require_source=policy.require_source, prefer_group=policy.prefer_groups)
         validated, report = audit(args, client=self.client, track=validation_snapshot(show))
         release = validated[0] if validated and validated[0] != 'reconcile_completion' else None
         return SelectionResult(release, report)

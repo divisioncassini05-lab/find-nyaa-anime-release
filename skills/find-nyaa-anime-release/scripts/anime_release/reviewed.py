@@ -178,6 +178,10 @@ def audit(args, *, client=None, track=None):
         evidence.save(fresh_path, fresh)
         need(False, 'candidate_details_changed', detail=(str(fresh_path),))
     need(fresh['release']['title'] == rows[cid]['title'], 'candidate_title_changed')
+    from quality_review import policy_from_args, validate_policy, validate_comparison, validate_requirements
+    policy = policy_from_args(args)
+    validate_policy(review, policy)
+    comparison = validate_comparison(review, fresh, review_path.parent, client=client, timeout=args.timeout)
     selection = review.get('selection', {})
     need(selection.get('kind') == 'regular', 'review_requires_regular_episode')
     need(bool(selection.get('work_reason', '').strip()), 'work_review_required')
@@ -214,6 +218,7 @@ def audit(args, *, client=None, track=None):
         # never MultiSub or the work's Chinese title by itself.
         from search_nyaa_releases import detect_chinese_in_detail
         need(detect_chinese_in_detail('\n'.join(subtitle_quotes))[0], 'subtitle_unqualified')
+    validate_requirements(review, fresh, policy)
     info_hash = fresh['release'].get('info_hash')
     magnet = magnet_from_hash(info_hash, fresh['release']['title'])
     try:
@@ -224,10 +229,13 @@ def audit(args, *, client=None, track=None):
     identity = WorkIdentity(track['track_id'], track['title'], track.get('season'), track.get('part'),
                             track['identity_revision'], tuple(track.get('aliases', [])), track.get('format'))
     target = TargetDecision(identity, intent, episode, 'agent_reviewed_full_pages', intent == 'latest_regular')
+    from submission_gate import _issue, digest
+    permit = _issue(info_hash, cid, fresh['release']['url'], policy, digest(review), fresh['content_sha256'])
     release = VerifiedRelease(identity, target, cid, fresh['release']['title'], magnet,
                               info_hash.lower(), fresh['release']['url'], 'regular',
-                              json.dumps({'review': review, 'fresh_detail_sha256': fresh['content_sha256']}, ensure_ascii=False))
-    result = {'status': 'found', 'work_identity': asdict(identity), 'target_episode': episode,
+                              json.dumps({'review': review, 'fresh_detail_sha256': fresh['content_sha256']}, ensure_ascii=False), permit)
+    result = {'status': 'found', 'eligibility': 'passed', 'quality_policy': policy,
+              'quality_comparison': comparison, 'work_identity': asdict(identity), 'target_episode': episode,
               'selected': {'nyaa_id': cid, 'title': release.title, 'url': release.source_url,
                            'size': fresh['release']['size'], 'video_size_gib': round(gib, 4),
                            'seeders': fresh['release']['seeders'], 'subtitle_evidence': subtitle_quotes,

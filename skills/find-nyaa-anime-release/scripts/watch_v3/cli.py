@@ -55,6 +55,8 @@ def parser():
     quality_args(q); client_args(q)
     q = sub.add_parser('recover')
     q.add_argument('--operation', required=True)
+    q.add_argument('--review', type=Path, help='Explicitly refresh the same pending operation review')
+    q.add_argument('--original-policy', type=Path, help='Complete original policy for legacy operations only; never defaults')
     client_args(q)
     q = sub.add_parser('reconcile')
     q.add_argument('title'); q.add_argument('--completion-evidence', type=Path)
@@ -82,6 +84,11 @@ def quality_args(q):
     q.add_argument('--tier', choices=['browse','watch','premium'], default='browse')
     q.add_argument('--require-zh', action='store_true')
     q.add_argument('--want-zh', action='store_true')
+    q.add_argument('--min-total-gib', type=float)
+    q.add_argument('--max-total-gib', type=float)
+    q.add_argument('--require-audio', action='append', default=[])
+    q.add_argument('--require-source', action='append', default=[])
+    q.add_argument('--prefer-group', action='append', default=[])
     q.add_argument('--min-gib-per-episode', type=float)
     q.add_argument('--max-gib-per-episode', type=float)
     q.add_argument('--allow-upward-compatibility', action='store_true')
@@ -107,7 +114,9 @@ def client(args):
 
 def policy(args):
     return QualityPolicy(args.tier, args.require_zh, args.want_zh, args.min_gib_per_episode,
-                         args.max_gib_per_episode, args.allow_upward_compatibility)
+                         args.max_gib_per_episode, args.allow_upward_compatibility,
+                         args.min_total_gib, args.max_total_gib, tuple(args.require_audio),
+                         tuple(args.require_source), tuple(args.prefer_group))
 
 
 def read_json(path):
@@ -191,7 +200,8 @@ def run(argv=None):
                 else:
                     require(all([args.track_id,args.listing,args.detail,args.intent,args.episode,args.output]), 'review_draft_arguments_required')
                     show = repo.find(track_id=args.track_id); require(show is not None, 'not_tracked')
-                    result = DiscoveryService().draft(show, args.listing, args.detail, args.intent, args.episode)
+                    from quality_review import policy_from_args
+                    result = DiscoveryService().draft(show, args.listing, args.detail, args.intent, args.episode, policy_from_args(args))
                     from anime_release.raw_evidence import save
                     save(args.output, result)
             elif args.command == 'deliver':
@@ -204,7 +214,9 @@ def run(argv=None):
                     str(args.qbittorrent_save_path) if args.qbittorrent_save_path else None, args.operation_id))
                 result = render_report(repo, outcome)
             elif args.command == 'recover':
-                result = render_report(repo, Workflow(repo, client(args)).recover(args.operation))
+                require(args.original_policy is None or args.review is not None, 're_review_required')
+                result = render_report(repo, Workflow(repo, client(args)).recover(args.operation,
+                    review=args.review, original_policy=read_json(args.original_policy) if args.original_policy else None))
             elif args.command == 'reconcile':
                 show = repo.find(title=args.title)
                 if show is None:

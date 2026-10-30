@@ -24,6 +24,20 @@ fields. Acceptance is recorded before progress is committed. If a process dies
 between those writes, `recover` inspects the original hash and commits the existing
 receipt or an `already_present` result; it never searches or substitutes a candidate.
 
+Before an add, the reviewed validator binds the original full quality policy,
+candidate/hash and fresh detail/review digests to a process-local capability.
+Both client adapters and desktop submission reject absent or mismatched capabilities;
+JSON reports cannot serve as credentials. Unaccepted recovery revalidates the saved
+policy and evidence. Explicit same-operation re-review can refresh evidence but not
+loosen conditions or change the target; see [agent-review.md](agent-review.md).
+The capability enforces supported API usage; it is not a sandbox against arbitrary
+code modifying the validator itself.
+
+Movies and complete seasons use [package-review.md](package-review.md) and a separate
+durable operation journal. They share client acceptance/deduplication, but never
+create synthetic per-episode tracking progress. Every ordinary episode passes its
+own bounds; aggregate size is not proof of qualification.
+
 Desktop context failures and Web API failures use typed RecoveryAction. The Web API
 adapter logs in when configured, checks exact hashes, supports magnet/torrent-file
 adds and keeps a successful add accepted even if follow-up inspection is unavailable.

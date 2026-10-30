@@ -100,28 +100,16 @@ accepting or rejecting coverage:
   conflicts with the validator, retain that diagnosis for repair and revalidation;
   neither silently skip the file nor bypass the validator.
 
-Then pin the reviewed ID in the specialized validators:
+Use [package-review.md](package-review.md) to draft, audit and deliver a season
+or movie with its original policy and exact episode-to-file mapping. The retained
+`search_nyaa_releases.py --candidate-id` reports are read-only discovery diagnostics;
+they are not submission authorization. Single regular episodes use the reviewed
+v3 entrypoint. Legacy pin-only enqueue is rejected with `reviewed_delivery_required`.
 
-```powershell
-python scripts/search_nyaa_releases.py "VERIFIED MOVIE TITLE" --movie --min-total-gib 10 --want-zh --candidate-id 1234567 --include-magnets --legal-ok --report
-python scripts/search_nyaa_releases.py "VERIFIED TITLE" --whole-season --episodes 10 --season S02 --candidate-id 1234567 --tier watch --allow-upward-compatibility --want-zh --include-magnets --legal-ok --report
-```
-
-The v3 `find_anime_release.py` compatibility entrypoint is for reviewed regular
-single episodes, not packages. Use the specialized `search_nyaa_releases.py`
-report above for batches; the count, season and ID in the example must be replaced
-with the actual reviewed values. Supply source season only when independently verified;
-never change the stored work identity to fit a filename label.
-
-After Agent review of the complete raw listing/detail, require a fresh pinned
-report with status `found`, exactly the reviewed candidate/hash, complete regular
-coverage and passing quality. A rejection must be diagnosed, never skipped.
-Persist the reviewed selection, validated report and intended hash before delivery.
-Then use `qbittorrent_submit.py MAGNET --source-url REVIEWED_URL --json`, taking
-MAGNET from that validated report. Save the returned matching accepted receipt
-before scheduling cleanup. On uncertain acceptance inspect/recover that same hash;
-never substitute candidates or treat a launcher exit as success. Package receipts
-live with the task's durable memory; do not forge regular-episode v3 progress.
+Never hand a raw magnet to `qbittorrent_submit.py` or import `submit_magnet` to work
+around a failure. Both desktop and Web API add paths require a process-local
+capability issued after validation. Preserve original operation/hash and policy
+on recovery; a serializable report or `passed:true` cannot manufacture a capability.
 
 
 ## Offline metadata

@@ -645,7 +645,14 @@ def submit_magnet(
     startup_settle_seconds: float = DEFAULT_STARTUP_SETTLE_SECONDS,
     retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
     dry_run: bool = False,
+    validation=None,
 ) -> dict[str, Any]:
+    if not dry_run:
+        from submission_gate import require, ValidationRequired
+        try:
+            require(validation, extract_btih(magnet.strip()), source_url)
+        except ValidationRequired as exc:
+            raise SubmissionError(str(exc), code=str(exc), retryable=False) from exc
     context = {
         "info_hash": extract_btih(magnet.strip()),
         "backup_dir": str(backup_dir.resolve()),
@@ -656,7 +663,7 @@ def submit_magnet(
         save_path=save_path, backup_dir=backup_dir, profile_path=profile_path,
         wait_seconds=wait_seconds, startup_wait_seconds=startup_wait_seconds,
         startup_settle_seconds=startup_settle_seconds, retry_delay_seconds=retry_delay_seconds,
-        dry_run=dry_run,
+        dry_run=dry_run, validation=validation,
     )
     try:
         if dry_run:
@@ -688,14 +695,24 @@ def _submit_magnet_locked(
     startup_settle_seconds: float = DEFAULT_STARTUP_SETTLE_SECONDS,
     retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS,
     dry_run: bool = False,
+    validation=None,
 ) -> dict[str, Any]:
+    if not dry_run:
+        from submission_gate import require, ValidationRequired
+        try:
+            require(validation, extract_btih(magnet.strip()), source_url)
+        except ValidationRequired as exc:
+            raise SubmissionError(str(exc), code=str(exc), retryable=False) from exc
     magnet = magnet.strip()
     info_hash = extract_btih(magnet)
     exe = find_executable(executable)
     require_client_context(exe)
     resume_file = backup_path(info_hash, backup_dir)
     metadata_file = torrent_backup_path(info_hash, backup_dir)
-    resolved_torrent_url = torrent_url or nyaa_torrent_url(source_url)
+    # source_url is provenance, not permission to fetch a second endpoint.
+    # Normal reviewed delivery hands the verified magnet directly to qBittorrent.
+    # Retain explicit torrent_url for callers intentionally requesting metainfo.
+    resolved_torrent_url = torrent_url
     evidence = _acceptance_evidence(info_hash, backup_dir)
     resume_existed = evidence["fastresume_exists"]
 

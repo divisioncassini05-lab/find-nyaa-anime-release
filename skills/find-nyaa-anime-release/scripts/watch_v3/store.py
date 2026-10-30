@@ -11,7 +11,7 @@ from anime_release.storage import StateFileError, atomic_json, file_lock
 
 SUCCESS_STATUSES = {'already_present', 'submitted', 'submitted_verified'}
 PHASES = {'airing', 'finale_pending_evidence', 'completed', 'blocked'}
-COMMANDS = {'create_track', 'record_delivery', 'record_pending_operation',
+COMMANDS = {'create_track', 'record_delivery', 'record_pending_operation', 'record_operation_review',
             'record_failed_operation', 'attach_completion_evidence', 'reconcile_completion',
             'record_waiting', 'repair_identity', 'append_outbox_action', 'ack_outbox_action'}
 
@@ -294,6 +294,15 @@ class StateRepository:
             require(not any(o.get('status') in {'prepared','recovering','accepted'} and not o.get('committed') for o in s['operations'].values()), 'operation_recovery_required')
             op.update(status='prepared', prepared_at=now_iso(), committed=False)
             s['operations'][op['operation_id']] = op
+        elif kind == 'record_operation_review':
+            op = s['operations'][f['operation_id']]
+            require(not op.get('committed') and not op.get('receipt', {}).get('accepted'), 'operation_already_accepted')
+            require(op['info_hash'] == f['info_hash'] and op['episode'] == f['episode']
+                    and op['identity_revision'] == s['identity_revision'], 'operation_identity_conflict')
+            from quality_review import recovery_policy
+            policy = recovery_policy(op.get('quality_policy'), f['quality_policy'])
+            op.update(quality_policy=copy.deepcopy(policy), review_path=f['review_path'],
+                      review_manifest=copy.deepcopy(f['review_manifest']), review_digest=f['review_digest'])
         elif kind == 'record_failed_operation':
             op = s['operations'][f['operation_id']]
             if op.get('status') != 'accepted':

@@ -19,7 +19,8 @@ class Opener:
         return Response(value)
 
 def request():
-    return DeliveryRequest('t','op',HASH,'magnet:?xt=urn:btih:'+HASH)
+    return DeliveryRequest('t','op',HASH,'magnet:?xt=urn:btih:'+HASH,
+        validation=__import__('quality_helpers').permit(HASH))
 
 def test_webapi_login_duplicate_exact_hash():
     opener=Opener([b'Ok.',b'v5.0.0',json.dumps([{'hash':HASH}]).encode()])
@@ -105,6 +106,9 @@ def test_v3_real_raw_review_delivery(tmp_path):
     from watch_v3.workflow import Workflow,Request
     raw_client,args,review=prepared(tmp_path)
     repo=StateRepository(args.state); repo.migrate()
+    review['quality_policy']['require_zh']=True
+    from test_agent_reviewed_flow import revise
+    revise(args,review)
     client=mock_client()
     result=Workflow(repo,client,ReviewValidator(raw_client)).deliver(Request('飙马野郎',args.review,QualityPolicy(require_zh=True)))
     assert result.status=='delivery_recorded'

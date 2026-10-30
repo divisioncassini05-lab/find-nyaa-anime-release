@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from quality_review import inspection_key
+
 import argparse
 import hashlib
 import json
@@ -95,7 +97,7 @@ class SeasonCoverage:
     average_gib_per_episode: float | None = None
     min_gib_per_episode: float | None = None
     max_gib_per_episode: float | None = None
-    quality_basis: str = "average"
+    quality_basis: str = "tier_per_file"
     source_exempt: bool = False
     complete: bool = False
     quality_fit: bool = False
@@ -148,6 +150,8 @@ class ClassifiedCandidate:
             "magnet": self.candidate.magnet,
             "published": self.candidate.published,
             "score": self.candidate.score,
+            "score_deprecated": True,
+            "rank_basis": "inspection_only_not_picture_quality",
             "matched_queries": self.candidate.matched_queries,
             "subtitle_signal": self.candidate.subtitle_signal,
             "detail_checked": self.candidate.detail_checked,
@@ -848,7 +852,7 @@ def _discovery_sort_key(item: ClassifiedCandidate) -> tuple[str, int, int, int, 
         identity.season or 0,
         int(identity.episode or identity.episode_end or 0),
         int(nyaa_id) if nyaa_id.isdigit() else 0,
-        item.candidate.score,
+        tuple(-v if isinstance(v, (int, float)) else v for v in inspection_key(item.candidate)),
     )
 
 
@@ -1112,29 +1116,8 @@ def _fast_path_hint(
     if ordinary_language:
         size_qualified = ordinary_language
 
-    if getattr(args, "trust_cjk_title_for_zh", False):
-        selected = max(
-            size_qualified,
-            key=lambda item: (
-                item.candidate.size_bytes or -1,
-                item.candidate.seeders,
-                item.candidate.downloads,
-                item.candidate.published or "",
-            ),
-        )
-        selection_basis = "trusted_cjk_title_largest_size_qualified_exact_episode"
-    else:
-        selected = max(
-            size_qualified,
-            key=lambda item: (
-                item.candidate.tier_fit == "in-tier",
-                item.candidate.score,
-                item.candidate.seeders,
-                item.candidate.downloads,
-                item.candidate.published or "",
-            ),
-        )
-        selection_basis = "exact_regular_episode_hard_size_quality_stability"
+    selected = _rank(size_qualified, prefer_in_tier=True)[0]
+    selection_basis = "eligible_practical_inspection_order_not_picture_quality"
     selected_id = nyaa.nyaa_id_from_url(selected.candidate.url)
     if selected_id is None:
         return None
@@ -1761,9 +1744,12 @@ def _coverage_from_file_entries(
     policy: SizePolicy,
     requested_season: int | None,
     expected_episodes: int | None,
+    description: str = "",
 ) -> SeasonCoverage:
     scope = _season_batch_scope(item, requested_season)
-    source_exempt = _is_source_exempt(item, args)
+    from package_release import source_exception
+    source_exempt = _is_source_exempt(item, args) and bool(source_exception({
+        'description': description, 'files': [{'name': e.name} for e in entries]}))
     covered_seasons = item.identity.covered_seasons
     if expected_episodes is None or expected_episodes <= 0:
         return SeasonCoverage(
@@ -1877,8 +1863,6 @@ def _coverage_from_file_entries(
         else "explicit_per_file"
         if policy.source == "explicit"
         else "tier_per_file"
-        if args.tier == "premium"
-        else "average"
     )
     quality_fit = source_exempt
     reason = "verified_complete_and_qualified" if source_exempt else "per_episode_size_unavailable"
@@ -1903,7 +1887,7 @@ def _coverage_from_file_entries(
                 if quality_fit
                 else "explicit_per_file_size_out_of_range"
             )
-        elif args.tier == "premium":
+        else:
             quality_fit = all(
                 (policy.hard_min_gib is None or value >= policy.hard_min_gib)
                 and (policy.hard_max_gib is None or value <= policy.hard_max_gib)
@@ -1913,17 +1897,6 @@ def _coverage_from_file_entries(
                 "verified_complete_and_qualified"
                 if quality_fit
                 else "tier_per_file_size_out_of_range"
-            )
-        else:
-            quality_fit = bool(
-                average_gib is not None
-                and (policy.hard_min_gib is None or average_gib >= policy.hard_min_gib)
-                and (policy.hard_max_gib is None or average_gib <= policy.hard_max_gib)
-            )
-            reason = (
-                "verified_complete_and_qualified"
-                if quality_fit
-                else "average_size_out_of_range"
             )
     return SeasonCoverage(
         scope=scope,
@@ -2038,7 +2011,7 @@ def _season_batch_report(
 
     for scope in ("exact", "multi", "unknown"):
         group = [item for item in inspectable if _season_batch_scope(item, requested_season) == scope]
-        group = sorted(group, key=lambda value: value.candidate.score, reverse=True)
+        group = sorted(group, key=lambda value: inspection_key(value.candidate))
         selected_group = group[:remaining_budget]
         if len(group) > len(selected_group):
             diagnostics["season_detail_unchecked_count"] += len(group) - len(selected_group)
@@ -2073,7 +2046,7 @@ def _season_batch_report(
                 continue
             diagnostics["season_detail_checked_count"] += 1
             coverage = _coverage_from_file_entries(
-                item, list(detail.files), args, policy, requested_season, expected_episodes
+                item, list(detail.files), args, policy, requested_season, expected_episodes, detail.description
             )
             item.coverage = coverage
             if coverage.reason in {
@@ -2191,14 +2164,9 @@ def _season_batch_report(
 def _rank(
     items: list[ClassifiedCandidate], *, prefer_in_tier: bool = False
 ) -> list[ClassifiedCandidate]:
-    ranked = sorted(
-        items,
-        key=lambda item: (
-            prefer_in_tier and item.candidate.tier_fit == "in-tier",
-            item.candidate.score,
-        ),
-        reverse=True,
-    )
+    ranked = sorted(items, key=lambda item: (
+        bool(prefer_in_tier and item.candidate.tier_fit != "in-tier"),
+        *inspection_key(item.candidate)))
     for index, item in enumerate(ranked, start=1):
         item.candidate.rank = index
     return ranked
@@ -2210,7 +2178,7 @@ def _latest_regular(items: list[ClassifiedCandidate]) -> list[ClassifiedCandidat
         key=lambda item: (
             item.identity.episode if item.identity.episode is not None else -1,
             item.candidate.published or "",
-            item.candidate.score,
+            tuple(-v if isinstance(v, (int, float)) else v for v in inspection_key(item.candidate)),
         ),
         reverse=True,
     )
@@ -2261,7 +2229,7 @@ def _inspect_details(
             selected,
             key=lambda item: (
                 item.candidate.subtitle_signal != "not confirmed",
-                item.candidate.score,
+                tuple(-v if isinstance(v, (int, float)) else v for v in inspection_key(item.candidate)),
             ),
             reverse=True,
         )

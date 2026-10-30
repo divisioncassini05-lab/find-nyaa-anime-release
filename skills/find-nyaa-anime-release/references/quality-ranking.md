@@ -1,6 +1,6 @@
 # Quality, Ranking, and Diagnostics
 
-Use this reference for quality disputes, batch math, downgrade decisions, or diagnostics. Follow SKILL.md for raw discovery and Agent review. The automatic tier fallback rules below apply only to unpinned compatibility searches; pinned finalization keeps the supplied tier and constraints.
+Use this reference for quality disputes, batch math, downgrade decisions, or diagnostics. Follow SKILL.md for raw discovery and Agent review. All delivery paths preserve the requested tier and constraints; changing tier requires a new explicit user decision.
 
 ## Search Budget
 
@@ -17,8 +17,13 @@ without inheriting a top-k reading limit or silently choosing another tier.
 
 ## Tiers and Size Floors
 
+These are this user's eligibility bounds, not universal definitions of visual
+quality. Passing a size floor is necessary under the applicable policy but is
+not sufficient to call a release high quality. Preserve the existing bounds and
+documented source exceptions; this preference changes comparison, not the bounds.
+
 ```text
-轻量观看 (browse): 1-2 GiB per episode, with 1 GiB as a hard floor and about 1.5 GiB preferred
+轻量观看 (browse): 1-2 GiB per episode, with 1 GiB as a hard floor
 普通观看 (watch):  2-4 GiB per episode
 高画质 (premium):  at least 6 GiB per episode, BDMV, remux, or comparable lossless source
 ```
@@ -35,13 +40,12 @@ without inheriting a top-k reading limit or silently choosing another tier.
   A user-supplied `--max-gib-per-episode` remains a hard cap and disables this
   relaxation; movie total-size bounds are unaffected.
 - Do not reduce a tier floor for a short runtime. A 12-minute episode at 514 MiB is below both `watch` and `browse` for this user.
-- For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras. Browse/watch tiers classify the remaining regular files by average size while enforcing a `1 GiB` absolute floor on every ordinary regular file. Premium requires every regular file to meet its `6 GiB` floor unless the package qualifies for the BDMV/remux source exemption. Explicit min/max constraints remain strict per file. Total size may prove a package is impossible, but cannot prove it is qualified.
+- For a season package, use an authoritative expected episode count and inspect the Nyaa file list. Exclude NCOP/NCED, PV, CM, sample, OVA/OAD, specials, and extras. Every regular file must satisfy the selected tier or explicit per-episode bounds; an average cannot mask an undersized episode. Premium retains its verified BDMV/remux source exemption. Explicit min/max constraints remain strict per file. Total size may prove a package is impossible, but cannot prove it is qualified.
 - In discovery output, treat `size_scope: batch_total` as an explicit warning: `size_gib` is the whole package, `per_episode_size_gib` is unavailable, and `requires_whole_season_verification` must remain true until file-list coverage and quality checks succeed.
 - A below-floor Chinese-subtitle release must not beat a qualified unsubtitled or multi-subtitle release unless Chinese subtitles are an explicit hard requirement and the user has separately approved a tier downgrade.
-- For an ordinary or soft-Chinese **普通观看** (`watch`) request with no `2-4 GiB` candidate and no user-supplied custom floor, the high-level script automatically retries the same target as **轻量观看** (`browse`, `1-2 GiB`). Label it **轻量观看降级结果**. A valid `2-4 GiB` candidate is never displaced merely because a smaller release has Chinese subtitles.
-- For a hard-Chinese **普通观看** request, a verified-Chinese **轻量观看** fallback produces `needs_quality_fallback_confirmation`: show its metadata without a magnet and ask first. After approval, rerun at `browse`; never go below `1 GiB`.
-- A high-quality request may retry exactly once at normal-watching quality. A direct normal-watching request may retry exactly once at lightweight quality. Never chain high -> normal -> lightweight in one request.
-- When a complete-season normal request and its lightweight fallback both fail but a verified premium package exists, return `needs_quality_upgrade_confirmation`. Show source type, total size, episode count, and seeders without a page or magnet; rerun at `premium` only after approval.
+- Failed searches do not change tiers automatically, including the compatibility
+  resolver. Report the unmet constraint. A user-approved tier change starts a new
+  review with its explicit policy; it cannot alter an in-flight delivery operation.
 
 ## Ranking
 
@@ -52,9 +56,29 @@ Hard filters happen before ranking:
    only the named tier's lower floor is hard; a higher-tier candidate is marked
    as an upward-compatible result and is considered after in-tier candidates.
 3. Any requested audio/source restriction.
-4. For a complete-season request: verified regular-episode coverage, the per-file absolute floor, then named-tier average or explicit per-file bounds. Prefer exact-season packages before qualified multi-season collections.
+4. For a complete-season request: verified regular-episode coverage, the per-file absolute floor, then named-tier or explicit per-file bounds. Prefer exact-season packages before qualified multi-season collections.
 
-Rank qualified candidates by requested quality, then swarm strength, original audio, an explicit current-request group hint, and finally Chinese/mixed-subtitle signals. In ordinary or soft-Chinese mode, subtitle signals are tie-breakers within the same quality class and never a reason to cross a hard filter. In hard-Chinese mode, verified Simplified or Traditional Chinese is an additional hard filter after work, episode, and size.
+Compare eligible releases using only their detail pages and complete file lists,
+including existing MediaInfo, source/encoding notes and static comparisons shown
+on those pages. Do not download video samples or consult external reviews. Assess
+source/master edition, retained detail/grain, compression artifacts, banding and
+filtering only to the extent supported by that evidence. Resolution, Blu-ray,
+Remux, codec, bit depth, bitrate and file size alone do not prove superiority.
+More audio tracks or extras do not improve video quality.
+
+Use a clear evidence-backed picture advantage first. If the apparent difference
+is small or the pages cannot establish one, mark comparable/unknown and use:
+verified Chinese subtitles, seed availability, an explicit user group preference,
+then ascending numeric candidate ID for a stable tie. Do not assume zero listed
+seeders proves a dead torrent. More detailed descriptions are not a quality bonus.
+Keep unknown evidence explicit; do not invent playback observations.
+
+The old mixed numeric score is deprecated. Size within a valid interval, proximity
+to its midpoint, codec labels and resolution labels earn no automatic quality
+points. Script ordering is practical inspection priority, never the Agent's final
+quality verdict. Explain decisive alternatives in `quality_comparison`, and carry
+the unchanged `quality_policy` from draft through delivery. The tier/source
+eligibility exceptions do not waive this evidence-based comparison.
 
 ## Structured Outcomes
 
@@ -65,7 +89,7 @@ Rank qualified candidates by requested quality, then swarm strength, original au
 - Partial query failure takes precedence over a negative candidate/quality conclusion: return `network_error` with the surviving rejection diagnostics. A latest discovery with partial query coverage remains `latest_unresolved` and cannot be enqueued.
 - `subtitle_unqualified` means every size-qualified candidate was checked successfully and none had verified Chinese subtitles.
 - `subtitle_check_incomplete` means the detail budget expired, a request failed, a URL was unavailable, or candidates remain unchecked. Do not state that no Chinese release exists.
-- `needs_quality_fallback_confirmation` means a hard-Chinese request can only be met by dropping from **普通观看** to **轻量观看**. Do not expose the fallback magnet before approval.
-- `needs_quality_upgrade_confirmation` means normal and lightweight complete-season checks failed but a verified premium package exists. Do not expose its page or magnet before approval.
+- `needs_quality_fallback_confirmation` is retained for reading historical reports; new searches never lower tiers automatically.
+- `needs_quality_upgrade_confirmation` is retained for historical reports; a user-requested tier change requires a new review.
 - `needs_confirmation` means special/batch/unknown parsing makes a definitive choice unsafe. Present at most two choices and their parsed identity.
 - `latest_unresolved` means release-based latest cannot be confirmed due to identity ambiguity or incomplete query evidence. A missing official schedule alone does not imply it. Keep official airing evidence separate from observed resource publication.

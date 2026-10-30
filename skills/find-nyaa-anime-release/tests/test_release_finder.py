@@ -717,7 +717,7 @@ class FailureReplyTests(unittest.TestCase):
             {"above_max_count": 1, "size_policy": {"hard_max_gib": 2.0}},
         )
         self.assertNotIn("有高于该区间的资源可选", reply)
-        self.assertIn("正篇平均体积", reply)
+        self.assertIn("正篇逐集体积", reply)
 
 
 class SearchReportTests(unittest.TestCase):
@@ -1561,7 +1561,7 @@ class HybridWorkflowTests(unittest.TestCase):
             12,
             False,
         )
-        self.assertGreater(score, 0)
+        self.assertEqual(score, 0)
         self.assertEqual(basis, "6.40 GiB single release")
         self.assertEqual(tier_fit, "in-tier")
 
@@ -1683,7 +1683,7 @@ class HybridWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(collect.call_count, 2)
 
-    def test_cjk_title_fast_path_tries_both_variants_and_uses_largest_in_range(self) -> None:
+    def test_cjk_title_fast_path_tries_both_variants_and_uses_practical_order(self) -> None:
         largest = self.nyaa_candidate(
             "[字幕组] 緣之空 S01E03 [1080p]",
             "3.8 GiB",
@@ -1755,7 +1755,7 @@ class HybridWorkflowTests(unittest.TestCase):
         self.assertEqual(payload["selected"][0]["nyaa_id"], "2135604")
         self.assertEqual(
             payload["diagnostic"]["fast_path"]["selection_basis"],
-            "trusted_cjk_title_largest_size_qualified_exact_episode",
+            "eligible_practical_inspection_order_not_picture_quality",
         )
         self.assertEqual(
             payload["diagnostic"]["required_subtitle"],
@@ -3704,7 +3704,7 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertEqual(payload["state_update"], "unchanged_already_watched")
         self.assertEqual(before, after)
 
-    def test_enqueue_success_advances_state_after_qbittorrent_accepts(self) -> None:
+    def test_unreviewed_enqueue_never_reaches_accepting_client(self) -> None:
         release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
         release.magnet = "magnet:?xt=urn:btih:" + ("a" * 40)
         release.url = "https://nyaa.si/view/123"
@@ -3784,14 +3784,9 @@ class HighLevelStateTests(unittest.TestCase):
                 )
             payload = json.loads(output.getvalue())
             saved = finder.load_state(state_path)["shows"][0]
-        self.assertEqual(payload["status"], "found")
-        self.assertEqual(payload["qbittorrent"]["status"], "submitted_verified")
-        self.assertEqual(payload["state_update"], "advanced")
-        self.assertEqual(saved["watched_episode"], 5)
-        self.assertEqual(saved["next_episode"], 6)
-        submit.assert_called_once()
-        self.assertEqual(submit.call_args.kwargs["profile_path"], profile)
-        self.assertEqual(submit.call_args.kwargs["backup_dir"], backup)
+        self.assertEqual(payload['status'], 'reviewed_delivery_required')
+        self.assertEqual(saved['watched_episode'], 4)
+        submit.assert_not_called()
 
     def test_enqueue_failure_does_not_advance_state(self) -> None:
         release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
@@ -3867,14 +3862,7 @@ class HighLevelStateTests(unittest.TestCase):
                 )
             after = state_path.read_bytes()
         payload = json.loads(output.getvalue())
-        self.assertEqual(payload["status"], "download_enqueue_failed")
-        self.assertEqual(payload["qbittorrent"]["status"], "error")
-        self.assertEqual(payload["availability"]["state"], "available_enqueue_failed")
-        self.assertEqual(payload["recovery"]["stage"], "client")
-        self.assertTrue(payload["recovery"]["release_confirmed"])
-        self.assertIsNone(payload["recovery"]["retry_basis"])
-        self.assertIn("S01E05", payload["reply_text"])
-        self.assertEqual(payload["state_update"], "none")
+        self.assertEqual(payload['status'], 'reviewed_delivery_required')
         self.assertEqual(before, after)
 
     def test_finished_total_requires_nyaa_discovery_for_latest_target(self) -> None:
@@ -3898,7 +3886,7 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertIsNone(target)
         self.assertEqual(source, "nyaa_discovery_required")
 
-    def test_latest_discovery_reports_and_advances_verified_new_episode(self) -> None:
+    def test_discovery_without_review_cannot_advance_new_episode(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Example Season 4",
             aliases=["Example 4th season"],
@@ -3984,12 +3972,8 @@ class HighLevelStateTests(unittest.TestCase):
                 )
             payload = json.loads(output.getvalue())
             saved = finder.load_state(state_path)["shows"][0]
-        self.assertEqual(payload["status"], "found")
-        self.assertEqual(payload["target_episode"], 14)
-        self.assertEqual(payload["availability"]["target_source"], "nyaa_discovery_required")
-        self.assertEqual(payload["qbittorrent"]["status"], "submitted_verified")
-        self.assertEqual(payload["state_update"], "advanced")
-        self.assertEqual((saved["watched_episode"], saved["next_episode"]), (14, 15))
+        self.assertEqual(payload['status'], 'reviewed_delivery_required')
+        self.assertEqual(saved['watched_episode'], 13)
 
     def test_latest_discovery_failure_does_not_rewrite_tracked_state(self) -> None:
         resolved = finder.ResolvedAnime(
@@ -4248,7 +4232,7 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertFalse(payload["progress"]["advanced"])
         self.assertEqual(before, after)
 
-    def test_retry_success_refreshes_progress_for_next_parent_run(self) -> None:
+    def test_legacy_retry_cannot_skip_review(self) -> None:
         scheduled = finder.ResolvedAnime(
             title="Example Anime",
             aliases=[],
@@ -4369,21 +4353,13 @@ class HighLevelStateTests(unittest.TestCase):
                     elif len(outputs) == 2:
                         after_retry = finder.load_state(state_path)["shows"][0]
 
-        self.assertEqual(after_failure["watched_episode"], 7)
-        self.assertEqual(search.call_args_list[0].kwargs["requested_episode"], 8)
-        self.assertEqual(outputs[0]["state_update"], "tracked_waiting")
-        self.assertEqual(after_retry["watched_episode"], 8)
-        self.assertEqual(after_retry["next_episode"], 9)
-        self.assertNotIn("pending_download", after_retry)
-        self.assertEqual(outputs[1]["state_update"], "advanced")
-        self.assertTrue(outputs[1]["progress"]["advanced"])
-        self.assertEqual(outputs[2]["status"], "latest_already_handled")
-        self.assertEqual(outputs[2]["progress"]["after_episode"], 8)
-        self.assertEqual(outputs[2]["progress"]["next_episode"], 9)
-        self.assertEqual(outputs[2]["qbittorrent"]["status"], "not_attempted")
-        submit.assert_called_once()
+        self.assertEqual(after_failure['watched_episode'], 7)
+        self.assertEqual(after_retry['watched_episode'], 7)
+        self.assertEqual(outputs[1]['status'], 'reviewed_delivery_required')
+        self.assertEqual(outputs[2]['status'], 'reviewed_delivery_required')
+        submit.assert_not_called()
 
-    def test_watch_falls_back_to_browse_when_no_custom_floor_was_given(self) -> None:
+    def test_watch_never_silently_downgrades(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Example",
             season="S01",
@@ -4445,13 +4421,10 @@ class HighLevelStateTests(unittest.TestCase):
                     ]
                 )
         payload = json.loads(output.getvalue())
-        first_args = search.call_args_list[0].args[0]
-        second_args = search.call_args_list[1].args[0]
-        self.assertEqual(search.call_count, 2)
-        self.assertEqual((first_args.tier, first_args.min_gib_per_episode), ("watch", 2.0))
-        self.assertEqual((second_args.tier, second_args.min_gib_per_episode), ("browse", 1.0))
-        self.assertEqual(payload["status"], "found")
-        self.assertEqual(payload["quality"]["fallback"], {"from": "watch", "to": "browse", "status": "found"})
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(search.call_args.args[0].tier, 'watch')
+        self.assertEqual(payload['status'], 'release_unqualified')
+        self.assertIsNone(payload['quality']['fallback'])
 
     def test_soft_chinese_preference_never_downgrades_a_valid_watch_release(self) -> None:
         resolved = finder.ResolvedAnime(
@@ -4519,7 +4492,7 @@ class HighLevelStateTests(unittest.TestCase):
         self.assertEqual(payload["selected"]["size"], "2.5 GiB")
         self.assertIsNone(payload["quality"]["fallback"])
 
-    def test_strict_zh_watch_fallback_requires_user_confirmation(self) -> None:
+    def test_strict_zh_failure_preserves_watch_floor(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Example",
             search_titles=["Example"],
@@ -4593,11 +4566,9 @@ class HighLevelStateTests(unittest.TestCase):
                     ]
                 )
         payload = json.loads(output.getvalue())
-        self.assertEqual(payload["status"], "needs_quality_fallback_confirmation")
-        self.assertIsNone(payload["selected"])
-        self.assertNotIn("magnet", payload["quality"]["fallback_candidate"])
-        self.assertTrue(payload["output_contract"]["magnet_deferred_until_confirmation"])
-        self.assertIn("是否降级到轻量观看", payload["reply_text"])
+        self.assertEqual(payload['status'], 'subtitle_unqualified')
+        self.assertIsNone(payload['selected'])
+        self.assertIsNone(payload['quality']['fallback'])
 
     def test_nickname_uses_canonical_title_before_web_resolution(self) -> None:
         resolved = finder.ResolvedAnime(
@@ -5321,7 +5292,7 @@ class SeasonBatchSelectionTests(unittest.TestCase):
         self.assertEqual(report.choices, [])
         self.assertEqual(report.diagnostics["season_quality_rejected_count"], 1)
 
-    def test_named_watch_tier_uses_average_with_one_gib_absolute_floor(self) -> None:
+    def test_named_watch_tier_rejects_below_tier_episode_even_when_average_passes(self) -> None:
         args = self.args("watch")
         args.episodes = 25
         batch = candidate("[G] Atlas Chronicle S1 [01-25] Complete", "57 GiB", 30)
@@ -5343,12 +5314,13 @@ class SeasonBatchSelectionTests(unittest.TestCase):
             args=args,
             context=context,
         )
-        self.assertEqual(report.status, "found")
-        coverage = report.selected[0].coverage
-        self.assertEqual(coverage.quality_basis, "average")
-        self.assertAlmostEqual(coverage.average_gib_per_episode, 2.276, places=3)
-        self.assertEqual(coverage.min_gib_per_episode, 1.7)
-        self.assertEqual(coverage.max_gib_per_episode, 3.0)
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["tier_per_file_rejected_count"], 1)
+        coverage = report.diagnostics["quality_rejection_samples"][0]
+        self.assertEqual(coverage["quality_basis"], "tier_per_file")
+        self.assertAlmostEqual(coverage["average_gib_per_episode"], 2.276, places=3)
+        self.assertEqual(coverage["min_gib_per_episode"], 1.7)
+        self.assertEqual(coverage["max_gib_per_episode"], 3.0)
 
     def test_named_watch_tier_rejects_any_episode_below_absolute_floor(self) -> None:
         args = self.args("watch")
@@ -5452,12 +5424,12 @@ class SeasonBatchSelectionTests(unittest.TestCase):
         args = self.args("premium")
         disc = candidate("[BDMV] Foxtrot Archive S1 [01-12] Complete", "180 GiB", 8)
         files = "".join(
-            f'<li>{index:05d}.m2ts <span class="file-size">(0.5 GiB)</span></li>'
+            f'<li>BDMV/STREAM/{index:05d}.m2ts <span class="file-size">(0.5 GiB)</span></li>'
             for index in range(1, 13)
         )
         page = (
             '<h3 class="panel-title">[BDMV] Foxtrot Archive S1 [01-12] Complete</h3>'
-            f'<div class="torrent-file-list"><ul>{files}</ul></div>'
+            f'<div class="torrent-file-list"><ul>{files}<li>BDMV/PLAYLIST/00001.mpls <span class="file-size">(1 KiB)</span></li></ul></div>'
         )
         context = core.SearchContext(
             canonical_title="Foxtrot Archive",
@@ -5515,7 +5487,7 @@ class SeasonBatchSelectionTests(unittest.TestCase):
         sizes = [5.2] * 24 + [6.1]
         report = self.run_report(
             [remux],
-            {remux.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            {remux.url: self.detail_page("Atlas Chronicle", {1: sizes}) + '<div id="torrent-description">Remux: untouched video; no re-encoding.</div>'},
             args=args,
             context=context,
         )
@@ -5667,7 +5639,7 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
         self.assertNotIn("magnet:?", payload["reply_text"])
         search.assert_not_called()
 
-    def test_premium_falls_back_only_one_level_to_watch(self) -> None:
+    def test_premium_never_silently_downgrades(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Harbor Signals",
             search_titles=["Harbor Signals"],
@@ -5750,14 +5722,12 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
                     ]
                 )
         payload = json.loads(output.getvalue())
-        self.assertEqual(search.call_count, 2)
-        self.assertEqual(search.call_args_list[1].args[0].tier, "watch")
-        self.assertEqual(payload["intent"], "season_batch")
-        self.assertEqual(payload["quality"]["effective_tier"], "watch")
-        self.assertEqual(payload["quality"]["fallback"]["to"], "watch")
-        self.assertEqual(payload["selected"]["coverage"]["scope"], "exact")
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(payload['quality']['effective_tier'], 'premium')
+        self.assertIsNone(payload['quality']['fallback'])
+        self.assertEqual(payload['status'], 'release_unqualified')
 
-    def test_watch_prompts_before_upgrading_to_complete_premium_season(self) -> None:
+    def test_watch_does_not_search_other_tiers_without_request(self) -> None:
         resolved = finder.ResolvedAnime(
             title="Harbor Signals",
             search_titles=["Harbor Signals"],
@@ -5847,14 +5817,10 @@ class SeasonBatchHighLevelTests(unittest.TestCase):
                     ]
                 )
         payload = json.loads(output.getvalue())
-        self.assertEqual(search.call_count, 3)
-        self.assertEqual([call.args[0].tier for call in search.call_args_list], ["watch", "browse", "premium"])
-        self.assertEqual(payload["status"], "needs_quality_upgrade_confirmation")
-        self.assertTrue(payload["output_contract"]["ready"])
-        self.assertEqual(payload["quality"]["upgrade_candidate"]["source_type"], "Remux")
-        self.assertNotIn("magnet", payload["quality"]["upgrade_candidate"])
-        self.assertNotIn("magnet:?", payload["reply_text"])
-        self.assertIn("是否改用高画质", payload["reply_text"])
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(payload['quality']['effective_tier'], 'watch')
+        self.assertIsNone(payload['quality']['upgrade'])
+        self.assertEqual(payload['status'], 'release_unqualified')
 
 
 if __name__ == "__main__":

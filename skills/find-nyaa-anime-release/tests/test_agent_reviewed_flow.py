@@ -59,6 +59,11 @@ def prepared(tmp_path, intent='latest_regular'):
         'video_file': client.detail.files[0].name,
         'subtitle_quotes': [line for line in client.detail.description.splitlines()
                             if '**Subtitles:**' in line]}
+    from quality_review import policy_from_args
+    from types import SimpleNamespace
+    review['quality_policy'] = policy_from_args(SimpleNamespace())
+    review['quality_comparison'] = {'result':'unknown', 'reason':'No comparable picture evidence in detail.',
+                                    'limitations':'Only metadata available.', 'alternatives':[]}
     raw.save(form, review)
     flags = ['--latest'] if intent == 'latest_regular' else ['--episode', '2']
     args = build_parser().parse_args(['飙马野郎', '--state', str(state), '--review', str(form),
@@ -164,6 +169,8 @@ def test_subfloor_and_multi_video_cannot_pass_as_single_episode(tmp_path):
 def test_hard_chinese_needs_real_language_evidence(tmp_path):
     client, args, review = prepared(tmp_path)
     args.require_zh = True
+    review['quality_policy']['require_zh'] = True
+    revise(args, review)
     assert reviewed.audit(args, client=client)[1]['status'] == 'found'
     review['selection']['subtitle_quotes'] = ['Multi-Subs']
     revise(args, review)

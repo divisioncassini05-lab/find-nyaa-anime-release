@@ -102,7 +102,7 @@ def save(path, value):
     return path
 
 
-def draft(track, listings, detail_path, intent, episode):
+def draft(track, listings, detail_path, intent, episode, policy=None):
     from evidence_artifacts import input_path
     listings = [input_path(p) for p in listings]
     detail_path = input_path(detail_path)
@@ -110,7 +110,9 @@ def draft(track, listings, detail_path, intent, episode):
     selected = read(detail_path, 'nyaa_detail')
     if not any(r['nyaa_id'] == selected['release']['nyaa_id'] for report in reports for r in report['rows']):
         raise ValueError('Selected ID is not in the supplied listing evidence')
-    return {'schema_version': 1, 'reviewed': False, 'track_id': track['track_id'],
+    from quality_review import draft_comparison
+    return {'schema_version': 1, 'reviewed': False, 'quality_policy': policy,
+            'quality_comparison': draft_comparison(), 'track_id': track['track_id'],
             'identity_revision': track['identity_revision'], 'intent': intent,
             'target_episode': episode, 'candidate_id': selected['release']['nyaa_id'],
             'listing_reports': [str(Path(p).resolve()) for p in listings],

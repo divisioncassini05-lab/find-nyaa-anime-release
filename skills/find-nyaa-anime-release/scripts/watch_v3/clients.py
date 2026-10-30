@@ -41,6 +41,17 @@ class DeliveryRequest:
     save_path: str | None = None
     source_url: str | None = None
     torrent_path: str | None = None
+    validation: object = field(default=None, repr=False, compare=False)
+
+    def saved_request(self):
+        return {k: v for k, v in asdict(self).items() if k != "validation"}
+
+    def authorize(self):
+        from submission_gate import require, ValidationRequired
+        try:
+            require(self.validation, self.info_hash, self.source_url)
+        except ValidationRequired as exc:
+            raise ClientFailure(str(exc)) from exc
 
     @property
     def idempotency_key(self):
@@ -115,7 +126,9 @@ class DesktopLauncherClient:
         import qbittorrent_submit as qb
         try:
             evidence = qb._acceptance_evidence(info_hash, self.backup_dir)
-            valid = evidence.get('fastresume_valid') is True and evidence.get('torrent_valid') is True
+            # A matching persisted magnet task is accepted before peer metadata
+            # arrives. Match the submitter so recovery does not re-add that task.
+            valid = evidence.get('fastresume_valid') is True
             return AcceptanceEvidence(info_hash, valid, evidence)
         except OSError as exc:
             raise ClientFailure('permission_denied') from exc
@@ -123,11 +136,12 @@ class DesktopLauncherClient:
     def submit(self, request):
         import qbittorrent_submit as qb
         request.validate()
+        request.authorize()
         self.preflight()
         if request.torrent_path:
             raise ClientFailure('desktop_torrent_file_not_supported')
         try:
-            result = self.submit_fn(request.magnet, source_url=request.source_url,
+            result = self.submit_fn(request.magnet, source_url=request.source_url, validation=request.validation,
                 executable=self.executable, save_path=Path(request.save_path) if request.save_path else self.save_path,
                 backup_dir=self.backup_dir, profile_path=self.profile_path)
             if result.get('status') not in SUCCESS_STATUSES or result.get('info_hash') != request.info_hash or result.get('ok') is not True:
@@ -147,7 +161,15 @@ class QbittorrentWebApiClient:
         self.username, self.password, self.timeout = username, password, timeout
         self.opener = opener or build_opener(HTTPCookieProcessor(CookieJar()))
 
-    def _request(self, path, data=None, content_type=None):
+    def _request(self, path, data=None, content_type=None, *, delivery=None):
+        if urlsplit(path).path.rstrip('/') == '/api/v2/torrents/add':
+            if not isinstance(delivery, DeliveryRequest):
+                raise ClientFailure('validated_submission_required')
+            delivery.validate()
+            delivery.authorize()
+            if data is not None or content_type is not None:
+                raise ClientFailure('direct_add_payload_not_allowed')
+            data, content_type = self._add_payload(delivery)
         headers = {'Referer': self.base_url + '/'}
         if content_type:
             headers['Content-Type'] = content_type
@@ -182,13 +204,29 @@ class QbittorrentWebApiClient:
 
     def submit(self, request):
         request.validate()
+        request.authorize()
         self.preflight()
         existing = self.inspect(request.info_hash)
         if existing.verified:
             return receipt(request, 'already_present', existing)
+        result = self._request('/api/v2/torrents/add', delivery=request)
+        if result.strip() != b'Ok.':
+            raise ClientFailure('client_rejected')
+        try:
+            evidence = self.inspect(request.info_hash)
+        except ClientFailure as exc:
+            # The successful add response is already acceptance. A subsequent
+            # inspection failure must not discard that pivot.
+            evidence = AcceptanceEvidence(request.info_hash, False, {'add_response':'Ok.', 'inspection_error':asdict(exc.recovery)})
+        return receipt(request, 'submitted_verified' if evidence.verified else 'submitted', evidence)
+
+    def _add_payload(self, request):
         if request.torrent_path:
             boundary = 'watch-' + request.operation_id
             data = Path(request.torrent_path).read_bytes()
+            from qbittorrent_submit import torrent_info_hash
+            if torrent_info_hash(data) != request.info_hash:
+                raise ClientFailure('torrent_hash_mismatch')
             body = (f'--{boundary}\r\nContent-Disposition: form-data; name="torrents"; filename="release.torrent"\r\nContent-Type: application/x-bittorrent\r\n\r\n'.encode() + data + b'\r\n')
             if request.save_path:
                 body += f'--{boundary}\r\nContent-Disposition: form-data; name="savepath"\r\n\r\n{request.save_path}\r\n'.encode()
@@ -200,13 +238,4 @@ class QbittorrentWebApiClient:
                 fields['savepath'] = request.save_path
             body = urlencode(fields).encode()
             content_type = 'application/x-www-form-urlencoded'
-        result = self._request('/api/v2/torrents/add', body, content_type)
-        if result.strip() != b'Ok.':
-            raise ClientFailure('client_rejected')
-        try:
-            evidence = self.inspect(request.info_hash)
-        except ClientFailure as exc:
-            # The successful add response is already acceptance. A subsequent
-            # inspection failure must not discard that pivot.
-            evidence = AcceptanceEvidence(request.info_hash, False, {'add_response':'Ok.', 'inspection_error':asdict(exc.recovery)})
-        return receipt(request, 'submitted_verified' if evidence.verified else 'submitted', evidence)
+        return body, content_type

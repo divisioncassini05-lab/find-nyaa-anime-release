@@ -136,11 +136,11 @@ class Workflow:
                 return WorkflowResult(selection.report['status'], tid, report=selection.report)
             release = selection.release
             opid = request.operation_id or hashlib.sha256(f'{tid}:{release.target.episode}:{release.info_hash}'.encode()).hexdigest()[:24]
-            delivery = DeliveryRequest(tid, opid, release.info_hash, release.magnet, request.save_path, release.source_url)
+            delivery = DeliveryRequest(tid, opid, release.info_hash, release.magnet, request.save_path, release.source_url, validation=release.permit)
             delivery.validate()
             op = {'operation_id':opid, 'track_id':tid, 'identity_revision':show['identity_revision'],
                   'info_hash':release.info_hash, 'episode':release.target.episode, 'kind':'regular',
-                  'candidate_id':release.candidate_id, 'request':asdict(delivery),
+                  'candidate_id':release.candidate_id, 'request':delivery.saved_request(), 'quality_policy':asdict(request.policy),
                   'review_path':str(manifest.path.resolve()), 'review_manifest':manifest.content, 'review_digest':hashlib.sha256(manifest.path.read_bytes()).hexdigest()}
             self.repo.command(tid, 'record_pending_operation', expected_revision=show['revision'], operation=op)
             saved = self.repo.find(track_id=tid)['operations'][opid]
@@ -151,6 +151,7 @@ class Workflow:
     def _execute(self, delivery, report=None):
         tid, opid = delivery.track_id, delivery.operation_id
         try:
+            delivery.authorize()
             preflight_delivery_context(self.client)
             accepted = self.client.submit(delivery).validate(delivery)
         except ClientFailure as exc:
@@ -168,8 +169,8 @@ class Workflow:
                                   recovery=asdict(ClientFailure('accepted_receipt_commit_failed', retryable=True).recovery))
         return WorkflowResult('delivery_recorded', tid, opid, receipt=accepted_dict, report=report)
 
-    def recover(self, operation_id):
-        result = self._recover(operation_id)
+    def recover(self, operation_id, *, review=None, original_policy=None):
+        result = self._recover(operation_id, review=review, original_policy=original_policy)
         result = self._finish(result)
         if result.status in {'recovered','already_accepted','delivery_recorded'}:
             from evidence_artifacts import cleanup
@@ -181,7 +182,7 @@ class Workflow:
                 pass  # expiry sweep retries housekeeping, acceptance stays durable
         return result
 
-    def _recover(self, operation_id):
+    def _recover(self, operation_id, *, review=None, original_policy=None):
         matches = [(s, s['operations'][operation_id]) for s in self.repo.read()['shows'] if operation_id in s['operations']]
         if not matches:
             return WorkflowResult('track_absent', None, operation_id)
@@ -213,4 +214,26 @@ class Workflow:
             except ClientFailure as exc:
                 self.repo.command(tid, 'record_failed_operation', operation_id=operation_id, recovery=asdict(exc.recovery))
                 return WorkflowResult('recovery_failed', tid, operation_id, recovery=asdict(exc.recovery))
-            return self._execute(delivery)
+            # Inspecting an accepted hash is read-only; a new add needs fresh validation.
+            from dataclasses import replace
+            from quality_review import recovery_policy, POLICY_FIELDS
+            if review is None and (set(op.get('quality_policy') or {}) != POLICY_FIELDS or not op.get('review_path')):
+                return WorkflowResult('re_review_required', tid, operation_id)
+            policy = recovery_policy(op.get('quality_policy'), original_policy)
+            manifest = ReviewManifest.load(Path(review or op['review_path']))
+            require(manifest.content.get('track_id') == tid, 'review_work_conflict')
+            review_digest = hashlib.sha256(manifest.path.read_bytes()).hexdigest()
+            if review is None:
+                require(review_digest == op['review_digest'], 'recovery_review_changed')
+            selection = self.validator.validate(manifest, show, QualityPolicy(**policy))
+            require(selection.release is not None and selection.release.info_hash == op['info_hash']
+                    and selection.release.target.episode == op['episode']
+                    and (not op.get('candidate_id') or selection.release.candidate_id == op['candidate_id']),
+                    'recovery_validation_failed')
+            if review is not None:
+                self.repo.command(tid, 'record_operation_review', expected_revision=show['revision'],
+                                  operation_id=operation_id, info_hash=op['info_hash'], episode=op['episode'],
+                                  quality_policy=policy, review_path=str(manifest.path.resolve()),
+                                  review_manifest=manifest.content, review_digest=review_digest)
+            delivery = replace(delivery, validation=selection.release.permit)
+            return self._execute(delivery, selection.report)

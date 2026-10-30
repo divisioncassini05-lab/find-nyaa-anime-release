@@ -32,6 +32,8 @@ def selected_view(
         "detail_chinese_confirmed": candidate.get("detail_chinese_confirmed"),
         "detail_subtitle_signal": candidate.get("detail_subtitle_signal"),
         "score": candidate.get("score"),
+        "score_deprecated": True,
+        "rank_basis": "inspection_only_not_picture_quality",
         "effective_season": candidate.get("effective_season"),
         "season_source": candidate.get("season_source"),
         "work_match": candidate.get("work_match"),
@@ -202,7 +204,9 @@ def render_failure_reply(
             reasons.append(f"正篇平均体积不在{tier_label}档位")
         if int((diagnostic or {}).get("explicit_per_file_rejected_count") or 0) > 0:
             reasons.append("至少一个正篇文件不满足你明确给出的体积范围")
-        detail = "；".join(reasons) or f"正篇平均体积不符合{tier_label}档位"
+        if int((diagnostic or {}).get("tier_per_file_rejected_count") or 0) > 0:
+            reasons.append(f"至少一集正篇体积不符合{tier_label}档位")
+        detail = "；".join(reasons) or f"正篇逐集体积不符合{tier_label}档位"
         release_unqualified = f"{subject}存在对应发布，但{detail}；未达门槛的候选不会展示。"
     else:
         release_unqualified = f"{subject}存在对应发布，但没有资源满足{tier_label}档位。"

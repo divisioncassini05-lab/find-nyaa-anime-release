@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quality_helpers import permit
+
 import base64
 import hashlib
 import sys
@@ -124,7 +126,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 save_path=root / "downloads",
                 backup_dir=root / "backup",
                 dry_run=True,
-            )
+             validation=permit(qbt.extract_btih(MAGNET), None))
 
         self.assertEqual(report["status"], "dry_run")
         self.assertIn("--skip-dialog=true", report["command"])
@@ -144,7 +146,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 backup_dir=root / "backup",
                 profile_path=profile,
                 dry_run=True,
-            )
+             validation=permit(qbt.extract_btih(MAGNET), None))
 
         self.assertIn(f"--profile={profile}", report["command"])
 
@@ -162,7 +164,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     executable=executable,
                     save_path=root / "downloads",
                     backup_dir=backup,
-                )
+                 validation=permit(qbt.extract_btih(MAGNET), None))
 
         self.assertEqual(report["status"], "already_present")
         popen.assert_not_called()
@@ -190,7 +192,7 @@ class QbittorrentSubmitTests(unittest.TestCase):
                         save_path=root / "downloads",
                         backup_dir=root / "backup",
                         wait_seconds=0,
-                    )
+                     validation=permit(qbt.extract_btih(MAGNET), None))
 
         report = raised.exception.as_report()
         self.assertEqual(report["error_code"], "handoff_unverified")
@@ -222,11 +224,11 @@ class QbittorrentSubmitTests(unittest.TestCase):
                         TORRENT_MAGNET, source_url="https://nyaa.si/view/2141829",
                         executable=executable, save_path=None,
                         backup_dir=root / "backup", wait_seconds=0,
-                    )
+                     validation=permit(qbt.extract_btih(TORRENT_MAGNET), "https://nyaa.si/view/2141829"))
         self.assertEqual(raised.exception.code, "handoff_unverified")
         self.assertNotIn("accepted the torrent", str(raised.exception))
 
-    def test_torrent_metadata_is_preferred_and_verified(self) -> None:
+    def test_explicit_torrent_metadata_is_verified(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             executable = root / "qbittorrent.exe"
@@ -256,10 +258,11 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 report = qbt.submit_magnet(
                     TORRENT_MAGNET,
                     source_url="https://nyaa.si/view/2141829",
+                    torrent_url="https://nyaa.si/download/2141829.torrent",
                     executable=executable,
                     save_path=root / "downloads",
                     backup_dir=backup,
-                )
+                 validation=permit(qbt.extract_btih(TORRENT_MAGNET), "https://nyaa.si/view/2141829"))
 
         self.assertEqual(report["status"], "submitted_verified")
         self.assertEqual(report["verification"], "torrent_metadata_saved")
@@ -301,10 +304,11 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 report = qbt.submit_magnet(
                     TORRENT_MAGNET,
                     source_url="https://nyaa.si/view/2141829",
+                    torrent_url="https://nyaa.si/download/2141829.torrent",
                     executable=executable,
                     save_path=root / "downloads",
                     backup_dir=backup,
-                )
+                 validation=permit(qbt.extract_btih(TORRENT_MAGNET), "https://nyaa.si/view/2141829"))
 
         self.assertGreater(elapsed, 8.0)
         self.assertEqual(report["status"], "submitted_verified")
@@ -342,11 +346,12 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 report = qbt.submit_magnet(
                     TORRENT_MAGNET,
                     source_url="https://nyaa.si/view/2141829",
+                    torrent_url="https://nyaa.si/download/2141829.torrent",
                     executable=executable,
                     save_path=root / "downloads",
                     backup_dir=backup,
                     startup_settle_seconds=0,
-                )
+                 validation=permit(qbt.extract_btih(TORRENT_MAGNET), "https://nyaa.si/view/2141829"))
 
         self.assertEqual(commands[0], [str(executable.resolve()), "--no-splash"])
         self.assertTrue(commands[1][-1].endswith(".torrent"))
@@ -395,12 +400,13 @@ class QbittorrentSubmitTests(unittest.TestCase):
                 report = qbt.submit_magnet(
                     TORRENT_MAGNET,
                     source_url="https://nyaa.si/view/2141829",
+                    torrent_url="https://nyaa.si/download/2141829.torrent",
                     executable=executable,
                     save_path=root / "downloads",
                     backup_dir=backup,
                     wait_seconds=5,
                     retry_delay_seconds=1,
-                )
+                 validation=permit(qbt.extract_btih(TORRENT_MAGNET), "https://nyaa.si/view/2141829"))
 
         self.assertEqual(launches, 2)
         self.assertEqual(report["status"], "submitted_verified")
@@ -430,9 +436,10 @@ class QbittorrentSubmitTests(unittest.TestCase):
                     qbt.submit_magnet(
                         MAGNET,
                         source_url="https://nyaa.si/view/2141829",
+                        torrent_url="https://nyaa.si/download/2141829.torrent",
                         executable=executable,
                         backup_dir=backup,
-                    )
+                     validation=permit(qbt.extract_btih(MAGNET), "https://nyaa.si/view/2141829"))
 
         popen.assert_not_called()
 

@@ -218,6 +218,10 @@ class Candidate:
     detail_chinese_confirmed: bool = False
     detail_subtitle_signal: str | None = None
     info_hash: str | None = None
+    score_deprecated: bool = True
+    rank_basis: str = 'inspection_only_not_picture_quality'
+    preferred_group: bool = False
+    avoided_group: bool = False
 
 
 NyaaListingEntry = NyaaRelease
@@ -433,13 +437,11 @@ def apply_detail_subtitle_signal(candidate: Candidate, detail_text: str, want_zh
         return
 
     if want_zh:
-        subtitle_bonus = 8.0 if airing_priority else 1.5
-        candidate.score += subtitle_bonus
+        candidate.score = 0.0  # Deprecated: verified subtitles affect inspection order only.
         reason_prefix = "airing same-tier" if airing_priority else "same-tier"
         candidate.reasons.append(f"{reason_prefix} Chinese/mixed subtitle tie-breaker from Nyaa details: {signal}")
     else:
-        subtitle_bonus = 2.0 if airing_priority else 0.5
-        candidate.score += subtitle_bonus
+        candidate.score = 0.0  # Deprecated: verified subtitles affect inspection order only.
         reason_prefix = "airing same-tier" if airing_priority else "same-tier"
         candidate.reasons.append(f"{reason_prefix} subtitle signal in Nyaa details: {signal}")
 
@@ -482,28 +484,22 @@ def bitrate_size_score(
     batch: bool,
 ) -> tuple[float, str, str, str]:
     if size_bytes is None:
-        return -40, "size unavailable; bitrate cannot be judged", "unknown", "unknown"
+        return 0.0, "size unavailable; eligibility unknown", "unknown", "unknown"
 
     total_gib = bytes_to_gib(size_bytes)
     if batch and episodes and episodes > 0:
         comparable_gib = total_gib / episodes
         basis = f"{comparable_gib:.2f} GiB/episode from {episodes}-episode batch"
     elif batch:
-        return -25, "batch size without --episodes; bitrate not comparable", f"{total_gib:.2f} GiB batch", "unknown"
+        return 0.0, "batch size without --episodes; eligibility unknown", f"{total_gib:.2f} GiB batch", "unknown"
     else:
         comparable_gib = total_gib
         basis = f"{comparable_gib:.2f} GiB single release"
 
     profile = TIER_PROFILES[tier]
-    ideal = profile["ideal_gib_per_episode"]
-    target_mid = (ideal[0] + ideal[1]) / 2
-
-    if ideal[0] <= comparable_gib <= ideal[1]:
-        center_distance = abs(comparable_gib - target_mid) / max(target_mid, 0.01)
-        return 80 - min(10, center_distance * 10), f"bitrate/size matches {profile['label']} tier", basis, "in-tier"
-    if comparable_gib < ideal[0]:
-        return -70, f"below {profile['label']} tier size target; belongs to a lower tier", basis, "below"
-    return -35, f"above {profile['label']} tier size target; belongs to a higher tier", basis, "above"
+    lower, upper = profile["ideal_gib_per_episode"]
+    fit = "below" if comparable_gib < lower else "above" if comparable_gib > upper else "in-tier"
+    return 0.0, f"size eligibility: {fit}; not a picture-quality score", basis, fit
 
 
 def comparable_gib_per_episode(candidate: Candidate, episodes: int | None) -> float | None:
@@ -686,83 +682,21 @@ def score_release(release: NyaaRelease,
     resolution = detect_resolution(title)
     codec = detect_codec(title)
     bit_depth = detect_bit_depth(title)
-    audio_score, audio_signal = detect_audio(title)
+    _, audio_signal = detect_audio(title)
     has_zh, subtitle_signal = detect_chinese(title)
     batch = looks_batch(title)
-    size_score, size_note, size_basis, tier_fit = bitrate_size_score(size_bytes, tier, duration_min, episodes, batch)
+    _, size_note, size_basis, tier_fit = bitrate_size_score(size_bytes, tier, duration_min, episodes, batch)
 
-    score = 0.0
-    reasons: list[str] = []
-
-    score += size_score
-    reasons.append(size_note)
-
-    swarm_score = min(18.0, math.log2(seeders + 1) * 3)
-    download_score = min(10.0, math.log10(downloads + 1) * 3)
-    leech_score = min(2.0, math.log2(leechers + 1) * 0.5)
-    score += swarm_score + download_score + leech_score
-    reasons.append(f"{seeders} seeders, {downloads} downloads")
-
-    normalized_group = (group or "").lower()
-    preferred = {g.lower() for g in prefer_groups}
-    avoided = {g.lower() for g in avoid_groups}
-    if normalized_group and normalized_group in preferred and tier_fit == "in-tier":
-        score += 14
-        reasons.append(f"preferred group: {group}")
-    elif normalized_group and normalized_group in preferred:
-        reasons.append(f"preferred group not used for rank outside quality tier: {group}")
-    if normalized_group and normalized_group in avoided:
-        score -= 25
-        reasons.append(f"avoided group: {group}")
-
-    if audio_score:
-        score += audio_score
-    reasons.append(audio_signal)
-
-    if desired_resolution and resolution and desired_resolution.lower() == resolution.lower():
-        score += 8
-        reasons.append(f"matches {desired_resolution}")
-    elif not desired_resolution and resolution:
-        if tier == "premium" and "2160" in resolution:
-            score += 8
-            reasons.append("2160p detected for premium tier")
-        elif tier != "premium" and "1080" in resolution:
-            score += 5
-            reasons.append("1080p detected")
-
-    if codec in {"HEVC", "AV1"}:
-        score += 4
-        reasons.append(codec)
-    elif codec == "AVC":
-        score += 2
-        reasons.append(codec)
-    if bit_depth in {"10bit", "12bit"}:
-        score += 3
-        reasons.append(bit_depth)
-
-    if want_zh and has_zh:
-        if tier_fit == "in-tier":
-            subtitle_bonus = 5.0 if airing_priority else 1.0
-            score += subtitle_bonus
-            reason_prefix = "airing same-tier" if airing_priority else "same-tier"
-            reasons.append(f"{reason_prefix} Chinese/mixed subtitle tie-breaker: {subtitle_signal}")
-        else:
-            reasons.append(f"Chinese/mixed subtitle signal not used for rank outside quality tier: {subtitle_signal}")
-    elif has_zh:
-        if tier_fit == "in-tier":
-            subtitle_bonus = 1.5 if airing_priority else 0.25
-            score += subtitle_bonus
-            reason_prefix = "airing same-tier" if airing_priority else "same-tier"
-            reasons.append(f"{reason_prefix} subtitle signal: {subtitle_signal}")
-        else:
-            reasons.append(f"subtitle signal not used for rank outside quality tier: {subtitle_signal}")
-    elif want_zh:
-        reasons.append("Chinese/mixed subtitles not confirmed")
-
+    reasons = [size_note, f"{seeders} seeders", audio_signal,
+               "inspection order only; picture quality requires detail review"]
+    preferred = {g.casefold() for g in prefer_groups}
+    avoided = {g.casefold() for g in avoid_groups}
     magnet = magnet_from_hash(info_hash, title) if include_magnets else None
     return Candidate(
         rank=0,
-        score=round(score, 2),
+        score=0.0,
+        preferred_group=bool(group and group.casefold() in preferred),
+        avoided_group=bool(group and group.casefold() in avoided),
         title=title,
         group=group,
         resolution=resolution,
@@ -867,7 +801,7 @@ def detail_page_as_item(nyaa_id: str, page_html: str) -> ET.Element:
 
 def merge_candidate(existing: Candidate, incoming: Candidate) -> Candidate:
     existing.matched_queries.extend(q for q in incoming.matched_queries if q not in existing.matched_queries)
-    if incoming.score > existing.score:
+    if (incoming.detail_checked, incoming.published or "") > (existing.detail_checked, existing.published or ""):
         incoming.matched_queries = existing.matched_queries
         return incoming
     return existing
@@ -883,7 +817,7 @@ def render_markdown(candidates: list[Candidate], include_magnets: bool, magnet_o
         suffix = f" ({meta})" if meta else ""
         lines.append(f"{candidate.rank}. {candidate.title}{suffix}")
         lines.append(
-            "   Score: {score} | Group: {group} | Size: {size} | Basis: {basis}".format(
+            "   Inspection only | Group: {group} | Size: {size} | Basis: {basis}".format(
                 score=candidate.score,
                 group=candidate.group or "unknown",
                 size=candidate.size or "unknown",
