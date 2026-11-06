@@ -30,11 +30,13 @@ jobs:
         shell: pwsh
     env:
       PYTHONUTF8: '1'
-      ANIME_TRACKING_STATE: ${{ runner.temp }}/codex-anime-tests/state.json
-      ANIME_DSH_HOME: ${{ runner.temp }}/dsh-anime-tests
-      DSH_TEST_NODE_MODULES: ${{ runner.temp }}/dsh-test-deps/node_modules
     steps:
       - uses: actions/checkout@v4
+      - name: Isolate test data from the checkout
+        run: |
+          "ANIME_TRACKING_STATE=$env:RUNNER_TEMP/codex-anime-tests/state.json" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "ANIME_DSH_HOME=$env:RUNNER_TEMP/dsh-anime-tests" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "DSH_TEST_NODE_MODULES=$env:RUNNER_TEMP/dsh-test-deps/node_modules" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
