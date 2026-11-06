@@ -45,7 +45,7 @@ jobs:
           node-version: '24'
       - name: Install test-only dependencies without lifecycle scripts
         run: |
-          python -m pip install pytest tzdata
+          python -m pip install pytest hypothesis tzdata
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm install --prefix '${{ runner.temp }}/dsh-test-deps' --ignore-scripts --no-audit --no-fund @deepseek-ai/cordis@4.1.0 @deepseek-ai/dsh-skill@0.2.2-rc.1 @deepseek-ai/dsh-plugin-market-index@0.2.2-rc.1 yaml@2.8.1 semver@7.7.3
       - name: Check synchronized generated payload
