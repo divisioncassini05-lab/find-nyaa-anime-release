@@ -71,10 +71,10 @@ jobs:
       - name: Check synchronized generated payload
         run: python -m pytest tests/test_distribution_sync.py -q -p no:cacheprovider
       - name: Test Codex distribution
-        run: python -m pytest skills/find-nyaa-anime-release/tests -q -m 'not live' -p no:cacheprovider
+        run: python -m pytest skills/find-nyaa-anime-release/tests --rootdir . -q -m 'not live' -p no:cacheprovider
       - name: Test DSH distribution
         working-directory: plugins/dsh-find-nyaa-anime-release
-        run: python -m pytest tests/test_dsh_adapter.py skills/find-nyaa-anime-release/tests -q -m 'not live' -p no:cacheprovider
+        run: python -m pytest tests/test_dsh_adapter.py skills/find-nyaa-anime-release/tests --rootdir . -q -m 'not live' -p no:cacheprovider
       - name: Check native registry and market metadata
         working-directory: plugins/dsh-find-nyaa-anime-release
         run: node --test tests/plugin.test.mjs
