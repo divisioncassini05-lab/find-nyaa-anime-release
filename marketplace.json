@@ -1,0 +1,42 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Anime search and tracking",
+    "zh": "动漫搜索与自动追番"
+  },
+  "plugins": [
+    {
+      "name": "dsh-find-nyaa-anime-release",
+      "title": {
+        "en": "Anime search and tracking",
+        "zh": "动漫搜索与自动追番"
+      },
+      "description": {
+        "en": "Review anime releases, verify Chinese subtitles and deliver qualified episodes or full seasons to qBittorrent.",
+        "zh": "用自然语言找 Nyaa 动漫资源，核对季集、画质和中文字幕，返回磁力或交给 qBittorrent，并支持定时追番。"
+      },
+      "author": "divisioncassini05-lab",
+      "homepage": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release/tree/main/plugins/dsh-find-nyaa-anime-release",
+      "repository": {
+        "url": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release",
+        "directory": "plugins/dsh-find-nyaa-anime-release"
+      },
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4IiB2aWV3Qm94PSIwIDAgMTI4IDEyOCI+CiAgPHJlY3Qgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIHJ4PSIyNCIgZmlsbD0iIzE3M0MzNiIvPgogIDxyZWN0IHg9IjIzIiB5PSIyNiIgd2lkdGg9IjY5IiBoZWlnaHQ9IjU1IiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRjBGNEVFIiBzdHJva2Utd2lkdGg9IjciLz4KICA8cGF0aCBkPSJNNDkgNDB2MjdsMjItMTMuNXoiIGZpbGw9IiNENkI3NTciLz4KICA8Y2lyY2xlIGN4PSI4NCIgY3k9IjgzIiByPSIyMSIgZmlsbD0iIzE3M0MzNiIgc3Ryb2tlPSIjNzVDOUIxIiBzdHJva2Utd2lkdGg9IjciLz4KICA8cGF0aCBkPSJtMTAwIDk5IDEzIDEzIiBzdHJva2U9IiM3NUM5QjEiIHN0cm9rZS13aWR0aD0iOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+Cjwvc3ZnPgo=",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793991846,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release",
+            "commit": "3dfcebd3bd13c653ed6f6a068afc5c2efe70ca7c",
+            "path": "plugins/dsh-find-nyaa-anime-release"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}
