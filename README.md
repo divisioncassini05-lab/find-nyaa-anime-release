@@ -1,4 +1,6 @@
-# Find Nyaa Anime Release
+# 动漫搜索与自动追番
+
+`find-nyaa-anime-release` · Codex Skill / DeepSeek Harness 插件
 
 <p align="center">
   <strong>让本地 Agent 识别动画、筛选画质与字幕、记录新番进度，并返回经过验证的 Nyaa 发布。</strong>
@@ -14,7 +16,12 @@
 
 你只需要用自然语言说明动画、季度、集数、画质或字幕要求。Skill 会解析作品身份，比较 Nyaa 候选，检查季集、体积、字幕和磁力，再把合格结果交给你。
 
-本项目以 **Codex 作为设计基准和主要验证环境**，下文也以 Codex 演示安装与使用。交互检索、证据验证和下载由 Markdown 指令与本地 Python 脚本配合完成。其他具备相应工具能力的 Agent 可以尝试直接使用，或按其路径、权限与调用方式做少量调整；定时任务还需要适配宿主的调度和配置接口。
+本项目以 **Codex 作为设计基准和主要验证环境**，同时提供独立的 **DeepSeek Harness 原生插件**。两份发行内容来自同一份核心，DSH 的技能注册、定时工具和数据路径独立适配，不需要安装 Codex。其他具备相应工具能力的 Agent 可按其路径、权限与调用方式接入。
+
+| 使用环境 | 安装与说明 |
+| --- | --- |
+| Codex | 下方 Skill 安装命令，原安装链接不变 |
+| DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
 ## 能做什么
 
@@ -54,7 +61,7 @@ $skill-installer install https://github.com/divisioncassini05-lab/find-nyaa-anim
 - 调用目录内的 Python 脚本；
 - 访问本地状态文件和网络。
 
-不同 Agent 的 Skill 目录、命令权限和触发语法并不统一。交互检索可从 `SKILL.md` 的对应入口开始；自动追番还需调度工具提供创建、读回、更新和删除能力，并适配现有任务配置、归属绑定及完结清理。当前配置读取以 Codex 的 `automation.toml` 为基础，其他宿主尚未逐一验证。
+不同 Agent 的 Skill 目录、命令权限和触发语法并不统一。交互检索可从 `SKILL.md` 的对应入口开始；自动追番还需适配调度工具、归属绑定及完结清理。Codex 发行版读取 `automation.toml`，DSH 发行版读取原生定时工具的返回结果，不混用两端的任务记录。其他宿主尚未逐一验证。
 
 发布模板默认使用安装者的当前聊天或其明确指定的追番聊天，不包含作者个人的聊天 ID；模型沿用目标聊天或任务当前的选择，不硬编码型号。
 
@@ -194,6 +201,8 @@ python scripts/watch.py recover --operation "OPERATION_ID"
 
 ## 更新与本地数据
 
+- Codex 和 DSH 版本在同一仓库维护：先更新公共核心，再生成 DSH 适配副本，并通过同步检查；不会把两套用户进度合并。
+- 维护者运行 `python tools/sync_skills.py --bump patch` 同步更新，`python tools/sync_skills.py --check` 检查遗漏。DSH 宿主接口发生变化时需要调整适配并重新验证，不能盲目覆盖。
 - 更新 Skill 或重新安装仓库不会自动改写已有定时任务；新建任务才会读取当前的定时追更模板。
 - 新番交互与定时任务沿用已保存的默认配置；其他交互请求的体积向上兼容需明确允许。任何模式都不能突破用户明确的体积上限或中文字幕硬要求。
 - 追番状态、原始页面证据、审核清单和交付恢复记录保存在本机，仓库只提供代码、规则和测试。

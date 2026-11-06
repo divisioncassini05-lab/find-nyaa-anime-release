@@ -1,0 +1,5827 @@
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+import sys
+import tempfile
+import time
+import unittest
+from datetime import date, datetime
+from pathlib import Path
+from unittest.mock import patch
+
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+import find_anime_release as finder
+import anime_release.workflow as v2_workflow
+import anime_release.identity as v2_identity
+import anime_release.legacy_state as v2_legacy_state
+import anime_release.metadata as v2_metadata
+import anime_release.providers as v2_providers
+from anime_release.repository import StateRepository
+from anime_release.evidence import from_raw
+import airing_watch_state as watch_state
+import release_search_core as core
+import search_nyaa_releases as nyaa
+from release_identity import EpisodeKind, normalize_season_number, parse_release_identity
+
+
+def candidate(title: str, size: str, seeders: int) -> nyaa.Candidate:
+    return nyaa.Candidate(
+        rank=0,
+        score=float(seeders),
+        title=title,
+        group=None,
+        resolution="1080p",
+        codec="AVC",
+        bit_depth=None,
+        audio_signal="unknown",
+        subtitle_signal="not confirmed",
+        size=size,
+        size_bytes=nyaa.parse_size(size),
+        size_basis="fixture",
+        bitrate_note="fixture",
+        tier_fit="in-tier",
+        seeders=seeders,
+        leechers=0,
+        downloads=0,
+        published="2026-07-10",
+        category="Anime",
+        url=f"https://nyaa.si/view/{seeders}",
+        magnet=None,
+        matched_queries=["fixture"],
+        reasons=[],
+    )
+
+
+def search_args() -> argparse.Namespace:
+    return argparse.Namespace(
+        query="Re:ZERO",
+        alias=[],
+        category="1_0",
+        filter="0",
+        tier="browse",
+        season="S04",
+        episode=None,
+        duration_min=22.0,
+        episodes=None,
+        want_zh=False,
+        require_zh=False,
+        trust_cjk_title_for_zh=False,
+        airing_priority=False,
+        resolution=None,
+        prefer_group=[],
+        avoid_group=[],
+        include_magnets=False,
+        timeout=1,
+        min_gib_per_episode=1.0,
+        max_gib_per_episode=None,
+        movie=False,
+        min_total_gib=None,
+        max_total_gib=None,
+        size_policy_source="tier",
+        limit=1,
+        inspect_details=False,
+        detail_limit=0,
+    )
+
+
+def detail_for_candidate(item, description=''):
+    from nyaa_client import NyaaRelease, NyaaReleaseDetail
+    rid=nyaa.nyaa_id_from_url(item.url)
+    return NyaaReleaseDetail(NyaaRelease(rid,item.title,item.category,item.size,item.size_bytes,
+        item.published,None,item.seeders,item.leechers,item.downloads,item.url,f'{int(rid):040x}'),description,())
+
+
+def rss_item(title: str, size: str, seeders: int) -> dict[str, str]:
+    item = nyaa.ET.Element("item")
+    nyaa.ET.SubElement(item, "title").text = title
+    nyaa.ET.SubElement(item, "link").text = f"https://nyaa.si/view/{seeders}"
+    nyaa.ET.SubElement(item, "guid").text = f"https://nyaa.si/view/{seeders}"
+    nyaa.ET.SubElement(item, "pubDate").text = "Fri, 10 Jul 2026 00:00:00 +0000"
+    values = {
+        "size": size,
+        "seeders": str(seeders),
+        "leechers": "0",
+        "downloads": "1",
+        "category": "Anime - Raw",
+        "infoHash": f"{seeders:040x}",
+    }
+    for name, value in values.items():
+        nyaa.ET.SubElement(item, f"{nyaa.NYAA_NS}{name}").text = value
+    return {"query": "Yani Neko", "xml": nyaa.ET.tostring(item, encoding="unicode")}
+
+
+class ReleaseIdentityTests(unittest.TestCase):
+    def test_ordinal_season_decimal_special(self) -> None:
+        identity = parse_release_identity(
+            "[shincaps] Re:ZERO 4th season 11.5 SP01/SP02 [1920x1080].ts"
+        )
+        self.assertEqual(identity.season, 4)
+        self.assertEqual(str(identity.episode), "11.5")
+        self.assertIs(identity.kind, EpisodeKind.SPECIAL)
+        self.assertIn("sp", identity.special_markers)
+
+    def test_season_number_is_not_episode_number(self) -> None:
+        identity = parse_release_identity("[Group] Re:ZERO Season 4 - 12 [1080p]")
+        self.assertEqual(identity.season, 4)
+        self.assertEqual(str(identity.episode), "12")
+        self.assertIs(identity.kind, EpisodeKind.REGULAR)
+        self.assertFalse(nyaa.looks_batch("[Group] Re:ZERO Season 4 - 12 [1080p]"))
+
+    def test_cjk_global_episode_label_is_a_regular_episode(self) -> None:
+        identity = parse_release_identity(
+            "[Group][Re:ZERO Season 4][13 - 总第79][WEB-DL][1080p]"
+        )
+        self.assertEqual(identity.season, 4)
+        self.assertEqual(str(identity.episode), "13")
+        self.assertIs(identity.kind, EpisodeKind.REGULAR)
+
+    def test_bit_depth_is_not_an_episode_and_season_only_release_is_a_batch(self) -> None:
+        cases = (
+            "[THM] From the New World Season 1 (BD Remux 1080p x264 8-bit PCM) [Dual Audio]",
+            "[Group] Atlas Chronicle Season 2 [BD 1080p HEVC 10-bit FLAC]",
+        )
+        for title in cases:
+            with self.subTest(title=title):
+                identity = parse_release_identity(title)
+                self.assertIsNone(identity.episode)
+                self.assertIs(identity.kind, EpisodeKind.BATCH)
+
+    def test_technical_numbers_without_a_season_are_not_episodes(self) -> None:
+        identity = parse_release_identity(
+            "[Group] Atlas Chronicle [BD 1080p HEVC 10-bit FLAC 2.0 24fps]"
+        )
+        self.assertIsNone(identity.episode)
+        self.assertIs(identity.kind, EpisodeKind.UNKNOWN)
+
+    def test_explicit_episode_still_wins_when_bit_depth_is_present(self) -> None:
+        identity = parse_release_identity(
+            "[Group] Atlas Chronicle Season 2 - 12 [BD 1080p HEVC 10-bit]"
+        )
+        self.assertEqual(str(identity.episode), "12")
+        self.assertIs(identity.kind, EpisodeKind.REGULAR)
+
+    def test_generic_batch_ranges_and_multi_season_forms(self) -> None:
+        cases = {
+            "[Group] Atlas S1 [01-12] Complete": ((1,), "1", "12"),
+            "[Group] Beacon E01-E24 Batch": ((), "1", "24"),
+            "[Group] Cipher S1+S2 Complete": ((1, 2), None, None),
+            "[Group] Delta S1~3 BDRip": ((1, 2, 3), None, None),
+        }
+        for title, expected in cases.items():
+            with self.subTest(title=title):
+                identity = parse_release_identity(title)
+                self.assertIs(identity.kind, EpisodeKind.BATCH)
+                self.assertEqual(identity.covered_seasons, expected[0])
+                self.assertEqual(
+                    str(identity.episode_start) if identity.episode_start is not None else None,
+                    expected[1],
+                )
+                self.assertEqual(
+                    str(identity.episode_end) if identity.episode_end is not None else None,
+                    expected[2],
+                )
+
+    def test_volume_range_is_not_mistaken_for_episode_batch(self) -> None:
+        identity = parse_release_identity("[Group] Echo Vol.1-3 BDMV")
+        self.assertIsNot(identity.kind, EpisodeKind.BATCH)
+
+    def test_cjk_season_forms(self) -> None:
+        self.assertEqual(normalize_season_number("\u7b2c\u56db\u5b63"), 4)
+        self.assertEqual(normalize_season_number("\u7b2c4\u671f"), 4)
+        self.assertEqual(normalize_season_number("\u7b2c\u5341\u4e00\u5b63"), 11)
+        identity = parse_release_identity("[Group] \u7b2c\u56db\u5b63 - 12 [1080p]")
+        self.assertEqual(identity.season, 4)
+        self.assertEqual(str(identity.episode), "12")
+
+    def test_common_season_labels(self) -> None:
+        for label in ("S04", "Season 4", "4th season", "IV"):
+            with self.subTest(label=label):
+                self.assertEqual(normalize_season_number(label), 4)
+
+
+class TitleSelectionTests(unittest.TestCase):
+    def test_detects_multiple_tracked_titles_in_one_request(self) -> None:
+        state = {
+            "shows": [
+                {"title": "\u63cf\u7ed8\u76f4\u81f3\u751f\u547d\u5c3d\u5934", "aliases": []},
+                {"title": "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973", "aliases": []},
+                {"title": "\u5411\u65e5\u8475\u9a6c\u620f\u56e2", "aliases": []},
+            ]
+        }
+        mentions = finder.detect_tracked_titles(
+            state,
+            "\u63cf\u7ed8\u76f4\u81f3\u751f\u547d\u5c3d\u5934\uff0c\u7a79\u5e90\u4e0b\u7684\u9b54\u5973\u548c\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+        )
+        self.assertEqual([item["title"] for item in mentions], [show["title"] for show in state["shows"]])
+
+    def test_multi_work_alias_is_rejected_and_sanitized(self) -> None:
+        combined = "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973\u548c\u5411\u65e5\u8475\u9a6c\u620f\u56e2"
+        first = {"title": "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973", "aliases": [combined]}
+        second = {"title": "\u5411\u65e5\u8475\u9a6c\u620f\u56e2", "aliases": []}
+        state = {"version": 1, "shows": [first, second]}
+        removed = finder.sanitize_state_aliases(state)
+        self.assertEqual(removed, [{"title": first["title"], "alias": combined}])
+        self.assertNotIn(combined, first["aliases"])
+        finder.upsert_show(
+            state,
+            first["title"],
+            [combined],
+            "S01",
+            None,
+            4,
+            "fixture",
+            show_hint=first,
+        )
+        self.assertNotIn(combined, first["aliases"])
+
+    def test_bangumi_v0_infobox_provides_release_titles(self) -> None:
+        fixtures = [
+            (
+                "\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+                {
+                    "id": 570583,
+                    "name": "\u30b0\u30ed\u30a6\u30a2\u30c3\u30d7\u30b7\u30e7\u30a6",
+                    "name_cn": "Grow Up Show \uff5e\u5411\u65e5\u8475\u9a6c\u620f\u56e2\uff5e",
+                    "date": "2026-07-04",
+                    "platform": "TV",
+                    "infobox": [
+                        {"key": "\u522b\u540d", "value": [{"v": "Grow Up Show: Himawari no Circus-dan"}]}
+                    ],
+                },
+                ["Grow Up Show: Himawari no Circus-dan"],
+            ),
+            (
+                "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973",
+                {
+                    "id": 552533,
+                    "name": "\u5929\u5e55\u306e\u30b8\u30e3\u30fc\u30c9\u30a5\u30fc\u30ac\u30eb",
+                    "name_cn": "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973",
+                    "date": "2026-07-04",
+                    "platform": "TV",
+                    "infobox": [
+                        {
+                            "key": "\u522b\u540d",
+                            "value": [
+                                {"v": "Tenmaku no Jaadugar"},
+                                {"k": "\u82f1\u6587\u540d", "v": "Jaadugar: A Witch in Mongolia"},
+                            ],
+                        }
+                    ],
+                },
+                ["Tenmaku no Jaadugar", "Jaadugar: A Witch in Mongolia"],
+            ),
+            (
+                "\u63cf\u7ed8\u76f4\u81f3\u751f\u547d\u5c3d\u5934",
+                {
+                    "id": 545917,
+                    "name": "\u3053\u308c\u63cf\u3044\u3066\u6b7b\u306d",
+                    "name_cn": "\u63cf\u7ed8\u76f4\u81f3\u751f\u547d\u5c3d\u5934",
+                    "date": "2026-07-03",
+                    "platform": "TV",
+                    "infobox": [
+                        {
+                            "key": "\u522b\u540d",
+                            "value": [{"v": "Kore Kaite Shine"}, {"v": "Draw This, Then Die!"}],
+                        }
+                    ],
+                },
+                ["Kore Kaite Shine", "Draw This, Then Die!"],
+            ),
+        ]
+        for query, item, expected in fixtures:
+            with self.subTest(query=query):
+                resolved, _ = finder.bangumi_item_to_resolved(query, item, finder.date(2026, 7, 12))
+                self.assertEqual(resolved.search_titles, expected)
+                self.assertEqual(resolved.bangumi_id, item["id"])
+
+    def test_preferred_nyaa_title_beats_chinese_display_title(self) -> None:
+        selected = finder.select_search_names(
+            "描绘直至生命尽头",
+            ["描绘直至生命尽头", "Kore wo Kaite Shine"],
+            2,
+            ["Kore wo Kaite Shine"],
+        )
+        self.assertEqual(selected[0], "Kore wo Kaite Shine")
+        self.assertNotIn("描绘直至生命尽头", selected)
+
+    def test_damaged_metadata_alias_is_rejected_and_broad_title_is_protected(self) -> None:
+        malformed = "ushoku Tensei: Jobless Reincarnation Season 3"
+        complete = "Mushoku Tensei III: Isekai Ittara Honki Dasu"
+        selected = finder.select_search_names(
+            malformed,
+            [complete],
+            2,
+            [malformed, complete],
+        )
+        self.assertNotIn(malformed, selected)
+        self.assertIn(complete, selected)
+        self.assertIn("Mushoku Tensei", selected)
+
+    def test_successful_query_is_learned_as_preferred_nyaa_title(self) -> None:
+        promoted = finder.promote_search_titles(
+            ["Jaadugar: A Witch in Mongolia", "Tenmaku no Jaadugar"],
+            ["Tenmaku no Jaadugar"],
+        )
+        self.assertEqual(promoted[0], "Tenmaku no Jaadugar")
+
+    def test_strict_zh_queries_are_conditional_and_use_group_anchor(self) -> None:
+        ordinary = finder.select_search_names(
+            "穹庐下的魔女",
+            ["穹庐下的魔女", "Tenmaku no Jaadugar"],
+            2,
+        )
+        strict = finder.strict_zh_search_names(
+            ordinary,
+            "穹庐下的魔女",
+            3,
+            ["FixtureGroup"],
+            ["穹廬下的魔女"],
+        )
+        self.assertEqual(ordinary, ["Tenmaku no Jaadugar"])
+        self.assertIn("穹庐下的魔女", strict)
+        self.assertIn("穹廬下的魔女", strict)
+        self.assertIn("FixtureGroup Tenmaku 03", strict)
+        self.assertIn("Tenmaku 03", strict)
+
+    def test_strict_zh_queries_prefer_chinese_variants_over_japanese_alias(self) -> None:
+        strict = finder.strict_zh_search_names(
+            ["Tenmaku no Jaadugar"],
+            "穹庐下的魔女",
+            9,
+            [],
+            ["天幕のジャードゥーガル", "穹廬下的魔女"],
+        )
+        self.assertIn("穹庐下的魔女", strict)
+        self.assertIn("穹廬下的魔女", strict)
+        self.assertNotIn("天幕のジャードゥーガル", strict)
+
+    def test_flexible_strict_match_handles_macron_and_doubled_vowels(self) -> None:
+        release = "[FixtureGroup] Tenmaku no Jādūgar - 03 [CHT]"
+        self.assertFalse(core._contains_title(release, "Tenmaku no Jaadugar"))
+        self.assertTrue(core._contains_title(release, "Tenmaku no Jaadugar", flexible=True))
+
+    def test_state_keeps_display_aliases_separate_from_search_titles(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Grow Up Show: Sunflower Circus",
+            aliases=["成长秀～向日葵马戏团～"],
+            search_titles=["Grow Up Show Sunflower Circus"],
+            trackable=True,
+        )
+        state = {"version": 1, "shows": []}
+        show = finder.upsert_show(state, resolved.title, resolved.aliases, "S01", 1, 2, "fixture", resolved)
+        restored = finder.resolved_from_state(show, "成长秀～向日葵马戏团～")
+        self.assertEqual(restored.search_titles, ["Grow Up Show Sunflower Circus"])
+
+    def test_romaji_alias_beats_mixed_cjk_alias(self) -> None:
+        title = "Re:ZERO -Starting Life in Another World- Season 4"
+        selected = finder.select_search_names(
+            title,
+            [
+                "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season",
+                "Re:\u30bc\u30ed\u304b\u3089\u59cb\u3081\u308b\u7570\u4e16\u754c\u751f\u6d3b 4th season",
+            ],
+            2,
+        )
+        self.assertIn("Re:Zero kara Hajimeru Isekai Seikatsu 4th Season", selected)
+        self.assertNotIn("Re:\u30bc\u30ed\u304b\u3089\u59cb\u3081\u308b\u7570\u4e16\u754c\u751f\u6d3b 4th season", selected)
+
+    def test_infer_season_reuses_release_identity(self) -> None:
+        self.assertEqual(finder.infer_season(["Example \u7b2c\u56db\u5b63"]), "S04")
+
+    def test_curated_nickname_resolves_to_canonical_work(self) -> None:
+        entry = finder.lookup_nickname_alias("\u5c3c\u53e4\u55b5\u55b5")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["canonical_title"], "Yani Neko")
+        love_live_entry = finder.lookup_nickname_alias("\u59ae\u53ef\u59ae\u53ef\u59ae")
+        self.assertEqual(love_live_entry["canonical_title"], "Love Live! School Idol Project")
+
+    def test_side_story_does_not_turn_single_mainline_into_multiple_seasons(self) -> None:
+        media = {
+            "format": "TV",
+            "relations": {
+                "edges": [
+                    {
+                        "relationType": "ADAPTATION",
+                        "node": {"type": "MANGA", "format": "MANGA"},
+                    },
+                    {
+                        "relationType": "SIDE_STORY",
+                        "node": {
+                            "type": "ANIME",
+                            "format": "ONA",
+                            "title": {"romaji": "Yani Neko Mini"},
+                            "synonyms": [],
+                        },
+                    },
+                ]
+            },
+        }
+        self.assertEqual(finder.mainline_scope_from_media(media), "single")
+        self.assertIn("Yani Neko Mini", finder.related_anime_titles(media))
+
+    def test_mainline_prequel_or_sequel_marks_multiple_seasons(self) -> None:
+        media = {
+            "format": "TV",
+            "relations": {
+                "edges": [
+                    {
+                        "relationType": "PREQUEL",
+                        "node": {"type": "ANIME", "format": "TV"},
+                    }
+                ]
+            },
+        }
+        self.assertEqual(finder.mainline_scope_from_media(media), "multi")
+
+    def test_user_query_does_not_make_side_story_an_exact_title_match(self) -> None:
+        main_media = {
+            "id": 207141,
+            "format": "TV",
+            "status": "RELEASING",
+            "title": {"english": "Chainsmoker Cat", "romaji": "Yani Neko", "native": "ヤニねこ"},
+            "synonyms": [],
+            "relations": {"edges": []},
+        }
+        mini_media = {
+            "id": 208105,
+            "format": "ONA",
+            "status": "RELEASING",
+            "title": {"english": None, "romaji": "Yani Neko Mini", "native": "ヤニねこ ミニ"},
+            "synonyms": [],
+            "relations": {"edges": []},
+        }
+        main, main_score = finder.media_to_resolved("Yani Neko", main_media, finder.date.today())
+        mini, mini_score = finder.media_to_resolved("Yani Neko", mini_media, finder.date.today())
+        self.assertGreater(main_score, mini_score + 6)
+        self.assertEqual(main.mainline_scope, "single")
+        self.assertEqual(main.season, "S01")
+        self.assertEqual(mini.title, "Yani Neko Mini")
+
+
+class SubtitleDetailTests(unittest.TestCase):
+    def test_http_payload_decoder_handles_gzip_header_and_magic(self) -> None:
+        payload = "<h3>穹廬下的魔女 [CHT]</h3>".encode()
+        compressed = nyaa.gzip.compress(payload)
+        self.assertEqual(nyaa.decode_http_payload(compressed, "gzip"), payload)
+        self.assertEqual(nyaa.decode_http_payload(compressed), payload)
+
+    def test_http_payload_decoder_handles_deflate(self) -> None:
+        payload = b"<rss><channel /></rss>"
+        self.assertEqual(
+            nyaa.decode_http_payload(nyaa.zlib.compress(payload), "deflate"),
+            payload,
+        )
+
+    def test_nested_nyaa_file_list_retains_directory_and_size(self) -> None:
+        page = """
+        <div class="torrent-file-list panel-body"><ul>
+          <li><i class="fa fa-folder"></i> Atlas S01<ul>
+            <li><i class="fa fa-file-o"></i> Atlas - 01.mkv <span class="file-size">(1.5 GiB)</span></li>
+          </ul></li>
+        </ul></div>
+        """
+        entries = nyaa.extract_nyaa_file_entries(page)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].name, "Atlas S01/Atlas - 01.mkv")
+        self.assertEqual(entries[0].size_bytes, nyaa.parse_size("1.5 GiB"))
+
+    def test_cht_hardsub_is_verified_from_detail_page(self) -> None:
+        page = """
+        <h3 class="panel-title">[FixtureGroup] Tenmaku no Jādūgar - 03 [CHT][MP4]</h3>
+        <div id="torrent-description">Torrent Info&#10;Subtitle:&#10;HardSub</div>
+        <div class="torrent-file-list panel-body"><ul><li>[FixtureGroup] 穹廬下的魔女 - 03 [CHT].mp4</li></ul></div>
+        """
+        detail = nyaa.extract_nyaa_description(page)
+        confirmed, signal = nyaa.detect_chinese_in_detail(detail)
+        self.assertTrue(confirmed)
+        self.assertIn("CHT", signal)
+
+    def test_cht_hardsub_evidence_can_be_separated_across_the_detail_page(self) -> None:
+        page = """
+        <h3 class="panel-title">[FixtureGroup] Atlas Chronicle - 04 [CHT][MP4]</h3>
+        <div id="torrent-description">
+          Torrent Info<br>Source: Baha<br>Video: AVC<br>Audio: AAC<br>
+          Container: MP4<br>Generated automatically<br>Subtitle:<br>HardSub
+        </div>
+        <div class="torrent-file-list panel-body"><ul>
+          <li>[FixtureGroup] Atlas Chronicle - 04 [1080P][CHT].mp4</li>
+        </ul></div>
+        """
+        confirmed, signal = nyaa.detect_chinese_in_detail(nyaa.extract_nyaa_description(page))
+        self.assertTrue(confirmed)
+        self.assertIn("CHT", signal)
+
+    def test_generic_chinese_title_does_not_pair_with_page_level_hardsub(self) -> None:
+        page = """
+        <h3 class="panel-title">Chinese Example - 04</h3>
+        <div id="torrent-description">Subtitle:<br>HardSub</div>
+        <div class="torrent-file-list panel-body"><ul><li>Chinese Example - 04.mp4</li></ul></div>
+        """
+        confirmed, _ = nyaa.detect_chinese_in_detail(nyaa.extract_nyaa_description(page))
+        self.assertFalse(confirmed)
+
+    def test_cht_title_without_matching_subtitle_context_is_not_proof(self) -> None:
+        page = """
+        <h3 class="panel-title">Example - 03 [CHT]</h3>
+        <div id="torrent-description">Subtitle: English</div>
+        <div class="torrent-file-list panel-body"><ul><li>Example - 03.mkv</li></ul></div>
+        """
+        confirmed, _ = nyaa.detect_chinese_in_detail(nyaa.extract_nyaa_description(page))
+        self.assertFalse(confirmed)
+
+    def test_multisub_without_chinese_and_explicit_negation_fail(self) -> None:
+        self.assertFalse(
+            nyaa.detect_chinese_in_detail("Subtitle languages: English, German, Russian\nMultiSub")[0]
+        )
+        self.assertFalse(
+            nyaa.detect_chinese_in_detail("Subtitle languages: English; no Chinese subtitles")[0]
+        )
+
+    def test_simplified_and_traditional_are_equally_accepted(self) -> None:
+        simplified = nyaa.detect_chinese_in_detail("Subtitle languages: Simplified Chinese")[0]
+        traditional = nyaa.detect_chinese_in_detail("Subtitle languages: Traditional Chinese")[0]
+        self.assertTrue(simplified)
+        self.assertTrue(traditional)
+
+    def test_toons_hub_style_chinese_labels_are_explicit_subtitle_evidence(self) -> None:
+        detail = (
+            "Subtitles: English, English (Forced), English [CC], Arabic, "
+            "Chinese (Simplified), Chinese (Traditional), French, German"
+        )
+        confirmed, signal = nyaa.detect_chinese_in_detail(detail)
+        self.assertTrue(confirmed)
+        self.assertIn("Chinese", signal)
+
+    def test_confirmed_detail_removes_stale_unconfirmed_reason(self) -> None:
+        release = candidate("[ToonsHub] Example S01E01 [Multi-Subs]", "1.4 GiB", 80)
+        release.reasons.append("Chinese/mixed subtitles not confirmed")
+        nyaa.apply_detail_subtitle_signal(
+            release,
+            "Subtitles: English, Chinese (Simplified), Chinese (Traditional)",
+            want_zh=True,
+            airing_priority=False,
+        )
+        self.assertTrue(release.detail_chinese_confirmed)
+        self.assertNotIn("Chinese/mixed subtitles not confirmed", release.reasons)
+        self.assertEqual(release.subtitle_signal, "detail-page: Chinese")
+
+    def test_audio_language_and_explicit_none_are_not_chinese_subtitle_evidence(self) -> None:
+        self.assertFalse(
+            nyaa.detect_chinese_in_detail(
+                "Audio language: Chinese\nSubtitle languages: English"
+            )[0]
+        )
+        self.assertFalse(nyaa.detect_chinese_in_detail("Chinese subtitles: None")[0])
+
+    def test_chinese_subtitle_file_and_mediainfo_text_track_are_evidence(self) -> None:
+        self.assertTrue(nyaa.detect_chinese_in_detail("Subs/Example.zh-CN.ass")[0])
+        self.assertTrue(nyaa.detect_chinese_in_detail("Text #1\nLanguage : Chinese")[0])
+        self.assertFalse(nyaa.detect_chinese_in_detail("Audio #1\nLanguage : Chinese")[0])
+
+
+class QualityTierTests(unittest.TestCase):
+    def test_low_level_cli_defaults_to_browse(self) -> None:
+        args = nyaa.parse_args(["Example"])
+        self.assertEqual(args.tier, "browse")
+
+    def test_movie_cli_defaults_to_ten_gib_total(self) -> None:
+        payload = {
+            "status": "no_rss_candidates",
+            "queries": ["Robot Dreams"],
+            "query_coverage": "includes_latin_alias",
+            "latin_query_match": False,
+            "candidate_source": "nyaa_html_size_desc",
+            "ordering": "nyaa_server_size_desc_then_local_size_desc_not_quality_rank",
+            "candidates": [],
+            "failures": [],
+            "cache": "fixture",
+        }
+        output = io.StringIO()
+        with (
+            patch.object(core, "discover_release_candidates", return_value=payload) as discover,
+            contextlib.redirect_stdout(output),
+        ):
+            code = nyaa.main(["Robot Dreams", "--movie", "--discover"])
+        self.assertEqual(code, 4)
+        args = discover.call_args.args[0]
+        self.assertTrue(args.movie)
+        self.assertEqual(args.min_total_gib, 10.0)
+        self.assertIsNone(args.min_gib_per_episode)
+        self.assertEqual(args.size_policy_source, "movie_default")
+
+    def test_movie_rejects_per_episode_size_bounds(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = nyaa.main(
+                ["Robot Dreams", "--movie", "--min-gib-per-episode", "1"]
+            )
+        self.assertEqual(code, 2)
+
+    def test_movie_filter_uses_total_size_and_selects_unknown_identity(self) -> None:
+        args = search_args()
+        args.query = "Robot Dreams"
+        args.season = None
+        args.movie = True
+        args.min_total_gib = 10.0
+        args.max_total_gib = None
+        args.min_gib_per_episode = None
+        args.size_policy_source = "movie_default"
+        too_small = candidate("[A] Robot Dreams (2023) [1080p]", "8.0 GiB", 200)
+        qualified = candidate("[B] Robot Dreams (2023) [1080p]", "12.0 GiB", 100)
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([too_small, qualified], [], "fixture"),
+        ):
+            report = core.search_release_report(args, intent=core.SearchIntent.MOVIE)
+        self.assertEqual(report.status, "found")
+        self.assertEqual([item.candidate.title for item in report.selected], [qualified.title])
+        self.assertEqual(report.diagnostics["below_min_count"], 1)
+        self.assertEqual(report.diagnostics["movie_count"], 2)
+        self.assertEqual(report.diagnostics["size_policy"]["scope"], "movie_total")
+        self.assertIn("12.00 GiB total", report.selected[0].candidate.reasons[-1])
+
+    def test_tier_size_uses_actual_file_size_not_runtime(self) -> None:
+        short_size = nyaa.parse_size("514.4 MiB")
+        _, _, _, watch_fit = nyaa.bitrate_size_score(short_size, "watch", 12.0, None, False)
+        _, _, _, browse_fit = nyaa.bitrate_size_score(short_size, "browse", 12.0, None, False)
+        _, _, _, browse_good = nyaa.bitrate_size_score(nyaa.parse_size("1.5 GiB"), "browse", 12.0, None, False)
+        _, _, _, watch_good = nyaa.bitrate_size_score(nyaa.parse_size("2.5 GiB"), "watch", 12.0, None, False)
+        self.assertEqual(watch_fit, "below")
+        self.assertEqual(browse_fit, "below")
+        self.assertEqual(browse_good, "in-tier")
+        self.assertEqual(watch_good, "in-tier")
+
+
+class FailureReplyTests(unittest.TestCase):
+    def test_single_episode_reports_an_above_range_release_without_details(self) -> None:
+        reply = finder.render_failure_reply(
+            "release_unqualified",
+            "Yani Neko",
+            "S01",
+            core.SearchIntent.SPECIFIC_EPISODE,
+            "browse",
+            {
+                "above_max_count": 1,
+                "below_min_count": 1,
+                "size_policy": {"source": "tier", "hard_min_gib": 1.0, "hard_max_gib": 2.0},
+            },
+        )
+        self.assertEqual(reply, "《Yani Neko》当前区间内没有合格资源，但有高于该区间的资源可选。")
+        self.assertNotIn("4.1 GiB", reply)
+        self.assertNotIn("magnet:?", reply)
+
+    def test_explicit_bounded_range_uses_the_same_above_range_message(self) -> None:
+        reply = finder.render_failure_reply(
+            "release_unqualified",
+            "Example",
+            "S01",
+            core.SearchIntent.SPECIFIC_EPISODE,
+            "browse",
+            {
+                "above_max_count": 2,
+                "size_policy": {"source": "explicit", "hard_min_gib": 1.0, "hard_max_gib": 2.0},
+            },
+        )
+        self.assertEqual(reply, "《Example》当前区间内没有合格资源，但有高于该区间的资源可选。")
+
+    def test_below_only_or_unbounded_search_keeps_the_generic_message(self) -> None:
+        diagnostics = (
+            {"above_max_count": 0, "size_policy": {"hard_max_gib": 2.0}},
+            {"above_max_count": 1, "size_policy": {"hard_max_gib": None}},
+        )
+        for diagnostic in diagnostics:
+            with self.subTest(diagnostic=diagnostic):
+                reply = finder.render_failure_reply(
+                    "release_unqualified",
+                    "Example",
+                    "S01",
+                    core.SearchIntent.SPECIFIC_EPISODE,
+                    "browse",
+                    diagnostic,
+                )
+                self.assertEqual(reply, "《Example》存在对应发布，但没有资源满足轻量观看档位。")
+
+    def test_season_batch_does_not_use_the_above_range_message(self) -> None:
+        reply = finder.render_failure_reply(
+            "release_unqualified",
+            "Example",
+            "S01",
+            core.SearchIntent.SEASON_BATCH,
+            "browse",
+            {"above_max_count": 1, "size_policy": {"hard_max_gib": 2.0}},
+        )
+        self.assertNotIn("有高于该区间的资源可选", reply)
+        self.assertIn("正篇逐集体积", reply)
+
+
+class SearchReportTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.args = search_args()
+        self.real_collect = core.collect_raw_candidates
+        self.patcher = patch.object(core, "collect_raw_candidates")
+        self.mock_collect = self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+
+    def test_latest_target_beats_more_seeded_previous_episode(self) -> None:
+        self.mock_collect.return_value = (
+            [
+                candidate("[A] Re:ZERO 4th season - 11 [1080p]", "1.4 GiB", 500),
+                candidate("[B] Re:ZERO Season 4 - 12 [1080p]", "1.2 GiB", 1),
+            ],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args, core.SearchIntent.LATEST_REGULAR, requested_episode=12
+        )
+        self.assertEqual(report.status, "found")
+        self.assertIn("12", report.selected[0].candidate.title)
+
+    def test_latest_discovery_only_ranks_candidates_from_newest_episode(self) -> None:
+        self.mock_collect.return_value = (
+            [
+                candidate("[A] Re:ZERO Season 4 - 11 [1080p]", "1.4 GiB", 500),
+                candidate("[B] Re:ZERO Season 4 - 12 [1080p]", "1.2 GiB", 1),
+            ],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args, core.SearchIntent.LATEST_REGULAR, requested_episode=None
+        )
+        self.assertEqual(report.status, "found")
+        self.assertIn("12", report.selected[0].candidate.title)
+
+    def test_strict_zh_prefers_detail_verified_cht_over_unverified_multisub(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        self.args.detail_limit = 5
+        erai = candidate("[Erai-raws] Re:ZERO S04E12 [MultiSub]", "1.5 GiB", 500)
+        fixture_group = candidate("[FixtureGroup] Re:ZERO S04E12 [CHT]", "1.5 GiB", 10)
+        self.mock_collect.return_value = ([erai, fixture_group], [], "miss")
+
+        def detail_for(url: str, _timeout: int) -> str:
+            if url.endswith("/10"):
+                return "[FixtureGroup] Re:ZERO S04E12 [CHT]\nSubtitle:\nHardSub\n[CHT].mp4"
+            return "[Erai-raws] Re:ZERO S04E12 [MultiSub]\nSubtitle languages: English, German"
+
+        with patch.object(nyaa, "fetch_nyaa_detail_text", side_effect=detail_for):
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "found")
+        self.assertIn("[FixtureGroup]", report.selected[0].candidate.title)
+        self.assertTrue(report.selected[0].candidate.detail_chinese_confirmed)
+
+    def test_strict_zh_failure_returns_no_candidate_or_magnet(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        self.args.detail_limit = 5
+        release = candidate("[Erai-raws] Re:ZERO S04E12 [MultiSub]", "1.5 GiB", 500)
+        release.magnet = "magnet:?xt=urn:btih:not-qualified"
+        self.mock_collect.return_value = ([release], [], "miss")
+        with patch.object(
+            nyaa,
+            "fetch_nyaa_detail_text",
+            return_value="Subtitle languages: English, German, Russian",
+        ):
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "subtitle_unqualified")
+        self.assertEqual(report.selected, [])
+        self.assertEqual(report.choices, [])
+
+    def test_strict_zh_continues_beyond_first_detail_batch(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        self.args.detail_limit = 5
+        releases = [
+            candidate(f"[G] Re:ZERO S04E12 [1080p] v{index}", "1.5 GiB", 100 - index)
+            for index in range(6)
+        ]
+        chinese_url = releases[-1].url
+        self.mock_collect.return_value = (releases, [], "miss")
+
+        def detail_for(url: str, _timeout: float) -> str:
+            if url == chinese_url:
+                return "Subtitle languages: Simplified Chinese"
+            return "Subtitle languages: English"
+
+        with patch.object(nyaa, "fetch_nyaa_detail_text", side_effect=detail_for):
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.url, chinese_url)
+        self.assertEqual(report.diagnostics["detail_checked_count"], 6)
+        self.assertEqual(report.diagnostics["subtitle_rejected_count"], 5)
+
+    def test_strict_zh_budget_or_fetch_failure_is_incomplete_not_unqualified(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        self.args.detail_limit = 5
+        self.args.detail_budget_seconds = 0
+        release = candidate("[G] Re:ZERO S04E12 [1080p]", "1.5 GiB", 10)
+        self.mock_collect.return_value = ([release], [], "miss")
+        report = core.search_release_report(
+            self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+        )
+        self.assertEqual(report.status, "subtitle_check_incomplete")
+        self.assertTrue(report.diagnostics["detail_budget_exhausted"])
+        self.assertEqual(report.diagnostics["detail_unchecked_count"], 1)
+
+        self.args.detail_budget_seconds = 30
+        with patch.object(nyaa, "fetch_nyaa_detail_text", side_effect=TimeoutError("slow")):
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "subtitle_check_incomplete")
+        self.assertEqual(report.diagnostics["detail_failed_count"], 1)
+
+    def test_strict_zh_query_failure_is_incomplete_not_unqualified(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        release = candidate("[G] Re:ZERO S04E12 [1080p]", "1.5 GiB", 10)
+        self.mock_collect.return_value = ([release], ["alias query timed out"], "miss-partial")
+        with patch.object(nyaa, "fetch_nyaa_detail_text", return_value="Subtitle: English"):
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "subtitle_check_incomplete")
+        self.assertEqual(report.diagnostics["rss_failure_count"], 1)
+
+    def test_strict_zh_cached_negative_refreshes_before_concluding(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        plain = candidate("[G] Re:ZERO S04E12 [1080p]", "1.5 GiB", 500)
+        chinese = candidate("[ZH] Re:ZERO S04E12 [CHT]", "1.5 GiB", 10)
+        chinese.subtitle_signal = "CHT"
+        self.mock_collect.side_effect = [
+            ([plain], [], "hit"),
+            ([plain, chinese], [], "refresh"),
+        ]
+
+        def detail_for(url: str, _timeout: float) -> str:
+            if url == chinese.url:
+                return "[CHT]\nSubtitle:\nHardSub\nEpisode [CHT].mp4"
+            return "Subtitle: English"
+
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(nyaa, "fetch_nyaa_detail_text", side_effect=detail_for),
+        ):
+            report = core.search_release_report(
+                self.args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=12,
+                cache_path=Path(temp_dir) / "raw.json",
+            )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.url, chinese.url)
+        self.assertTrue(report.diagnostics["strict_cache_refresh_used"])
+        self.assertEqual(self.mock_collect.call_count, 2)
+
+    def test_strict_zh_never_auto_selects_unknown_work_from_broad_query(self) -> None:
+        self.args.require_zh = True
+        self.args.want_zh = True
+        self.args.inspect_details = True
+        self.args.season = "S01"
+        wrong = candidate("[G] Tenmaku Warriors S01E03 [CHT]", "1.5 GiB", 100)
+        self.mock_collect.return_value = ([wrong], [], "miss")
+        context = core.SearchContext(
+            canonical_title="穹庐下的魔女",
+            aliases=("穹廬下的魔女",),
+            search_titles=("Tenmaku no Jaadugar",),
+            mainline_scope="single",
+            resolved_season=1,
+            flexible_title_match=True,
+        )
+        with patch.object(nyaa, "fetch_nyaa_detail_text") as detail_fetch:
+            report = core.search_release_report(
+                self.args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=3,
+                context=context,
+            )
+        self.assertEqual(report.status, "needs_confirmation")
+        self.assertEqual(report.selected, [])
+        self.assertEqual(report.diagnostics["work_unconfirmed_count"], 1)
+        detail_fetch.assert_not_called()
+
+    def test_soft_zh_preference_keeps_fast_path_without_detail_fetch(self) -> None:
+        self.args.want_zh = True
+        release = candidate("[Erai-raws] Re:ZERO S04E12 [MultiSub]", "1.5 GiB", 500)
+        self.mock_collect.return_value = ([release], [], "miss")
+        with patch.object(nyaa, "fetch_nyaa_detail_text") as detail_fetch:
+            report = core.search_release_report(
+                self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+            )
+        self.assertEqual(report.status, "found")
+        detail_fetch.assert_not_called()
+
+    def test_special_is_excluded_from_latest_regular(self) -> None:
+        self.mock_collect.return_value = (
+            [
+                candidate("[A] Re:ZERO 4th season - 11.5 SP01 [1080p]", "1.4 GiB", 500),
+                candidate("[B] Re:ZERO Season 4 - 12 [1080p]", "1.2 GiB", 1),
+            ],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args, core.SearchIntent.LATEST_REGULAR, requested_episode=12
+        )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.requested_episode, 12)
+        self.assertEqual(len(report.selected), 1)
+        self.assertEqual(report.selected[0].identity.kind, EpisodeKind.REGULAR)
+
+    def test_existing_but_small_release_is_not_missing(self) -> None:
+        self.mock_collect.return_value = (
+            [candidate("[B] Re:ZERO Season 4 - 12 [1080p]", "500 MiB", 1)],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["raw_count"], 1)
+
+    def test_explicit_floor_overrides_named_tier_bounds(self) -> None:
+        self.args.tier = "watch"
+        self.args.min_gib_per_episode = 1.0
+        self.args.size_policy_source = "explicit"
+        low_tier = candidate("[B] Re:ZERO Season 4 - 12 [1080p]", "1.4 GiB", 1)
+        low_tier.tier_fit = "below"
+        self.mock_collect.return_value = ([low_tier], [], "miss")
+        report = core.search_release_report(
+            self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+        )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(len(report.selected), 1)
+
+    def test_explicit_upper_bound_is_enforced(self) -> None:
+        self.args.tier = "watch"
+        self.args.min_gib_per_episode = 1.0
+        self.args.max_gib_per_episode = 2.0
+        self.args.size_policy_source = "explicit"
+        self.mock_collect.return_value = (
+            [candidate("[B] Re:ZERO Season 4 - 12 [1080p]", "4.1 GiB", 1)],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["above_max_count"], 1)
+
+    def test_single_mainline_inherits_missing_season_and_excludes_related_work(self) -> None:
+        self.args.query = "Yani Neko"
+        self.args.season = "S01"
+        self.args.tier = "watch"
+        self.args.min_gib_per_episode = 1.0
+        self.args.size_policy_source = "explicit"
+        self.mock_collect.return_value = (
+            [
+                candidate("[DKB] Yani Neko - S01E02 [1080p]", "514.4 MiB", 262),
+                candidate("[ToonsHub] Chainsmoker Cat S01E02 [1080p]", "866.1 MiB", 1192),
+                candidate("[shincaps] Yani Neko - 02 (BS11 1920x1080 MPEG2 AAC).ts", "4.1 GiB", 9),
+                candidate("[Group] Yani Neko Mini - 02 [1080p]", "5.0 GiB", 500),
+            ],
+            [],
+            "miss",
+        )
+        context = core.SearchContext(
+            canonical_title="Yani Neko",
+            aliases=("Chainsmoker Cat", "ヤニねこ"),
+            related_titles=("Yani Neko Mini",),
+            mainline_scope="single",
+            resolved_season=1,
+        )
+        report = core.search_release_report(
+            self.args,
+            core.SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=2,
+            context=context,
+        )
+        self.assertEqual(report.status, "found")
+        self.assertIn("shincaps", report.selected[0].candidate.title)
+        self.assertEqual(report.selected[0].effective_season, 1)
+        self.assertEqual(report.selected[0].season_source, "single_mainline")
+        self.assertEqual(report.diagnostics["related_work_count"], 1)
+        self.assertEqual(report.diagnostics["observed_target_max_gib"], 4.1)
+
+    def test_specific_current_title_beats_shared_related_short_title(self) -> None:
+        self.args.query = "THE GHOST IN THE SHELL 2026"
+        self.args.season = "S01"
+        self.mock_collect.return_value = (
+            [
+                candidate(
+                    "[Commie] The Ghost in the Shell - 02 [1080p]",
+                    "1.7 GiB",
+                    312,
+                )
+            ],
+            [],
+            "miss",
+        )
+        context = core.SearchContext(
+            canonical_title="THE GHOST IN THE SHELL 2026",
+            aliases=("The Ghost in the Shell",),
+            search_titles=(
+                "THE GHOST IN THE SHELL 2026",
+                "THE GHOST IN THE SHELL",
+            ),
+            related_titles=(
+                "Ghost in the Shell",
+                "Ghost in the Shell: Stand Alone Complex",
+            ),
+            mainline_scope="single",
+            resolved_season=1,
+        )
+        report = core.search_release_report(
+            self.args,
+            core.SearchIntent.NEXT_TRACKED,
+            requested_episode=2,
+            context=context,
+        )
+        self.assertEqual(report.status, "found")
+        selected = report.selected[0]
+        self.assertEqual(selected.work_match, "alias")
+        self.assertEqual(selected.work_match_evidence.decision, "positive_more_specific")
+        self.assertEqual(report.diagnostics["related_work_count"], 0)
+        self.assertEqual(report.diagnostics["wrong_season_count"], 0)
+        self.assertNotIn("work_match_evidence", report.as_dict()["selected"][0])
+        self.assertIn("work_match_evidence", report.as_dict(explain=True)["selected"][0])
+
+    def test_more_specific_related_title_still_excludes_side_story(self) -> None:
+        self.args.query = "Atlas Chronicle"
+        self.args.season = "S01"
+        self.mock_collect.return_value = (
+            [
+                candidate("[Group] Atlas Chronicle - 02 [1080p]", "1.5 GiB", 10),
+                candidate("[Group] Atlas Chronicle Mini - 02 [1080p]", "1.5 GiB", 500),
+            ],
+            [],
+            "miss",
+        )
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            related_titles=("Atlas Chronicle Mini",),
+            mainline_scope="single",
+            resolved_season=1,
+        )
+        report = core.search_release_report(
+            self.args,
+            core.SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=2,
+            context=context,
+        )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.seeders, 10)
+        self.assertEqual(report.diagnostics["related_work_count"], 1)
+        self.assertEqual(report.diagnostics["wrong_season_count"], 0)
+
+    def test_specific_legacy_title_beats_shared_current_alias(self) -> None:
+        release = candidate(
+            "[Group] Harbor Signal: Legacy Fleet S01E02 [1080p]",
+            "1.5 GiB",
+            100,
+        )
+        context = core.SearchContext(
+            canonical_title="Harbor Signal 2026",
+            aliases=("Harbor Signal",),
+            related_titles=("Harbor Signal: Legacy Fleet",),
+            mainline_scope="single",
+            resolved_season=1,
+        )
+        evidence = core._work_match_evidence(release, context)
+        self.assertEqual(evidence.outcome, "related_work")
+        self.assertEqual(evidence.decision, "related_more_specific")
+
+    def test_equal_positive_and_related_title_favors_current_target(self) -> None:
+        release = candidate("[Group] Shared Chronicle S01E02 [1080p]", "1.5 GiB", 20)
+        context = core.SearchContext(
+            canonical_title="Shared Chronicle",
+            related_titles=("Shared Chronicle",),
+            resolved_season=1,
+        )
+        evidence = core._work_match_evidence(release, context)
+        self.assertEqual(evidence.outcome, "canonical")
+        self.assertEqual(evidence.decision, "positive_tie")
+
+    def test_wrong_season_count_excludes_related_work(self) -> None:
+        self.args.query = "Atlas Chronicle"
+        self.args.season = "S01"
+        self.mock_collect.return_value = (
+            [
+                candidate("[Group] Atlas Chronicle S02E02 [1080p]", "1.5 GiB", 10),
+                candidate("[Group] Atlas Chronicle Mini S01E02 [1080p]", "1.5 GiB", 20),
+            ],
+            [],
+            "miss",
+        )
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            related_titles=("Atlas Chronicle Mini",),
+            resolved_season=1,
+        )
+        report = core.search_release_report(
+            self.args,
+            core.SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=2,
+            context=context,
+        )
+        self.assertEqual(report.status, "no_nyaa_release_for_target")
+        self.assertEqual(report.diagnostics["related_work_count"], 1)
+        self.assertEqual(report.diagnostics["wrong_season_count"], 1)
+
+    def test_multi_mainline_does_not_infer_missing_season(self) -> None:
+        self.args.query = "Example"
+        self.args.season = "S02"
+        self.mock_collect.return_value = (
+            [candidate("[Group] Example - 02 [1080p]", "1.4 GiB", 10)],
+            [],
+            "miss",
+        )
+        context = core.SearchContext(
+            canonical_title="Example",
+            mainline_scope="multi",
+            resolved_season=2,
+        )
+        report = core.search_release_report(
+            self.args,
+            core.SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=2,
+            context=context,
+        )
+        self.assertEqual(report.status, "needs_confirmation")
+        self.assertEqual(report.selected, [])
+
+    def test_watch_upper_bound_keeps_oversized_target_visible(self) -> None:
+        self.args.query = "Yani Neko"
+        self.args.season = "S01"
+        self.args.tier = "watch"
+        self.args.min_gib_per_episode = 2.0
+        self.args.size_policy_source = "tier"
+        self.mock_collect.return_value = (
+            [candidate("[shincaps] Yani Neko - 02 [1920x1080].ts", "4.1 GiB", 9)],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args,
+            core.SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=2,
+            context=core.SearchContext(
+                canonical_title="Yani Neko",
+                mainline_scope="single",
+                resolved_season=1,
+            ),
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertIn("4.1 GiB", report.choices[0].candidate.size)
+        self.assertEqual(report.diagnostics["above_max_count"], 1)
+        self.assertEqual(report.diagnostics["observed_target_max_gib"], 4.1)
+
+    def test_uncertain_candidates_get_one_targeted_fallback(self) -> None:
+        self.mock_collect.side_effect = [
+            ([candidate("[A] Re:ZERO 4th season complete [1080p]", "9.0 GiB", 30)], [], "miss"),
+            ([candidate("[B] Re:ZERO S04E12 [1080p]", "1.2 GiB", 10)], [], "miss"),
+        ]
+        report = core.search_release_report(
+            self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+        )
+        self.assertEqual(report.status, "found")
+        self.assertTrue(report.diagnostics["fallback_query_used"])
+        self.assertEqual(self.mock_collect.call_count, 2)
+
+    def test_specific_target_never_falls_back_to_previous_regular_episode(self) -> None:
+        self.mock_collect.return_value = (
+            [candidate("[A] Re:ZERO Season 4 - 11 [1080p]", "1.4 GiB", 500)],
+            [],
+            "miss",
+        )
+        report = core.search_release_report(
+            self.args, core.SearchIntent.SPECIFIC_EPISODE, requested_episode=12
+        )
+        self.assertEqual(report.status, "no_nyaa_release_for_target")
+        self.assertEqual(report.selected, [])
+
+    def test_raw_cache_reuses_candidates(self) -> None:
+        raw = [rss_item("[B] Re:ZERO Season 4 - 12 [1080p]", "1.2 GiB", 1)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "raw.json"
+            with patch.object(core.time, "time", return_value=1_000_000):
+                core._write_cached_rss_items(cache, "fixture", raw)
+                restored = core._read_cached_rss_items(cache, "fixture")
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored[0]["query"], raw[0]["query"])
+        self.assertEqual(
+            restored[0]["release"]["title"],
+            "[B] Re:ZERO Season 4 - 12 [1080p]",
+        )
+        self.assertNotIn("xml", restored[0])
+
+    def test_raw_cache_hit_skips_rss_fetch(self) -> None:
+        raw = [rss_item("[B] Re:ZERO Season 4 - 12 [1080p]", "1.2 GiB", 1)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "raw.json"
+            with patch.object(core.time, "time", return_value=1_000_000):
+                core._write_cached_rss_items(cache, core._raw_cache_key(self.args), raw)
+                with patch.object(nyaa, "fetch_rss") as fetch:
+                    restored, failures, cache_state = self.real_collect(self.args, cache)
+        self.assertEqual(cache_state, "hit")
+        self.assertEqual(failures, [])
+        self.assertIn("Re:ZERO Season 4 - 12", restored[0].title)
+        fetch.assert_not_called()
+
+    def test_raw_cache_is_rescored_for_a_different_tier(self) -> None:
+        raw = [rss_item("[B] Example S01E01 [1080p]", "1.5 GiB", 10)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "raw.json"
+            self.args.query = "Example"
+            self.args.alias = []
+            key = core._raw_cache_key(self.args)
+            with patch.object(core.time, "time", return_value=1_000_000):
+                core._write_cached_rss_items(cache, key, raw)
+                browse, _, browse_cache = self.real_collect(self.args, cache)
+                self.args.tier = "watch"
+                watch, _, watch_cache = self.real_collect(self.args, cache)
+        self.assertEqual((browse_cache, watch_cache), ("hit", "hit"))
+        self.assertEqual(browse[0].tier_fit, "in-tier")
+        self.assertEqual(watch[0].tier_fit, "below")
+
+    def test_partial_multi_query_result_is_not_cached(self) -> None:
+        item = rss_item("[B] Example S01E01 [1080p]", "1.5 GiB", 10)
+        feed = f"<rss><channel>{item['xml']}</channel></rss>"
+        self.args.query = "Example"
+        self.args.alias = ["Example Alias"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "raw.json"
+            with patch.object(nyaa, "fetch_rss", side_effect=[feed, TimeoutError("slow")]):
+                _, failures, cache_state = self.real_collect(self.args, cache)
+            cached = core._read_cached_rss_items(cache, core._raw_cache_key(self.args))
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(cache_state, "miss-partial")
+        self.assertIsNone(cached)
+
+
+class HybridWorkflowTests(unittest.TestCase):
+    @staticmethod
+    def nyaa_candidate(
+        title: str,
+        size: str,
+        nyaa_id: int,
+        seeders: int | None = None,
+    ) -> nyaa.Candidate:
+        release = candidate(title, size, seeders if seeders is not None else nyaa_id)
+        release.url = f"https://nyaa.si/view/{nyaa_id}"
+        release.magnet = f"magnet:?xt=urn:btih:{nyaa_id:040x}"
+        return release
+
+    @staticmethod
+    def listing_html(
+        nyaa_id: int,
+        title: str,
+        timestamp: int,
+        size: str = "1.2 GiB",
+        category: str = "Anime - Non-English-translated",
+    ) -> str:
+        return f"""
+        <table class="torrent-list"><tbody><tr>
+          <td><a href="/?c=1_3" title="{category}">Anime</a></td>
+          <td><a href="/view/{nyaa_id}" title="{title}">{title}</a></td>
+          <td><a href="magnet:?xt=urn:btih:{nyaa_id:040x}">magnet</a></td><td>{size}</td>
+          <td data-timestamp="{timestamp}">date</td>
+          <td>216</td><td>4</td><td>3065</td>
+        </tr></tbody></table>
+        """
+
+    @staticmethod
+    def detail_html(
+        nyaa_id: int,
+        title: str,
+        size: str = "1.2 GiB",
+    ) -> str:
+        return f"""
+        <div class="panel panel-default">
+          <div class="panel-heading"><h3 class="panel-title">{title}</h3></div>
+          <div class="panel-body">
+            <div><div class="col-md-1">Category:</div><div class="col-md-5">Anime - Non-English-translated</div></div>
+            <div><div class="col-md-1">Date:</div><div class="col-md-5" data-timestamp="1784390517">2026-07-18</div></div>
+            <div><div class="col-md-1">Seeders:</div><div class="col-md-5">216</div></div>
+            <div><div class="col-md-1">Leechers:</div><div class="col-md-5">4</div></div>
+            <div><div class="col-md-1">File size:</div><div class="col-md-5">{size}</div></div>
+            <div><div class="col-md-1">Completed:</div><div class="col-md-5">3065</div></div>
+            <div><div class="col-md-1">Info hash:</div><div class="col-md-5"><kbd>{nyaa_id:040x}</kbd></div></div>
+          </div>
+        </div>
+        <div id="torrent-description">Subtitle: HardSub</div>
+        <div class="torrent-file-list"><ul><li>[ANi] 穹廬下的魔女 - 04 [CHT].mp4 <span class="file-size">({size})</span></li></ul></div>
+        """
+
+    def test_search_listing_url_pushes_size_sort_to_nyaa(self) -> None:
+        url = nyaa.build_search_listing_url(
+            "Yosuga no Sora",
+            "1_0",
+            "0",
+            1,
+        )
+        self.assertIn("q=Yosuga+no+Sora", url)
+        self.assertIn("s=size", url)
+        self.assertIn("o=desc", url)
+        self.assertIn("c=1_0", url)
+        self.assertIn("f=0", url)
+
+    def test_exact_episode_uses_one_server_sorted_page_and_keeps_magnet_hash(self) -> None:
+        args = search_args()
+        args.query = "Example"
+        args.season = "S01"
+        args.episode = 3
+        args.discover = True
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 1.0
+        args.max_gib_per_episode = 4.0
+        args.include_magnets = True
+        page = self.listing_html(
+            2003,
+            "[Group] Example S01E03 [1080p]",
+            1784390517,
+            size="3.0 GiB",
+        )
+        with (
+            patch.object(
+                nyaa,
+                "fetch_search_listing_page",
+                return_value=page,
+            ) as fetch_listing,
+            patch.object(nyaa, "fetch_rss") as fetch_rss,
+        ):
+            candidates, failures, cache_state = core.collect_raw_candidates(args)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(cache_state, "miss")
+        fetch_listing.assert_called_once_with(
+            "Example",
+            "1_0",
+            "0",
+            1,
+            1,
+            sort="size",
+            order="desc",
+        )
+        fetch_rss.assert_not_called()
+        self.assertEqual(len(candidates), 1)
+        self.assertTrue(candidates[0].magnet.startswith("magnet:?xt=urn:btih:"))
+
+    def test_discovery_keeps_low_size_and_unverified_candidates_compact(self) -> None:
+        args = search_args()
+        args.query = "Example"
+        args.alias = ["示例动画"]
+        args.discover = True
+        args.min_gib_per_episode = 1.0
+        low = self.nyaa_candidate("[A] Example S01E04 [1080p]", "0.5 GiB", 101)
+        unverified = self.nyaa_candidate(
+            "[B] Example S01E04 [1080p][MultiSub]", "1.5 GiB", 102
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([low, unverified], [], "fixture"),
+        ):
+            report = core.discover_release_candidates(args)
+        self.assertEqual(report["status"], "found")
+        self.assertEqual(report["query_coverage"], "includes_latin_alias")
+        self.assertEqual(report["ordering"], "published_desc_only_not_quality_rank")
+        self.assertEqual(report["queries"], ["Example", "示例动画"])
+        self.assertEqual({item["nyaa_id"] for item in report["candidates"]}, {"101", "102"})
+        self.assertEqual(
+            set(report["candidates"][0]),
+            {
+                "nyaa_id",
+                "title",
+                "identity",
+                "size_gib",
+                "size_scope",
+                "per_episode_size_gib",
+                "requires_whole_season_verification",
+                "seeders",
+                "published",
+                "matched_queries",
+                "url",
+            },
+        )
+        self.assertIn(0.5, [item["size_gib"] for item in report["candidates"]])
+        self.assertTrue(
+            all(
+                item["size_scope"] == "single_regular_episode"
+                and item["per_episode_size_gib"] == item["size_gib"]
+                and not item["requires_whole_season_verification"]
+                for item in report["candidates"]
+            )
+        )
+        self.assertNotIn("magnet", json.dumps(report, ensure_ascii=False))
+
+    def test_exact_cjk_match_recovers_latin_alias_and_retries_discovery(self) -> None:
+        args = search_args()
+        args.query = "再见拉拉"
+        args.alias = ["再见，拉拉", "Bye Bye, Lala"]
+        args.season = "S01"
+        args.episode = 1
+        args.discover = True
+        args.require_zh = True
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 1.0
+
+        low = self.nyaa_candidate(
+            "[绿茶字幕组] 再见拉拉 / Sayonara Lara [01][WebRip][1080p][简日内嵌]",
+            "0.499 GiB",
+            2129656,
+            seeders=24,
+        )
+        low.matched_queries = ["再见拉拉", "再见，拉拉"]
+        unrelated = self.nyaa_candidate(
+            "[NC-Raws] 再见了，我的克拉默 / Sayonara Watashi no Cramer - 01 [1080p]",
+            "0.99 GiB",
+            1367414,
+            seeders=0,
+        )
+        unrelated.matched_queries = ["再见拉拉"]
+        recovered = self.nyaa_candidate(
+            "[ToonsHub] Goodbye Lara S01E01 1080p CR WEB-DL DUAL AAC2.0 "
+            "H.264 (Sayonara Lara, Dual-Audio, Multi-Subs)",
+            "1.4 GiB",
+            2128765,
+            seeders=81,
+        )
+        recovered.matched_queries = ["Sayonara Lara"]
+
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            side_effect=[
+                ([low, unrelated], [], "fixture"),
+                ([recovered], [], "fixture-recovery"),
+            ],
+        ) as collect:
+            report = core.discover_release_candidates(args)
+
+        self.assertEqual(collect.call_count, 2)
+        recovery_args = collect.call_args_list[1].args[0]
+        self.assertEqual(recovery_args.query, "Sayonara Lara")
+        self.assertEqual(report["alias_recovery"]["aliases"], ["Sayonara Lara"])
+        self.assertTrue(report["alias_recovery"]["latin_query_match_after_retry"])
+        self.assertTrue(report["latin_query_match"])
+        self.assertIn("Sayonara Lara", report["queries"])
+        self.assertIn(
+            "2128765", {item["nyaa_id"] for item in report["candidates"]}
+        )
+
+    def test_discovery_marks_batch_size_as_total_not_per_episode(self) -> None:
+        args = search_args()
+        args.query = "Yosuga no Sora"
+        args.alias = ["缘之空"]
+        args.discover = True
+        args.tier = "premium"
+        args.min_gib_per_episode = 6.0
+        batch = self.nyaa_candidate(
+            "[BDRip] Yosuga no Sora [01-12] Complete [1080p]",
+            "6.4 GiB",
+            103,
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([batch], [], "fixture"),
+        ):
+            report = core.discover_release_candidates(args)
+
+        self.assertEqual(report["status"], "found")
+        self.assertEqual(len(report["candidates"]), 1)
+        candidate_payload = report["candidates"][0]
+        self.assertEqual(candidate_payload["size_gib"], 6.4)
+        self.assertEqual(candidate_payload["size_scope"], "batch_total")
+        self.assertIsNone(candidate_payload["per_episode_size_gib"])
+        self.assertTrue(candidate_payload["requires_whole_season_verification"])
+        self.assertNotIn("fast_path", report)
+
+    def test_movie_discovery_labels_package_as_movie_total(self) -> None:
+        args = search_args()
+        args.query = "Robot Dreams"
+        args.season = None
+        args.discover = True
+        args.movie = True
+        args.min_gib_per_episode = None
+        args.min_total_gib = 10.0
+        args.size_policy_source = "movie_default"
+        release = self.nyaa_candidate(
+            "[Group] Robot Dreams (2023) [1080p BluRay]",
+            "12.0 GiB",
+            2139999,
+        )
+        release.matched_queries = ["Robot Dreams"]
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([release], [], "fixture"),
+        ):
+            report = core.discover_release_candidates(args)
+        self.assertEqual(report["status"], "found")
+        self.assertEqual(report["candidates"][0]["size_scope"], "movie_total")
+        self.assertIsNone(report["candidates"][0]["per_episode_size_gib"])
+        self.assertNotIn("fast_path", report)
+
+    def test_episode_count_never_divides_a_single_episode_release(self) -> None:
+        release = self.nyaa_candidate(
+            "[Group] Example S01E03 [1080p]",
+            "6.4 GiB",
+            104,
+        )
+        self.assertAlmostEqual(nyaa.comparable_gib_per_episode(release, 12), 6.4)
+        score, _note, basis, tier_fit = nyaa.bitrate_size_score(
+            release.size_bytes,
+            "premium",
+            22.0,
+            12,
+            False,
+        )
+        self.assertEqual(score, 0)
+        self.assertEqual(basis, "6.40 GiB single release")
+        self.assertEqual(tier_fit, "in-tier")
+
+    def test_simple_episode_fast_path_prefers_stable_qualified_release(self) -> None:
+        args = search_args()
+        args.query = "I Want to Love You Till Your Dying Day"
+        args.alias = ["Kimi ga Shinu made Koi wo Shitai"]
+        args.season = "S01"
+        args.episode = 3
+        args.discover = True
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 1.0
+        newest = self.nyaa_candidate(
+            "[ToonsHub] I Want to Love You Till Your Dying Day S01E03 "
+            "1080p CR WEB-DL Multi-Subs",
+            "1.4 GiB",
+            2135600,
+            seeders=98,
+        )
+        language_variant = self.nyaa_candidate(
+            "I Want to Love You Till Your Dying Day S01E03 VOSTFR "
+            "1080p WEB x264",
+            "1.3 GiB",
+            2135599,
+            seeders=600,
+        )
+        stable = self.nyaa_candidate(
+            "[SubsPlease] I Want to Love You Till Your Dying Day S01E03 "
+            "1080p WEB-DL",
+            "1.3 GiB",
+            2135596,
+            seeders=547,
+        )
+        too_small = self.nyaa_candidate(
+            "[Fansub] I Want to Love You Till Your Dying Day S01E03 "
+            "1080p CHS",
+            "0.4 GiB",
+            2135601,
+            seeders=900,
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([newest, language_variant, stable, too_small], [], "fixture"),
+        ):
+            report = core.discover_release_candidates(args)
+
+        self.assertEqual(report["status"], "found")
+        self.assertEqual(
+            {item["nyaa_id"] for item in report["candidates"]},
+            {"2135600", "2135599", "2135596", "2135601"},
+        )
+        self.assertEqual(report["fast_path"]["status"], "ready")
+        self.assertEqual(report["fast_path"]["candidate_id"], "2135596")
+        self.assertEqual(report["fast_path"]["target_episode"], 3)
+        self.assertNotIn("magnet", json.dumps(report, ensure_ascii=False))
+
+    def test_strict_chinese_discovery_does_not_emit_simple_fast_path(self) -> None:
+        args = search_args()
+        args.query = "Example"
+        args.season = "S01"
+        args.episode = 3
+        args.discover = True
+        args.require_zh = True
+        release = self.nyaa_candidate(
+            "[Fansub] Example S01E03 [1080p][CHS]",
+            "1.3 GiB",
+            2135602,
+            seeders=200,
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([release], [], "fixture"),
+        ):
+            report = core.discover_release_candidates(args)
+        self.assertNotIn("fast_path", report)
+
+    def test_fast_verify_discovers_and_verifies_one_candidate(self) -> None:
+        release = self.nyaa_candidate(
+            "[Group] Example S01E03 [1080p]",
+            "1.3 GiB",
+            2135603,
+            seeders=240,
+        )
+        output = io.StringIO()
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=([release], [], "fixture"),
+            ) as collect,
+            patch.object(core.DEFAULT_NYAA_CLIENT, 'get', return_value=detail_for_candidate(release)),
+            contextlib.redirect_stdout(output),
+        ):
+            code = nyaa.main(
+                [
+                    "Example",
+                    "--season",
+                    "S01",
+                    "--episode",
+                    "3",
+                    "--fast-verify",
+                    "--min-gib-per-episode",
+                    "1",
+                    "--include-magnets",
+                    "--legal-ok",
+                    "--report",
+                ]
+            )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["selected"][0]["nyaa_id"], "2135603")
+        self.assertTrue(payload["selected"][0]["magnet"].startswith("magnet:?"))
+        self.assertEqual(
+            payload["diagnostic"]["fast_path"]["candidate_id"],
+            "2135603",
+        )
+        self.assertEqual(collect.call_count, 2)
+
+    def test_cjk_title_fast_path_tries_both_variants_and_uses_practical_order(self) -> None:
+        largest = self.nyaa_candidate(
+            "[字幕组] 緣之空 S01E03 [1080p]",
+            "3.8 GiB",
+            2135604,
+            seeders=20,
+        )
+        largest.matched_queries = ["緣之空"]
+        smaller = self.nyaa_candidate(
+            "[字幕组] 缘之空 S01E03 [1080p]",
+            "2.5 GiB",
+            2135605,
+            seeders=900,
+        )
+        smaller.matched_queries = ["缘之空"]
+        too_large = self.nyaa_candidate(
+            "[字幕组] 缘之空 S01E03 [REMUX]",
+            "4.5 GiB",
+            2135606,
+            seeders=500,
+        )
+        too_large.matched_queries = ["缘之空"]
+        unrelated_latin_title = self.nyaa_candidate(
+            "[Group] Yosuga no Sora S01E03 [1080p]",
+            "3.9 GiB",
+            2135607,
+            seeders=1000,
+        )
+        unrelated_latin_title.matched_queries = ["缘之空"]
+        output = io.StringIO()
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=(
+                    [smaller, too_large, unrelated_latin_title, largest],
+                    [],
+                    "fixture",
+                ),
+            ) as collect,
+            patch.object(core.DEFAULT_NYAA_CLIENT, 'get', return_value=detail_for_candidate(largest)),
+            patch.object(nyaa, "fetch_nyaa_detail_text") as fetch_detail,
+            contextlib.redirect_stdout(output),
+        ):
+            code = nyaa.main(
+                [
+                    "缘之空",
+                    "--alias",
+                    "緣之空",
+                    "--season",
+                    "S01",
+                    "--episode",
+                    "3",
+                    "--fast-verify",
+                    "--min-gib-per-episode",
+                    "1",
+                    "--max-gib-per-episode",
+                    "4",
+                    "--require-zh",
+                    "--trust-cjk-title-for-zh",
+                    "--include-magnets",
+                    "--legal-ok",
+                    "--report",
+                ]
+            )
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["selected"][0]["nyaa_id"], "2135604")
+        self.assertEqual(
+            payload["diagnostic"]["fast_path"]["selection_basis"],
+            "eligible_practical_inspection_order_not_picture_quality",
+        )
+        self.assertEqual(
+            payload["diagnostic"]["required_subtitle"],
+            "trusted_chinese_release_title",
+        )
+        self.assertTrue(payload["diagnostic"]["cjk_title_trust_used"])
+        self.assertIn("trusted Chinese release title", payload["selected"][0]["subtitle_signal"])
+        self.assertEqual(collect.call_count, 2)
+        fetch_detail.assert_not_called()
+
+    def test_cjk_title_fast_path_accepts_seasonless_first_season_episode(self) -> None:
+        release = self.nyaa_candidate(
+            "[ANi] Tenmaku no Jādūgar /  穹廬下的魔女 - 09 "
+            "[1080P][Baha][WEB-DL][AAC AVC][CHT][MP4]",
+            "1.6 GiB",
+            2149867,
+            seeders=699,
+        )
+        release.matched_queries = ["穹廬下的魔女"]
+        output = io.StringIO()
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=([release], [], "fixture"),
+            ) as collect,
+            patch.object(core.DEFAULT_NYAA_CLIENT, 'get', return_value=detail_for_candidate(release)),
+            patch.object(nyaa, "fetch_nyaa_detail_text") as fetch_detail,
+            contextlib.redirect_stdout(output),
+        ):
+            code = nyaa.main(
+                [
+                    "穹庐下的魔女",
+                    "--alias",
+                    "穹廬下的魔女",
+                    "--season",
+                    "S01",
+                    "--episode",
+                    "9",
+                    "--fast-verify",
+                    "--min-gib-per-episode",
+                    "1",
+                    "--require-zh",
+                    "--trust-cjk-title-for-zh",
+                    "--include-magnets",
+                    "--legal-ok",
+                    "--report",
+                ]
+            )
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["selected"][0]["nyaa_id"], "2149867")
+        self.assertEqual(payload["selected"][0]["effective_season"], 1)
+        self.assertEqual(
+            payload["selected"][0]["season_source"],
+            "trusted_cjk_first_season",
+        )
+        self.assertIn(
+            "trusted Chinese release title",
+            payload["selected"][0]["subtitle_signal"],
+        )
+        # Discovery performs one targeted fallback because the release omits S01,
+        # then exact-ID verification runs after the fast-path selection.
+        self.assertEqual(collect.call_count, 3)
+        fetch_detail.assert_not_called()
+
+    def test_fast_verify_rejects_strict_chinese_mode(self) -> None:
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code = nyaa.main(
+                [
+                    "Example",
+                    "--episode",
+                    "3",
+                    "--fast-verify",
+                    "--require-zh",
+                    "--include-magnets",
+                    "--legal-ok",
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("only for a simple regular episode", errors.getvalue())
+
+    def test_cjk_title_trust_requires_strict_zh_and_a_cjk_query(self) -> None:
+        missing_strict = io.StringIO()
+        with contextlib.redirect_stderr(missing_strict):
+            code = nyaa.main(
+                [
+                    "缘之空",
+                    "--trust-cjk-title-for-zh",
+                    "--report",
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("requires --require-zh", missing_strict.getvalue())
+
+        missing_cjk = io.StringIO()
+        with contextlib.redirect_stderr(missing_cjk):
+            code = nyaa.main(
+                [
+                    "Yosuga no Sora",
+                    "--require-zh",
+                    "--trust-cjk-title-for-zh",
+                    "--report",
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("requires a Simplified or Traditional Chinese query", missing_cjk.getvalue())
+
+    def test_official_air_date_uses_exact_episode_and_seven_day_window(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="穹庐下的魔女",
+            aliases=["Tenmaku no Jaadugar"],
+            search_titles=["Jaadugar: A Witch in Mongolia"],
+            current=True,
+            trackable=True,
+            format="TV",
+            anilist_id=190569,
+        )
+        identity = finder.IdentityResolution(
+            "resolved",
+            resolved,
+            {"title": "穹庐下的魔女"},
+            True,
+            "state",
+            ["state"],
+            [],
+            "state",
+        )
+        response = {
+            "data": {
+                "Media": {
+                    "id": 190569,
+                    "format": "TV",
+                    "status": "RELEASING",
+                    "startDate": {"year": 2026, "month": 7, "day": 4},
+                    "title": {
+                        "romaji": "Tenmaku no Jaadugar",
+                        "english": "Jaadugar: A Witch in Mongolia",
+                        "native": "天幕のジャードゥーガル",
+                    },
+                    "synonyms": [],
+                },
+                "AiringSchedule": {
+                    "mediaId": 190569,
+                    "episode": 4,
+                    "airingAt": 1784385000,
+                },
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "schedule.json"
+            with (
+                patch.object(v2_providers, "anilist_air_date_request", return_value=response) as request,
+                patch.object(finder.time, "time", return_value=1784810000),
+            ):
+                found = finder.official_air_date_report(
+                    identity, 4, cache, 8, False, date(2026, 7, 23)
+                )
+                seventh_day = finder.official_air_date_report(
+                    identity, 4, cache, 8, False, date(2026, 7, 25)
+                )
+                eighth_day = finder.official_air_date_report(
+                    identity, 4, cache, 8, False, date(2026, 7, 26)
+                )
+        self.assertEqual(found["status"], "found")
+        self.assertEqual(found["airing_date"], "2026-07-18")
+        self.assertEqual(found["age_days"], 5)
+        self.assertEqual(found["scan_since"], "2026-07-18")
+        self.assertEqual(found["scan_until"], "2026-07-23")
+        self.assertEqual(found["window_mode"], "recent_to_today")
+        self.assertTrue(found["recent_scan_eligible"])
+        self.assertEqual(seventh_day["status"], "found")
+        self.assertEqual(eighth_day["status"], "found")
+        self.assertEqual(eighth_day["scan_until"], "2026-07-25")
+        self.assertEqual(eighth_day["window_mode"], "post_airing_7_day")
+        self.assertTrue(eighth_day["recent_scan_eligible"])
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(seventh_day["cache"], "hit")
+
+    def test_official_air_date_returns_first_episode_historical_window(self) -> None:
+        identity = finder.IdentityResolution(
+            "resolved",
+            finder.ResolvedAnime(
+                title="穹庐下的魔女",
+                anilist_id=190569,
+                format="TV",
+            ),
+            None,
+            False,
+            "official",
+            ["anilist"],
+            [],
+            "anilist",
+        )
+        response = {
+            "data": {
+                "Media": {
+                    "id": 190569,
+                    "format": "TV",
+                    "status": "RELEASING",
+                    "startDate": {"year": 2026, "month": 7, "day": 4},
+                    "title": {"romaji": "Tenmaku no Jaadugar"},
+                    "synonyms": [],
+                },
+                "AiringSchedule": {
+                    "mediaId": 190569,
+                    "episode": 1,
+                    "airingAt": int(datetime(2026, 7, 4, 22).timestamp()),
+                },
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(
+                    v2_providers,
+                    "anilist_air_date_request",
+                    return_value=response,
+                ),
+                patch.object(
+                    finder.time,
+                    "time",
+                    return_value=datetime(2026, 7, 23, 12).timestamp(),
+                ),
+            ):
+                report = finder.official_air_date_report(
+                    identity,
+                    1,
+                    Path(temp_dir) / "schedule.json",
+                    8,
+                    False,
+                    date(2026, 7, 23),
+                )
+        self.assertEqual(report["status"], "found")
+        self.assertTrue(report["is_current_new_anime"])
+        self.assertEqual(report["scan_since"], "2026-07-04")
+        self.assertEqual(report["scan_until"], "2026-07-11")
+        self.assertEqual(report["window_mode"], "post_airing_7_day")
+        self.assertTrue(report["recent_scan_eligible"])
+
+    def test_official_air_date_rejects_non_current_and_never_writes_state(self) -> None:
+        identity = finder.IdentityResolution(
+            "resolved",
+            finder.ResolvedAnime(
+                title="Finished Example",
+                anilist_id=123,
+                format="TV",
+            ),
+            None,
+            False,
+            "official",
+            ["state"],
+            [],
+            "state",
+        )
+        finished = {
+            "data": {
+                "Media": {
+                    "id": 123,
+                    "format": "TV",
+                    "status": "FINISHED",
+                    "startDate": {"year": 2026, "month": 7, "day": 4},
+                    "title": {"romaji": "Finished Example"},
+                    "synonyms": [],
+                },
+                "AiringSchedule": {
+                    "mediaId": 123,
+                    "episode": 4,
+                    "airingAt": 1784385000,
+                },
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = io.StringIO()
+            with (
+                patch.object(v2_workflow, "load_state", return_value={"version": 1, "shows": []}),
+                patch.object(v2_legacy_state, "sanitize_state_aliases", return_value=["repair"]),
+                patch.object(StateRepository, "commit") as save_state,
+                patch.object(v2_identity, "resolve_work_identity", return_value=identity),
+                patch.object(v2_providers, "anilist_media_request", return_value=finished),
+                patch.object(v2_providers, "anilist_air_date_request", return_value=finished),
+                patch.object(finder.time, "time", return_value=1784810000),
+                contextlib.redirect_stdout(output),
+            ):
+                code = finder.main(
+                    [
+                        "Finished Example",
+                        "--state",
+                        str(Path(temp_dir) / "state.json"),
+                        "--official-air-date",
+                        "--episode",
+                        "4",
+                        "--schedule-cache",
+                        str(Path(temp_dir) / "schedule.json"),
+                        "--json",
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "not_current_airing")
+        self.assertEqual(payload["state_update"], "none")
+        save_state.assert_not_called()
+
+    def test_official_air_date_rejects_old_long_running_anime(self) -> None:
+        identity = finder.IdentityResolution(
+            "resolved",
+            finder.ResolvedAnime(
+                title="Old Long Runner",
+                anilist_id=999,
+                format="TV",
+            ),
+            None,
+            False,
+            "official",
+            ["anilist"],
+            [],
+            "anilist",
+        )
+        response = {
+            "data": {
+                "Media": {
+                    "id": 999,
+                    "format": "TV",
+                    "status": "RELEASING",
+                    "startDate": {"year": 1999, "month": 10, "day": 20},
+                    "title": {"romaji": "Old Long Runner"},
+                    "synonyms": [],
+                },
+                "AiringSchedule": {
+                    "mediaId": 999,
+                    "episode": 1,
+                    "airingAt": 940320000,
+                },
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(
+                v2_providers,
+                "anilist_air_date_request",
+                return_value=response,
+            ):
+                report = finder.official_air_date_report(
+                    identity,
+                    1,
+                    Path(temp_dir) / "schedule.json",
+                    8,
+                    False,
+                    date(2026, 7, 23),
+                )
+        self.assertEqual(report["status"], "not_current_new_anime")
+        self.assertTrue(report["is_current_airing"])
+        self.assertFalse(report["is_current_new_anime"])
+        self.assertFalse(report["recent_scan_eligible"])
+
+    def test_missing_old_episode_schedule_still_classifies_long_runner(self) -> None:
+        identity = finder.IdentityResolution(
+            "resolved",
+            finder.ResolvedAnime(
+                title="Old Long Runner",
+                anilist_id=999,
+                format="TV",
+            ),
+            None,
+            False,
+            "official",
+            ["anilist"],
+            [],
+            "anilist",
+        )
+        media_response = {
+            "data": {
+                "Media": {
+                    "id": 999,
+                    "format": "TV",
+                    "status": "RELEASING",
+                    "startDate": {"year": 1999, "month": 10, "day": 20},
+                    "title": {"romaji": "Old Long Runner"},
+                    "synonyms": [],
+                }
+            }
+        }
+        missing_schedule = finder.urllib.error.HTTPError(
+            "https://graphql.anilist.co",
+            404,
+            "Not Found",
+            None,
+            None,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(
+                    v2_providers,
+                    "anilist_air_date_request",
+                    side_effect=missing_schedule,
+                ),
+                patch.object(
+                    v2_providers,
+                    "anilist_media_request",
+                    return_value=media_response,
+                ) as media_request,
+            ):
+                report = finder.official_air_date_report(
+                    identity,
+                    1,
+                    Path(temp_dir) / "schedule.json",
+                    8,
+                    False,
+                    date(2026, 7, 23),
+                )
+        self.assertEqual(report["status"], "not_current_new_anime")
+        self.assertFalse(report["recent_scan_eligible"])
+        media_request.assert_called_once_with(999, 8)
+
+    def test_official_air_date_resolves_missing_anilist_id_from_tracked_aliases(self) -> None:
+        state_show = {
+            "title": "Example",
+            "search_titles": ["Example Romaji"],
+        }
+        identity = finder.IdentityResolution(
+            "resolved",
+            finder.ResolvedAnime(
+                title="Example",
+                search_titles=["Example Romaji"],
+                current=True,
+                format="TV",
+            ),
+            state_show,
+            True,
+            "full_title",
+            ["state"],
+            [],
+            "state_hit",
+        )
+        fresh = finder.ResolvedAnime(
+            title="Example Romaji",
+            aliases=["Example"],
+            search_titles=["Example Romaji"],
+            current=True,
+            format="TV",
+            status="RELEASING",
+            anilist_id=456,
+            source="anilist",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "schedule.json"
+            with patch.object(
+                v2_providers,
+                "resolve_title",
+                return_value=("resolved", fresh),
+            ) as resolve:
+                completed = finder.ensure_official_air_identity(
+                    identity,
+                    cache,
+                    8,
+                    False,
+                    date(2026, 7, 23),
+                )
+        self.assertEqual(completed.status, "resolved")
+        self.assertEqual(completed.resolved.anilist_id, 456)
+        self.assertEqual(completed.resolver, "official_air_date_anilist")
+        self.assertIs(completed.state_show, state_show)
+        resolve.assert_called_once_with("Example Romaji", 8, date(2026, 7, 23))
+
+    def test_recent_scan_finds_diacritic_release_from_official_air_date(self) -> None:
+        args = search_args()
+        args.query = "穹庐下的魔女"
+        args.alias = ["Tenmaku no Jaadugar"]
+        args.season = "S01"
+        args.episode = 4
+        args.require_zh = True
+        args.want_zh = True
+        target = self.listing_html(
+            2134316,
+            "[ANi] Tenmaku no Jādūgar / 穹廬下的魔女 - 04 [1080P][CHT]",
+            1784390517,
+        )
+        old = self.listing_html(
+            2134000,
+            "[ANi] Other Show - 01",
+            1784217600,
+        )
+        with patch.object(
+            nyaa,
+            "fetch_listing_page",
+            side_effect=lambda *_args, **_kwargs: target + old,
+        ):
+            candidates, diagnostic, failures = core.collect_recent_candidates(
+                args,
+                date(2026, 7, 18),
+                today=date(2026, 7, 23),
+            )
+        self.assertEqual(failures, [])
+        self.assertEqual(diagnostic["status"], "complete")
+        self.assertTrue(diagnostic["cutoff_reached"])
+        self.assertIn("2134316", {nyaa.nyaa_id_from_url(item.url) for item in candidates})
+        matched = next(item for item in candidates if nyaa.nyaa_id_from_url(item.url) == "2134316")
+        self.assertEqual(matched.matched_queries, ["Tenmaku no Jaadugar"])
+
+    def test_recent_exact_episode_is_not_crowded_out_by_ordinary_rss_results(self) -> None:
+        args = search_args()
+        args.query = "穹庐下的魔女"
+        args.alias = ["Tenmaku no Jaadugar"]
+        args.season = None
+        args.episode = 4
+        args.recent_since = date(2026, 7, 18)
+        ordinary = [
+            self.nyaa_candidate(
+                f"[Group] Tenmaku no Jaadugar - {episode:02d} [1080p]",
+                "1.1 GiB",
+                2135000 + index,
+            )
+            for index, episode in enumerate(([1, 2] * 13))
+        ]
+        target = self.nyaa_candidate(
+            "[ANi] Tenmaku no Jādūgar / 穹廬下的魔女 - 04 [1080P][CHT]",
+            "1.2 GiB",
+            2134316,
+        )
+        recent_diagnostic = {
+            "status": "complete",
+            "since": "2026-07-18",
+            "until": "2026-07-23",
+            "category": "1_3",
+            "pages_fetched": 8,
+            "cutoff_reached": True,
+            "matched_count": 1,
+            "errors": [],
+        }
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=(ordinary, [], "fixture"),
+            ),
+            patch.object(
+                core,
+                "collect_recent_candidates",
+                return_value=([target], recent_diagnostic, []),
+            ),
+        ):
+            report = core.discover_release_candidates(args)
+        self.assertEqual(report["status"], "found")
+        self.assertEqual(
+            {item["nyaa_id"] for item in report["candidates"]},
+            {"2134316"},
+        )
+        self.assertTrue(
+            all(item["identity"]["episode"] == "4" for item in report["candidates"])
+        )
+
+    def test_recent_scan_reports_incomplete_when_page_cap_does_not_reach_cutoff(self) -> None:
+        args = search_args()
+        args.query = "Example"
+        args.alias = []
+        args.season = "S01"
+        args.episode = 1
+        current = self.listing_html(
+            2136000,
+            "[Group] Example S01E01 [1080p]",
+            1784822400,
+        )
+        with patch.object(nyaa, "fetch_listing_page", return_value=current) as fetch:
+            _, diagnostic, failures = core.collect_recent_candidates(
+                args,
+                date(2026, 7, 18),
+                today=date(2026, 7, 23),
+            )
+        self.assertEqual(failures, [])
+        self.assertEqual(diagnostic["status"], "incomplete")
+        self.assertFalse(diagnostic["cutoff_reached"])
+        self.assertEqual(diagnostic["pages_fetched"], core.MAX_RECENT_SCAN_PAGES)
+        self.assertEqual(fetch.call_count, core.MAX_RECENT_SCAN_PAGES)
+
+    def test_historical_air_window_keeps_only_first_seven_post_airing_days(self) -> None:
+        args = search_args()
+        args.query = "Example"
+        args.alias = []
+        args.season = "S01"
+        args.episode = 1
+        args.current_new_anime = True
+        in_window = self.listing_html(
+            1001,
+            "[Group] Example S01E01 [1080p]",
+            int(datetime(2026, 7, 6, 12).timestamp()),
+        )
+        too_late = self.listing_html(
+            1002,
+            "[Group] Example S01E01 Late Repack [1080p]",
+            int(datetime(2026, 7, 14, 12).timestamp()),
+        )
+        before_window = self.listing_html(
+            1000,
+            "[Group] Other Show S01E01 [1080p]",
+            int(datetime(2026, 7, 3, 12).timestamp()),
+        )
+        with patch.object(
+            nyaa,
+            "fetch_listing_page",
+            return_value=too_late + in_window + before_window,
+        ):
+            candidates, diagnostic, failures = core.collect_recent_candidates(
+                args,
+                date(2026, 7, 4),
+                until=date(2026, 7, 11),
+                today=date(2026, 7, 23),
+            )
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            {nyaa.nyaa_id_from_url(item.url) for item in candidates},
+            {"1001"},
+        )
+        self.assertEqual(diagnostic["since"], "2026-07-04")
+        self.assertEqual(diagnostic["until"], "2026-07-11")
+        self.assertEqual(diagnostic["window_days"], 7)
+        self.assertEqual(diagnostic["window_mode"], "post_airing_7_day")
+        self.assertTrue(diagnostic["current_new_anime"])
+
+    def test_historical_recent_since_requires_official_current_new_anime_gate(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = nyaa.main(
+                [
+                    "Example",
+                    "--episode",
+                    "1",
+                    "--discover",
+                    "--recent-since",
+                    "2026-07-04",
+                    "--recent-until",
+                    "2026-07-11",
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("--current-new-anime", stderr.getvalue())
+
+    def test_historical_recent_window_accepts_exact_seven_day_official_range(self) -> None:
+        payload = {
+            "status": "found",
+            "queries": ["Example"],
+            "candidates": [],
+            "failures": [],
+        }
+        output = io.StringIO()
+        with (
+            patch.object(core, "discover_release_candidates", return_value=payload) as discover,
+            contextlib.redirect_stdout(output),
+        ):
+            code = nyaa.main(
+                [
+                    "Example",
+                    "--episode",
+                    "1",
+                    "--discover",
+                    "--recent-since",
+                    "2026-07-04",
+                    "--recent-until",
+                    "2026-07-11",
+                    "--current-new-anime",
+                ]
+            )
+        self.assertEqual(code, 0)
+        called_args = discover.call_args.args[0]
+        self.assertEqual(called_args.recent_since, date(2026, 7, 4))
+        self.assertEqual(called_args.recent_until, date(2026, 7, 11))
+        self.assertTrue(called_args.current_new_anime)
+
+    def test_direct_candidate_id_fetches_detail_page_and_reuses_chinese_check(self) -> None:
+        args = search_args()
+        args.query = "穹庐下的魔女"
+        args.alias = ["Tenmaku no Jaadugar"]
+        args.season = None
+        args.episode = 4
+        args.candidate_id = ["2134316"]
+        args.require_zh = True
+        args.want_zh = True
+        args.inspect_details = True
+        args.detail_limit = 5
+        args.include_magnets = True
+        page = self.detail_html(
+            2134316,
+            "[ANi] Tenmaku no Jādūgar / 穹廬下的魔女 - 04 [1080P][Baha][CHT]",
+        )
+        with (
+            patch.object(core, "collect_raw_candidates", return_value=([], [], "fixture")),
+            patch.object(nyaa, "fetch_nyaa_detail_page", return_value=page) as fetch_page,
+            patch.object(nyaa, "fetch_nyaa_detail_text") as fetch_text,
+        ):
+            report = core.search_release_report(
+                args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=4,
+            )
+        self.assertEqual(report.status, "found")
+        selected = report.selected[0].candidate
+        self.assertEqual(selected.size, "1.2 GiB")
+        self.assertTrue(selected.detail_chinese_confirmed)
+        self.assertEqual(selected.detail_subtitle_signal, "detail-page: CHT")
+        self.assertTrue(selected.magnet.startswith("magnet:?"))
+        fetch_page.assert_called_once()
+        fetch_text.assert_not_called()
+
+    def test_direct_candidate_id_rejects_unrelated_detail_title(self) -> None:
+        args = search_args()
+        args.query = "Tenmaku no Jaadugar"
+        args.alias = []
+        args.season = None
+        args.episode = 4
+        args.candidate_id = ["999"]
+        page = self.detail_html(999, "[Group] Completely Different Show - 04")
+        with (
+            patch.object(core, "collect_raw_candidates", return_value=([], [], "fixture")),
+            patch.object(nyaa, "fetch_nyaa_detail_page", return_value=page),
+        ):
+            report = core.search_release_report(
+                args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=4,
+            )
+        self.assertEqual(report.status, "candidate_id_title_mismatch")
+        self.assertEqual(report.selected, [])
+
+    def test_read_only_probe_returns_tracked_next_episode_without_writing(self) -> None:
+        state = {
+            "version": 1,
+            "shows": [
+                {
+                    "title": "二十世纪电气目录",
+                    "aliases": ["Sparks of Tomorrow"],
+                    "season": "S01",
+                    "watched_episode": 3,
+                    "latest_known_episode": 3,
+                    "next_episode": 4,
+                    "airing": True,
+                    "status": "airing",
+                    "search_titles": ["20th Century Electricity Catalogue"],
+                    "verified_search_titles": ["Sparks of Tomorrow"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "airing.json"
+            state_path.write_text(
+                json.dumps(state, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            before = state_path.read_bytes()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                return_code = watch_state.main(
+                    ["--state", str(state_path), "probe", "二十世纪电气目录"]
+                )
+            after = state_path.read_bytes()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(return_code, 0)
+        self.assertTrue(payload["tracked"])
+        self.assertEqual(payload["watched_episode"], 3)
+        self.assertEqual(payload["latest_known_episode"], 3)
+        self.assertEqual(payload["next_episode"], 4)
+        self.assertEqual(payload["verified_search_titles"], ["Sparks of Tomorrow"])
+        self.assertEqual(before, after)
+
+    def test_probe_exposes_chinese_variants_without_japanese_alias(self) -> None:
+        show = {
+            "title": "穹庐下的魔女",
+            "aliases": [
+                "天幕のジャードゥーガル",
+                "穹廬下的魔女",
+                "Tenmaku no Jaadugar",
+            ],
+        }
+        payload = watch_state.probe_payload(show)
+        self.assertEqual(
+            payload["strict_zh_title_variants"],
+            ["穹庐下的魔女", "穹廬下的魔女"],
+        )
+
+    def test_record_found_marks_tracked_episode_watched_and_advances_next(self) -> None:
+        state = {
+            "version": 1,
+            "shows": [
+                {
+                    "title": "Kore Kaite Shine",
+                    "aliases": ["描绘直至生命尽头"],
+                    "season": "S01",
+                    "watched_episode": 3,
+                    "latest_known_episode": 3,
+                    "next_episode": 4,
+                    "airing": True,
+                    "status": "airing",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "airing.json"
+            state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                return_code = watch_state.main(
+                    [
+                        "--state",
+                        str(state_path),
+                        "record-found",
+                        "描绘直至生命尽头",
+                        "--episode",
+                        "4",
+                    ]
+                )
+            saved = watch_state.load_state(state_path)["shows"][0]
+        payload = json.loads(output.getvalue())
+        self.assertEqual(return_code, 0)
+        self.assertEqual(payload["status"], "recorded")
+        self.assertEqual(
+            (
+                saved["watched_episode"],
+                saved["latest_known_episode"],
+                saved["next_episode"],
+            ),
+            (4, 4, 5),
+        )
+        self.assertIn("treated as watched", saved["notes"])
+
+    def test_record_found_is_monotonic_and_does_not_create_untracked_show(self) -> None:
+        state = {
+            "version": 1,
+            "shows": [
+                {
+                    "title": "Kore Kaite Shine",
+                    "aliases": ["描绘直至生命尽头"],
+                    "watched_episode": 4,
+                    "latest_known_episode": 4,
+                    "next_episode": 5,
+                    "airing": True,
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "airing.json"
+            state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            before_older = state_path.read_bytes()
+            older_output = io.StringIO()
+            with contextlib.redirect_stdout(older_output):
+                return_code = watch_state.main(
+                    [
+                        "--state",
+                        str(state_path),
+                        "record-found",
+                        "描绘直至生命尽头",
+                        "--episode",
+                        "3",
+                    ]
+                )
+            after_older = state_path.read_bytes()
+            saved = watch_state.load_state(state_path)
+            before_untracked = state_path.read_bytes()
+            with contextlib.redirect_stdout(io.StringIO()):
+                untracked_code = watch_state.main(
+                    [
+                        "--state",
+                        str(state_path),
+                        "record-found",
+                        "Untracked Show",
+                        "--episode",
+                        "1",
+                    ]
+                )
+            after_untracked = state_path.read_bytes()
+        self.assertEqual(return_code, 0)
+        self.assertEqual(json.loads(older_output.getvalue())["status"], "unchanged")
+        self.assertEqual(before_older, after_older)
+        self.assertEqual(
+            (
+                saved["shows"][0]["watched_episode"],
+                saved["shows"][0]["latest_known_episode"],
+                saved["shows"][0]["next_episode"],
+            ),
+            (4, 4, 5),
+        )
+        self.assertEqual(untracked_code, 1)
+        self.assertEqual(before_untracked, after_untracked)
+
+    def test_default_one_gib_floor_rejects_sub_one_gib_release(self) -> None:
+        args = search_args()
+        args.query = "Sparks of Tomorrow"
+        args.season = "S01"
+        args.episode = 3
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 1.0
+        too_small = self.nyaa_candidate(
+            "[Group] Sparks of Tomorrow S01E03 [1080p][CHS]",
+            "677.8 MiB",
+            3001,
+            seeders=142,
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([too_small], [], "fixture"),
+        ):
+            report = core.search_release_report(
+                args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=3,
+            )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.selected, [])
+        self.assertEqual(report.diagnostics["below_min_count"], 1)
+
+    def test_cli_rejects_sub_one_gib_floor_without_explicit_override(self) -> None:
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            return_code = nyaa.main(
+                ["Example", "--min-gib-per-episode", "0", "--report"]
+            )
+        self.assertEqual(return_code, 2)
+        self.assertIn("--allow-sub-1g", errors.getvalue())
+
+    def test_cjk_only_discovery_is_explicitly_provisional(self) -> None:
+        args = search_args()
+        args.query = "向日葵马戏团"
+        args.alias = []
+        args.discover = True
+        episode_one = self.nyaa_candidate(
+            "[Group] Grow Up Show - Himawari no Circus-dan - 01 [简体]",
+            "0.6 GiB",
+            2130661,
+            seeders=34,
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([episode_one], [], "fixture"),
+        ):
+            report = core.discover_release_candidates(args)
+        self.assertEqual(report["status"], "found")
+        self.assertEqual(report["query_coverage"], "cjk_only_provisional")
+        self.assertEqual(report["candidates"][0]["identity"]["episode"], "1")
+
+    def test_mushoku_broad_discovery_verifies_2135067_from_shared_cache(self) -> None:
+        malformed = "ushoku Tensei: Jobless Reincarnation Season 3"
+        complete = "Mushoku Tensei III: Isekai Ittara Honki Dasu"
+        queries = finder.select_search_names(
+            malformed,
+            [complete],
+            2,
+            [malformed, complete],
+        )
+        self.assertIn("Mushoku Tensei", queries)
+        release_title = (
+            "[Feibanyama] Mushoku Tensei Jobless Reincarnation S03E04 "
+            "[IQIYI WebRip 2160p NVENC AAC Multi-Subs]"
+        )
+        populated_listing = self.listing_html(
+            2135067,
+            release_title,
+            1784390517,
+            size="1.9 GiB",
+        )
+        unrelated_listing = self.listing_html(
+            2135000,
+            "[Group] Other Show S01E04 [1080p]",
+            1784390516,
+            size="1.5 GiB",
+        )
+
+        def listing_for(query: str, *_args: object, **_kwargs: object) -> str:
+            return populated_listing if query == "Mushoku Tensei" else unrelated_listing
+
+        args = search_args()
+        args.query = queries[0]
+        args.alias = queries[1:]
+        args.season = "S03"
+        args.episode = 4
+        args.discover = True
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 1.0
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "rss.json"
+            with patch.object(
+                nyaa,
+                "fetch_search_listing_page",
+                side_effect=listing_for,
+            ) as fetch:
+                discovery = core.discover_release_candidates(args, cache_path=cache_path)
+                self.assertIn(
+                    "2135067", {entry["nyaa_id"] for entry in discovery["candidates"]}
+                )
+                self.assertEqual(
+                    discovery["candidate_source"],
+                    "nyaa_html_size_desc",
+                )
+                fetch.reset_mock()
+                args.discover = False
+                args.candidate_id = ["2135067"]
+                args.require_zh = True
+                args.want_zh = True
+                args.inspect_details = True
+                args.detail_limit = 5
+                args.include_magnets = True
+                with patch.object(
+                    core.DEFAULT_NYAA_CLIENT,
+                    "get",
+                    return_value=detail_for_candidate(self.nyaa_candidate(
+                        release_title,'1.9 GiB',2135067,seeders=10),
+                        "Subtitle languages: Simplified Chinese, Traditional Chinese"),
+                ):
+                    verified = core.search_release_report(
+                        args,
+                        core.SearchIntent.SPECIFIC_EPISODE,
+                        requested_episode=4,
+                        cache_path=cache_path,
+                    )
+                fetch.assert_not_called()
+        self.assertEqual(verified.status, "found")
+        payload = verified.as_dict(explain=True)
+        self.assertEqual(payload["selected"][0]["nyaa_id"], "2135067")
+        self.assertTrue(payload["selected"][0]["detail_chinese_confirmed"])
+        self.assertTrue(payload["selected"][0]["magnet"].startswith("magnet:?"))
+
+    def test_representative_shortlist_beats_newest_small_release(self) -> None:
+        args = search_args()
+        args.query = "Grow Up Show"
+        args.alias = ["Grow Up Show: Sunflower Circus"]
+        args.season = "S01"
+        args.episode = 3
+        args.discover = True
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 0.0
+        args.require_zh = True
+        args.want_zh = True
+        args.inspect_details = True
+        args.detail_limit = 5
+        args.include_magnets = True
+        small_newest = self.nyaa_candidate(
+            "[Gecko] Grow Up Show S01E03 [1080p][M-SUB]",
+            "707 MiB",
+            2135586,
+            seeders=5,
+        )
+        small_newest.published = "2026-07-21"
+        balanced_older = self.nyaa_candidate(
+            "[VARYG] Grow Up Show S01E03 [1080p][Multi-Subs]",
+            "1.4 GiB",
+            2134348,
+            seeders=41,
+        )
+        balanced_older.published = "2026-07-18"
+        releases = [small_newest, balanced_older]
+
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=(releases, [], "fixture"),
+        ):
+            discovery = core.discover_release_candidates(args)
+        self.assertEqual(discovery["candidates"][0]["nyaa_id"], "2134348")
+        self.assertEqual(
+            discovery["ordering"],
+            "nyaa_server_size_desc_then_local_size_desc_not_quality_rank",
+        )
+
+        args.discover = False
+        args.candidate_id = ["2135586", "2134348"]
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=(releases, [], "fixture"),
+            ),
+            patch.object(
+                core.DEFAULT_NYAA_CLIENT,
+                "get",
+                side_effect=lambda rid,**_: detail_for_candidate(
+                    next(r for r in releases if nyaa.nyaa_id_from_url(r.url)==str(rid)),
+                    "Subtitle languages: Simplified Chinese"),
+            ) as details,
+        ):
+            report = core.search_release_report(
+                args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=3,
+            )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.url, balanced_older.url)
+        self.assertEqual(details.call_count, 2)
+        self.assertEqual({c.args[0] for c in details.call_args_list}, {'2135586','2134348'})
+
+    def test_candidate_id_rejects_multisub_only_and_hides_magnet(self) -> None:
+        args = search_args()
+        args.query = "Mushoku Tensei"
+        args.season = "S03"
+        args.episode = 4
+        args.candidate_id = ["2135076"]
+        args.require_zh = True
+        args.want_zh = True
+        args.inspect_details = True
+        args.detail_limit = 5
+        args.include_magnets = True
+        release = self.nyaa_candidate(
+            "[Erai-raws] Mushoku Tensei III S03E04 [1080p][MultiSub]",
+            "1.4 GiB",
+            2135076,
+        )
+        with (
+            patch.object(
+                core,
+                "collect_raw_candidates",
+                return_value=([release], [], "fixture"),
+            ),
+            patch.object(
+                core.DEFAULT_NYAA_CLIENT,
+                "get",
+                return_value=detail_for_candidate(release,"Subtitle languages: English, German, Russian; MultiSub"),
+            ),
+        ):
+            report = core.search_release_report(
+                args,
+                core.SearchIntent.SPECIFIC_EPISODE,
+                requested_episode=4,
+            )
+        self.assertEqual(report.status, "subtitle_unqualified")
+        self.assertNotIn("magnet:?", json.dumps(report.as_dict(explain=True)))
+
+    def test_ghost_in_the_shell_2026_is_not_mixed_with_sac_or_movie(self) -> None:
+        args = search_args()
+        args.query = "Ghost in the Shell"
+        args.season = "S01"
+        current = self.nyaa_candidate(
+            "[A] Ghost in the Shell 2026 S01E04 [1080p]", "1.5 GiB", 201
+        )
+        sac = self.nyaa_candidate(
+            "[B] Ghost in the Shell Stand Alone Complex S02E26 [1080p]",
+            "1.5 GiB",
+            202,
+        )
+        movie = self.nyaa_candidate(
+            "[C] Ghost in the Shell 1995 Movie [1080p]", "8.0 GiB", 203
+        )
+        context = core.SearchContext(
+            canonical_title="Ghost in the Shell 2026",
+            aliases=("The Ghost in the Shell 2026",),
+            related_titles=(
+                "Ghost in the Shell Stand Alone Complex",
+                "Ghost in the Shell 1995 Movie",
+            ),
+            resolved_season=1,
+        )
+        with patch.object(
+            core,
+            "collect_raw_candidates",
+            return_value=([current, sac, movie], [], "fixture"),
+        ):
+            report = core.search_release_report(
+                args,
+                core.SearchIntent.LATEST_REGULAR,
+                context=context,
+            )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.url, current.url)
+        self.assertEqual(report.diagnostics["related_work_count"], 2)
+
+    def test_low_level_discovery_does_not_call_metadata_or_tracking_state(self) -> None:
+        payload = {
+            "status": "no_rss_candidates",
+            "queries": ["Example"],
+            "candidates": [],
+            "failures": [],
+            "cache": "fixture",
+        }
+        output = io.StringIO()
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(core, "discover_release_candidates", return_value=payload),
+            patch.object(v2_identity, "resolve_work_identity") as metadata,
+            patch.object(StateRepository, "commit") as save_state,
+            contextlib.redirect_stdout(output),
+        ):
+            return_code = nyaa.main(
+                ["Example", "--discover", "--cache", str(Path(temp_dir) / "rss.json")]
+            )
+        self.assertEqual(return_code, 4)
+        self.assertEqual(json.loads(output.getvalue())["queries"], ["Example"])
+        metadata.assert_not_called()
+        save_state.assert_not_called()
+
+
+class HighLevelStateTests(unittest.TestCase):
+    def test_main_reports_above_range_availability_without_candidate_details(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example",
+            search_titles=["Example"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            status="FINISHED",
+        )
+        oversized = candidate("[Group] Example S01E01 Oversized", "4.1 GiB", 9)
+        oversized.magnet = "magnet:?xt=urn:btih:oversized"
+        oversized_item = core.ClassifiedCandidate(
+            oversized,
+            parse_release_identity(oversized.title),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="release_unqualified",
+            selected=[],
+            choices=[oversized_item],
+            diagnostics={
+                "above_max_count": 1,
+                "below_min_count": 1,
+                "size_policy": {
+                    "source": "explicit",
+                    "hard_min_gib": 1.0,
+                    "hard_max_gib": 2.0,
+                },
+            },
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example",
+                        "--season",
+                        "S01",
+                        "--episode",
+                        "1",
+                        "--min-gib-per-episode",
+                        "1",
+                        "--max-gib-per-episode",
+                        "2",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(
+            payload["reply_text"],
+            "《Example》 S01E01当前区间内没有合格资源，但有高于该区间的资源可选。",
+        )
+        self.assertNotIn("Oversized", payload["reply_text"])
+        self.assertNotIn("4.1 GiB", payload["reply_text"])
+        self.assertNotIn("magnet:?", payload["reply_text"])
+
+    def test_unique_tracked_title_uses_state_before_identity_resolvers(self) -> None:
+        no_release = core.ReleaseSearchReport(
+            intent=core.SearchIntent.NEXT_TRACKED,
+            requested_season=1,
+            requested_episode=2,
+            status="no_nyaa_release_for_target",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 0, "size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "\u653b\u58f3\u673a\u52a8\u961f",
+                            "aliases": ["The Ghost in the Shell"],
+                            "search_titles": [
+                                "THE GHOST IN THE SHELL 2026",
+                                "THE GHOST IN THE SHELL",
+                            ],
+                            "season": "S01",
+                            "latest_known_episode": 1,
+                            "next_episode": 2,
+                            "airing": True,
+                            "format": "TV",
+                            "anilist_id": 177699,
+                            "mainline_scope": "single",
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_bangumi_title") as bangumi,
+                patch.object(v2_providers, "resolve_title") as anilist,
+                patch.object(
+                    v2_metadata,
+                    "hydrate_airing_metadata",
+                    side_effect=lambda resolved, *_: (resolved, "fixture"),
+                ),
+                patch.object(v2_workflow, "search_release_report", return_value=no_release) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "\u653b\u58f3\u673a\u52a8\u961f",
+                        "--json",
+                        "--no-state-update",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+
+        self.assertEqual(payload["identity_status"], "resolved")
+        self.assertEqual(payload["resolver"], "state_hit")
+        self.assertEqual(payload["target_episode"], 2)
+        self.assertEqual(search.call_args.kwargs["intent"], core.SearchIntent.NEXT_TRACKED)
+        self.assertEqual(search.call_args.kwargs["requested_episode"], 2)
+        context = search.call_args.kwargs["context"]
+        self.assertEqual(context.search_titles[0], "THE GHOST IN THE SHELL 2026")
+        bangumi.assert_not_called()
+        anilist.assert_not_called()
+
+    def test_auto_batch_returns_each_title_with_complete_magnet_reply(self) -> None:
+        def found_report(title: str, episode: int, magnet: str) -> core.ReleaseSearchReport:
+            release = candidate(f"[Group] {title} S01E{episode:02d} [1080p]", "1.4 GiB", 20)
+            release.magnet = magnet
+            release.matched_queries = [title]
+            item = core.ClassifiedCandidate(
+                release,
+                parse_release_identity(release.title),
+                "match",
+                effective_season=1,
+                season_source="title",
+            )
+            return core.ReleaseSearchReport(
+                intent=core.SearchIntent.NEXT_TRACKED,
+                requested_season=1,
+                requested_episode=episode,
+                status="found",
+                selected=[item],
+                choices=[],
+                diagnostics={"raw_count": 1, "size_policy": {}},
+                failures=[],
+                cache="miss",
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973",
+                            "aliases": [],
+                            "search_titles": ["Tenmaku no Jaadugar"],
+                            "verified_search_titles": ["Tenmaku no Jaadugar"],
+                            "season": "S01",
+                            "next_episode": 3,
+                            "airing": True,
+                        },
+                        {
+                            "title": "\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+                            "aliases": [],
+                            "search_titles": ["Grow Up Show"],
+                            "verified_search_titles": ["Grow Up Show"],
+                            "season": "S01",
+                            "next_episode": 2,
+                            "airing": True,
+                        },
+                    ],
+                },
+            )
+            output = io.StringIO()
+            reports = [
+                found_report("Tenmaku no Jaadugar", 3, "magnet:?xt=urn:btih:f2902b9eaa13bacf8127a623aea6287d51b4b715"),
+                found_report("Grow Up Show", 2, "magnet:?xt=urn:btih:a678a63d6add51c38f698c580c77287215c4b5e5"),
+            ]
+            with (
+                patch.object(v2_workflow, "search_release_report", side_effect=reports) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "\u7a79\u5e90\u4e0b\u7684\u9b54\u5973\u548c\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-web-resolve",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "batch")
+        self.assertEqual(len(payload["results"]), 2)
+        self.assertIn("magnet:?xt=urn:btih:f2902b9eaa13bacf8127a623aea6287d51b4b715", payload["reply_text"])
+        self.assertIn("magnet:?xt=urn:btih:a678a63d6add51c38f698c580c77287215c4b5e5", payload["reply_text"])
+        self.assertTrue(payload["output_contract"]["ready"])
+        self.assertEqual([call.args[0].query for call in search.call_args_list], ["Tenmaku no Jaadugar", "Grow Up Show"])
+
+    def test_missing_requested_magnet_is_output_incomplete(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example Anime",
+            search_titles=["Example Anime"],
+            season="S01",
+            source="anilist",
+        )
+        release = candidate("[Group] Example Anime S01E01 [1080p]", "1.4 GiB", 10)
+        item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+            effective_season=1,
+            season_source="title",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1, "size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--episode",
+                        "1",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "output_incomplete")
+        self.assertEqual(payload["output_contract"]["missing_fields"], ["magnet"])
+        self.assertIn("缺少必要字段", payload["reply_text"])
+
+    def test_strict_zh_failure_does_not_advance_tracked_progress(self) -> None:
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=3,
+            status="subtitle_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 2, "size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "穹庐下的魔女",
+                            "aliases": ["Tenmaku no Jaadugar"],
+                            "search_titles": ["Tenmaku no Jaadugar"],
+                            "season": "S01",
+                            "latest_known_episode": 2,
+                            "next_episode": 3,
+                            "airing": True,
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "穹庐下的魔女",
+                        "--episode",
+                        "3",
+                        "--require-zh",
+                        "--release-group-hint",
+                        "FixtureGroup",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-web-resolve",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            saved = finder.load_state(state_path)["shows"][0]
+        payload = json.loads(output.getvalue())
+        search_args_value = search.call_args.args[0]
+        self.assertEqual(payload["status"], "subtitle_unqualified")
+        self.assertIn("未确认带有中文字幕", payload["reply_text"])
+        self.assertEqual(payload["state_update"], "tracked_waiting")
+        self.assertEqual((saved["latest_known_episode"], saved["next_episode"]), (2, 3))
+        self.assertTrue(search_args_value.require_zh)
+        self.assertTrue(search_args_value.inspect_details)
+        self.assertEqual(search_args_value.prefer_group, ["FixtureGroup"])
+
+    def test_chinese_state_without_search_titles_is_enriched_before_nyaa(self) -> None:
+        bangumi = finder.ResolvedAnime(
+            title="Grow Up Show: Himawari no Circus-dan",
+            aliases=["\u5411\u65e5\u8475\u9a6c\u620f\u56e2"],
+            search_titles=["Grow Up Show: Himawari no Circus-dan", "Grow Up Show Sunflower Circus"],
+            season="S01",
+            current=True,
+            trackable=True,
+            source="bangumi",
+            format="TV",
+            status="RELEASING",
+            bangumi_id=570583,
+            anilist_id=999,
+            evidence=(from_raw('bangumi', {'id':570583, 'type':2, 'platform':'TV',
+                'name':'Grow Up Show: Himawari no Circus-dan', 'name_cn':'向日葵马戏团'}),),
+        )
+        selected_candidate = candidate(
+            "[Erai-raws] Grow Up Show: Himawari no Circus-dan - 02 [1080p]",
+            "1.4 GiB",
+            20,
+        )
+        selected_candidate.magnet = "magnet:?xt=urn:btih:" + ("c" * 40)
+        selected_candidate.matched_queries = ["Grow Up Show Sunflower Circus"]
+        item = core.ClassifiedCandidate(
+            selected_candidate,
+            parse_release_identity(selected_candidate.title),
+            "match",
+            effective_season=1,
+            season_source="single_mainline",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.NEXT_TRACKED,
+            requested_season=1,
+            requested_episode=2,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1, "size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+                            "aliases": [],
+                            "season": "S01",
+                            "next_episode": 2,
+                            "airing": True,
+                        },
+                        {
+                            "title": "Grow Up Show: Himawari no Circus-dan",
+                            "aliases": [],
+                            "season": "S01",
+                            "next_episode": 2,
+                            "airing": True,
+                            "anilist_id": 999,
+                        },
+                    ],
+                },
+            )
+            output = io.StringIO()
+            failed_anilist = finder.ResolvedAnime(title="fixture", source="anilist unavailable")
+            with (
+                patch.object(v2_providers, "resolve_bangumi_title", return_value=("resolved", bangumi)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolver_failed", failed_anilist)),
+                patch.object(v2_metadata, "hydrate_airing_metadata", return_value=(bangumi, "unavailable")),
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+            saved_state = finder.load_state(state_path)
+            saved = saved_state["shows"][0]
+        search_args = search.call_args.args[0]
+        self.assertEqual(search_args.query, "Grow Up Show: Himawari no Circus-dan")
+        self.assertNotIn("\u5411\u65e5\u8475\u9a6c\u620f\u56e2", [search_args.query, *search_args.alias])
+        self.assertEqual(saved["search_titles"][0], "Grow Up Show Sunflower Circus")
+        self.assertEqual(saved["verified_search_titles"], ["Grow Up Show Sunflower Circus"])
+        self.assertEqual(saved["bangumi_id"], 570583)
+        self.assertEqual(len(saved_state["shows"]), 2)  # A shared provider ID never deduplicates local records.
+        self.assertEqual(saved_state["shows"][1]["title"], "Grow Up Show: Himawari no Circus-dan")
+        self.assertIn("Grow Up Show: Himawari no Circus-dan", saved["search_titles"])
+        self.assertEqual(payload["identity_sources"][:2], ["state", "bangumi"])
+
+    def test_authoritative_failure_requests_web_without_searching_chinese_nyaa(self) -> None:
+        failed = finder.ResolvedAnime(title="\u672a\u77e5\u4e2d\u6587\u756a", source="no result")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_bangumi_title", return_value=("resolver_failed", failed)),
+                patch.object(v2_providers, "resolve_title", return_value=("resolver_failed", failed)),
+                patch.object(v2_workflow, "search_release_report") as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "\u672a\u77e5\u4e2d\u6587\u756a",
+                        "--json",
+                        "--no-state-update",
+                        "--state",
+                        str(root / "state.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "needs_web_resolution")
+        self.assertEqual(payload["search_titles"], [])
+        search.assert_not_called()
+
+    def test_search_title_web_override_bypasses_incomplete_chinese_identity(self) -> None:
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=2,
+            status="no_nyaa_release_for_target",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 0},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_bangumi_title") as bangumi,
+                patch.object(v2_providers, "resolve_title") as anilist,
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "\u5411\u65e5\u8475\u9a6c\u620f\u56e2",
+                        "--episode",
+                        "2",
+                        "--search-title",
+                        "Grow Up Show: Himawari no Circus-dan",
+                        "--no-web-resolve",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(search.call_args.args[0].query, "Grow Up Show: Himawari no Circus-dan")
+        self.assertEqual(payload["status"], "no_nyaa_release_for_target")
+        self.assertIn("web", payload["identity_sources"])
+        bangumi.assert_not_called()
+        anilist.assert_not_called()
+
+    def test_unverified_no_rss_requests_one_web_title_retry(self) -> None:
+        no_rss = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=2,
+            status="no_rss_candidates",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 0},
+            failures=[],
+            cache="miss",
+        )
+        resolved = finder.ResolvedAnime(
+            title="Example Anime",
+            search_titles=["Example Anime"],
+            season="S01",
+            source="anilist",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=no_rss),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--episode",
+                        "2",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "needs_web_resolution")
+        self.assertEqual(payload["diagnostic"]["provisional_status"], "no_rss_candidates")
+
+    def test_verified_search_title_does_not_repeat_web_resolution(self) -> None:
+        no_rss = core.ReleaseSearchReport(
+            intent=core.SearchIntent.NEXT_TRACKED,
+            requested_season=1,
+            requested_episode=3,
+            status="no_rss_candidates",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 0},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "next_episode": 3,
+                            "airing": True,
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(v2_metadata, "hydrate_airing_metadata", side_effect=lambda resolved, *_: (resolved, "hit")),
+                patch.object(v2_workflow, "search_release_report", return_value=no_rss),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                    ]
+                )
+        self.assertEqual(json.loads(output.getvalue())["status"], "no_rss_candidates")
+
+    def test_single_mainline_result_advances_progress_and_persists_context(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Chainsmoker Cat",
+            aliases=["Yani Neko", "ヤニねこ"],
+            season="S01",
+            current=True,
+            trackable=True,
+            source="fixture",
+            format="TV",
+            status="RELEASING",
+            anilist_id=207141,
+            mainline_scope="single",
+            related_titles=["Yani Neko Mini"],
+        )
+        item = core.ClassifiedCandidate(
+            candidate("[shincaps] Yani Neko - 02 [1920x1080].ts", "4.1 GiB", 9),
+            parse_release_identity("[shincaps] Yani Neko - 02 [1920x1080].ts"),
+            "match",
+            effective_season=1,
+            season_source="single_mainline",
+            work_match="alias",
+        )
+        item.candidate.magnet = "magnet:?xt=urn:btih:" + ("d" * 40)
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=2,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={
+                "raw_count": 1,
+                "size_policy": {
+                    "source": "explicit",
+                    "hard_min_gib": 1.0,
+                    "hard_max_gib": None,
+                },
+            },
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Yani Neko",
+                        "--season",
+                        "S01",
+                        "--episode",
+                        "2",
+                        "--tier",
+                        "watch",
+                        "--min-gib-per-episode",
+                        "1",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+            saved = finder.load_state(state_path)["shows"][0]
+        context = search.call_args.kwargs["context"]
+        self.assertEqual(payload["selected"]["season_source"], "single_mainline")
+        self.assertEqual(saved["watched_episode"], 2)
+        self.assertEqual(saved["latest_known_episode"], 2)
+        self.assertEqual(saved["next_episode"], 3)
+        self.assertEqual(saved["mainline_scope"], "single")
+        self.assertIn("Yani Neko Mini", saved["related_titles"])
+        self.assertEqual(context.mainline_scope, "single")
+
+    def test_explicit_already_watched_episode_returns_without_rewriting_state(self) -> None:
+        item = core.ClassifiedCandidate(
+            candidate("[Group] Example Anime - 04 [1080p]", "1.4 GiB", 30),
+            parse_release_identity("[Group] Example Anime - 04 [1080p]"),
+            "match",
+        )
+        item.candidate.magnet = "magnet:?xt=urn:btih:8806d0a91bbb5b7a4e240bd2453682e52a899b88"
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=4,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 4,
+                            "latest_known_episode": 4,
+                            "next_episode": 5,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                        }
+                    ],
+                },
+            )
+            before = state_path.read_bytes()
+            output = io.StringIO()
+            with (
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--episode",
+                        "4",
+                        "--no-web-resolve",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            after = state_path.read_bytes()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["state_update"], "unchanged_already_watched")
+        self.assertEqual(before, after)
+
+    def test_unreviewed_enqueue_never_reaches_accepting_client(self) -> None:
+        release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
+        release.magnet = "magnet:?xt=urn:btih:" + ("a" * 40)
+        release.url = "https://nyaa.si/view/123"
+        item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=5,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 4,
+                            "latest_known_episode": 4,
+                            "next_episode": 5,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            profile = root / "qbit-profile"
+            backup = profile / "qBittorrent" / "BT_backup"
+            accepted = {
+                "status": "submitted_verified",
+                "ok": True,
+                "info_hash": "a" * 40,
+            }
+            with (
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "submit_magnet", return_value=accepted) as submit,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--episode",
+                        "5",
+                        "--no-web-resolve",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--enqueue-qbittorrent",
+                        "--qbittorrent-profile",
+                        str(profile),
+                        "--candidate-id", "123",
+                        "--qbittorrent-backup-dir",
+                        str(backup),
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+            saved = finder.load_state(state_path)["shows"][0]
+        self.assertEqual(payload['status'], 'reviewed_delivery_required')
+        self.assertEqual(saved['watched_episode'], 4)
+        submit.assert_not_called()
+
+    def test_enqueue_failure_does_not_advance_state(self) -> None:
+        release = candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30)
+        release.magnet = "magnet:?xt=urn:btih:" + ("b" * 40)
+        release.url = "https://nyaa.si/view/123"
+        item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=5,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 4,
+                            "latest_known_episode": 4,
+                            "next_episode": 5,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                        }
+                    ],
+                },
+            )
+            before = state_path.read_bytes()
+            output = io.StringIO()
+            with (
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                patch.object(
+                    v2_workflow,
+                    "submit_magnet",
+                    side_effect=finder.SubmissionError("fixture failure"),
+                ),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--episode",
+                        "5",
+                        "--no-web-resolve",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--enqueue-qbittorrent",
+                        "--candidate-id", "123",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            after = state_path.read_bytes()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload['status'], 'reviewed_delivery_required')
+        self.assertEqual(before, after)
+
+    def test_finished_total_requires_nyaa_discovery_for_latest_target(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example Season 4",
+            season="S04",
+            current=True,
+            trackable=True,
+            source="anilist",
+            status="FINISHED",
+            episodes=25,
+        )
+        target, source = finder.latest_regular_target(
+            resolved,
+            {
+                "watched_episode": 13,
+                "latest_known_episode": 13,
+                "next_episode": 14,
+            },
+        )
+        self.assertIsNone(target)
+        self.assertEqual(source, "nyaa_discovery_required")
+
+    def test_discovery_without_review_cannot_advance_new_episode(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example Season 4",
+            aliases=["Example 4th season"],
+            season="S04",
+            current=True,
+            trackable=True,
+            source="state",
+            status="RELEASING",
+            episodes=25,
+            duration_min=24,
+            anilist_id=123,
+        )
+        release = candidate("[Group] Example Season 4 - 14 [1080p]", "1.4 GiB", 30)
+        release.magnet = "magnet:?xt=urn:btih:c3499c2729730a7f807efb8676a92dcb6f8a3f8f"
+        release.url = "https://nyaa.si/view/123"
+        item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.LATEST_REGULAR,
+            requested_season=4,
+            requested_episode=None,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Season 4",
+                            "aliases": [],
+                            "search_titles": ["Example Season 4"],
+                            "season": "S04",
+                            "watched_episode": 13,
+                            "latest_known_episode": 13,
+                            "next_episode": 14,
+                            "airing": True,
+                            "status": "waiting",
+                            "format": "TV",
+                            "anilist_id": 123,
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(v2_metadata, "hydrate_airing_metadata", return_value=(resolved, "hit")),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                patch.object(
+                    v2_workflow,
+                    "submit_magnet",
+                    return_value={"status": "submitted_verified", "ok": True},
+                ),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Season 4",
+                        "--latest",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--enqueue-qbittorrent",
+                        "--candidate-id", "123",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+            saved = finder.load_state(state_path)["shows"][0]
+        self.assertEqual(payload['status'], 'reviewed_delivery_required')
+        self.assertEqual(saved['watched_episode'], 13)
+
+    def test_latest_discovery_failure_does_not_rewrite_tracked_state(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example Season 4",
+            season="S04",
+            current=True,
+            trackable=True,
+            source="state",
+            status="RELEASING",
+            episodes=25,
+            anilist_id=123,
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.LATEST_REGULAR,
+            requested_season=4,
+            requested_episode=None,
+            status="release_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Season 4",
+                            "aliases": [],
+                            "search_titles": ["Example Season 4"],
+                            "season": "S04",
+                            "watched_episode": 13,
+                            "latest_known_episode": 13,
+                            "next_episode": 14,
+                            "airing": True,
+                            "status": "waiting",
+                            "format": "TV",
+                            "anilist_id": 123,
+                        }
+                    ],
+                },
+            )
+            before = state_path.read_bytes()
+            output = io.StringIO()
+            with (
+                patch.object(v2_metadata, "hydrate_airing_metadata", return_value=(resolved, "hit")),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Season 4",
+                        "--latest",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+            after = state_path.read_bytes()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "release_unqualified")
+        self.assertEqual(payload["target_episode"], None)
+        self.assertEqual(payload["availability"]["state"], "release_unqualified")
+        self.assertEqual(payload["state_update"], "none")
+        self.assertEqual(before, after)
+
+    def test_latest_equal_to_watched_returns_without_rewriting_state(self) -> None:
+        scheduled = finder.ResolvedAnime(
+            title="Example Anime",
+            aliases=[],
+            search_titles=["Example Anime"],
+            verified_search_titles=["Example Anime"],
+            season="S01",
+            current=True,
+            trackable=True,
+            source="anilist",
+            format="TV",
+            status="RELEASING",
+            anilist_id=123,
+            next_airing_episode=5,
+            next_airing_at=int(time.time()) + 3600,
+        )
+        item = core.ClassifiedCandidate(
+            candidate("[Group] Example Anime - 04 [1080p]", "1.4 GiB", 30),
+            parse_release_identity("[Group] Example Anime - 04 [1080p]"),
+            "match",
+        )
+        item.candidate.magnet = "magnet:?xt=urn:btih:8806d0a91bbb5b7a4e240bd2453682e52a899b88"
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.LATEST_REGULAR,
+            requested_season=1,
+            requested_episode=4,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 4,
+                            "latest_known_episode": 4,
+                            "next_episode": 5,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                            "anilist_id": 123,
+                        }
+                    ],
+                },
+            )
+            before = state_path.read_bytes()
+            output = io.StringIO()
+            with (
+                patch.object(
+                    v2_metadata,
+                    "hydrate_airing_metadata",
+                    return_value=(scheduled, "hit"),
+                ),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                patch.object(v2_workflow, "submit_magnet") as submit_magnet,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--latest",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--enqueue-qbittorrent",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+            after = state_path.read_bytes()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "latest_already_handled")
+        self.assertEqual(payload["target_episode"], 4)
+        self.assertEqual(payload["state_update"], "unchanged_already_watched")
+        self.assertEqual(
+            payload["qbittorrent"],
+            {
+                "status": "not_attempted",
+                "ok": True,
+                "reason": "latest_already_handled",
+            },
+        )
+        self.assertEqual(
+            payload["progress"],
+            {
+                "before_episode": 4,
+                "after_episode": 4,
+                "latest_episode": 4,
+                "next_episode": 5,
+                "advanced": False,
+            },
+        )
+        self.assertIn("下一目标是 S01E05", payload["reply_text"])
+        self.assertIn("未调用 qBittorrent", payload["reply_text"])
+        submit_magnet.assert_not_called()
+        self.assertEqual(before, after)
+
+    def test_metadata_only_result_does_not_advance_progress(self) -> None:
+        item = core.ClassifiedCandidate(
+            candidate("[Group] Example Anime - 05 [1080p]", "1.4 GiB", 30),
+            parse_release_identity("[Group] Example Anime - 05 [1080p]"),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=5,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 4,
+                            "latest_known_episode": 4,
+                            "next_episode": 5,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                        }
+                    ],
+                },
+            )
+            before = state_path.read_bytes()
+            output = io.StringIO()
+            with (
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime",
+                        "--episode",
+                        "5",
+                        "--no-web-resolve",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            after = state_path.read_bytes()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["state_update"], "none")
+        self.assertEqual(payload["progress"]["before_episode"], 4)
+        self.assertEqual(payload["progress"]["after_episode"], 4)
+        self.assertFalse(payload["progress"]["advanced"])
+        self.assertEqual(before, after)
+
+    def test_legacy_retry_cannot_skip_review(self) -> None:
+        scheduled = finder.ResolvedAnime(
+            title="Example Anime",
+            aliases=[],
+            search_titles=["Example Anime"],
+            verified_search_titles=["Example Anime"],
+            season="S01",
+            current=True,
+            trackable=True,
+            source="anilist",
+            format="TV",
+            status="RELEASING",
+            anilist_id=123,
+            next_airing_episode=9,
+            next_airing_at=int(time.time()) + 3600,
+        )
+        release = candidate("[Group] Example Anime - 08 [1080p]", "1.4 GiB", 30)
+        release.magnet = "magnet:?xt=urn:btih:" + ("e" * 40)
+        release.url = "https://nyaa.si/view/123"
+        item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+        )
+        missing = core.ReleaseSearchReport(
+            intent=core.SearchIntent.LATEST_REGULAR,
+            requested_season=1,
+            requested_episode=8,
+            status="release_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        found = core.ReleaseSearchReport(
+            intent=core.SearchIntent.LATEST_REGULAR,
+            requested_season=1,
+            requested_episode=8,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        accepted = {
+            "status": "submitted_verified",
+            "ok": True,
+            "info_hash": "e" * 40,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 7,
+                            "latest_known_episode": 7,
+                            "next_episode": 8,
+                            "pending_download": {
+                                "episode": 7,
+                                "season": "S01",
+                                "info_hash": "d" * 40,
+                                "release_title": "[Old] Example Anime - 07 [1080p]",
+                            },
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                            "anilist_id": 123,
+                        }
+                    ],
+                },
+            )
+            argv = [
+                "Example Anime",
+                "--latest",
+                "--include-magnet",
+                "--legal-ok",
+                "--enqueue-qbittorrent",
+                "--candidate-id", "123",
+                "--json",
+                "--state",
+                str(state_path),
+                "--cache",
+                str(root / "raw.json"),
+                "--schedule-cache",
+                str(root / "schedule.json"),
+            ]
+            outputs = []
+            with (
+                patch.object(
+                    v2_metadata,
+                    "hydrate_airing_metadata",
+                    side_effect=lambda *_: (scheduled, "hit"),
+                ),
+                patch.object(
+                    v2_workflow,
+                    "search_release_report",
+                    side_effect=[missing, found, found],
+                ) as search,
+                patch.object(v2_workflow, "submit_magnet", return_value=accepted) as submit,
+            ):
+                for _ in range(3):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        finder.main(argv)
+                    outputs.append(json.loads(output.getvalue()))
+                    if len(outputs) == 1:
+                        after_failure = finder.load_state(state_path)["shows"][0]
+                    elif len(outputs) == 2:
+                        after_retry = finder.load_state(state_path)["shows"][0]
+
+        self.assertEqual(after_failure['watched_episode'], 7)
+        self.assertEqual(after_retry['watched_episode'], 7)
+        self.assertEqual(outputs[1]['status'], 'reviewed_delivery_required')
+        self.assertEqual(outputs[2]['status'], 'reviewed_delivery_required')
+        submit.assert_not_called()
+
+    def test_watch_never_silently_downgrades(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example",
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            status="FINISHED",
+        )
+        primary = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="release_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        fallback_item = core.ClassifiedCandidate(
+            candidate("[Group] Example S01E01 [1080p]", "1.4 GiB", 10),
+            parse_release_identity("[Group] Example S01E01 [1080p]"),
+            "match",
+        )
+        fallback = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="found",
+            selected=[fallback_item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="hit",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", side_effect=[primary, fallback]) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example",
+                        "--season",
+                        "S01",
+                        "--episode",
+                        "1",
+                        "--tier",
+                        "watch",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(search.call_args.args[0].tier, 'watch')
+        self.assertEqual(payload['status'], 'release_unqualified')
+        self.assertIsNone(payload['quality']['fallback'])
+
+    def test_soft_chinese_preference_never_downgrades_a_valid_watch_release(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example",
+            search_titles=["Example"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            status="FINISHED",
+        )
+        watch_candidate = candidate("[Group] Example S01E01 [1080p]", "2.5 GiB", 10)
+        watch_candidate.subtitle_signal = "not confirmed"
+        watch_item = core.ClassifiedCandidate(
+            watch_candidate,
+            parse_release_identity(watch_candidate.title),
+            "match",
+            effective_season=1,
+            season_source="title",
+            work_match="search_title",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="found",
+            selected=[watch_item],
+            choices=[],
+            diagnostics={"raw_count": 1, "size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example",
+                        "--season",
+                        "S01",
+                        "--episode",
+                        "1",
+                        "--tier",
+                        "watch",
+                        "--want-zh",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        search_args_value = search.call_args.args[0]
+        self.assertEqual(search.call_count, 1)
+        self.assertTrue(search_args_value.want_zh)
+        self.assertFalse(search_args_value.require_zh)
+        self.assertEqual(payload["status"], "found")
+        self.assertEqual(payload["selected"]["size"], "2.5 GiB")
+        self.assertIsNone(payload["quality"]["fallback"])
+
+    def test_strict_zh_failure_preserves_watch_floor(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example",
+            search_titles=["Example"],
+            season="S01",
+            current=True,
+            trackable=True,
+            source="fixture",
+            status="RELEASING",
+        )
+        primary = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="subtitle_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 1, "size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        fallback_candidate = candidate("[G] Example S01E01 [CHT]", "1.4 GiB", 20)
+        fallback_candidate.detail_checked = True
+        fallback_candidate.detail_chinese_confirmed = True
+        fallback_candidate.detail_subtitle_signal = "detail-page: CHT"
+        fallback_candidate.subtitle_signal = "CHT; detail-page: CHT"
+        fallback_item = core.ClassifiedCandidate(
+            fallback_candidate,
+            parse_release_identity(fallback_candidate.title),
+            "match",
+            effective_season=1,
+            season_source="title",
+            work_match="search_title",
+        )
+        fallback = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="found",
+            selected=[fallback_item],
+            choices=[],
+            diagnostics={"raw_count": 1, "size_policy": {}},
+            failures=[],
+            cache="hit",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", side_effect=[primary, fallback]),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example",
+                        "--season",
+                        "S01",
+                        "--episode",
+                        "1",
+                        "--tier",
+                        "watch",
+                        "--require-zh",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload['status'], 'subtitle_unqualified')
+        self.assertIsNone(payload['selected'])
+        self.assertIsNone(payload['quality']['fallback'])
+
+    def test_nickname_uses_canonical_title_before_web_resolution(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Yani Neko",
+            season="S01",
+            current=True,
+            trackable=True,
+            source="fixture",
+            status="RELEASING",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BROWSE,
+            requested_season=1,
+            requested_episode=None,
+            status="no_nyaa_release_for_target",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 0},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)) as resolve,
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "\u5c3c\u53e4\u55b5\u55b5",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        self.assertEqual(resolve.call_args.args[0], "Yani Neko")
+        self.assertEqual(json.loads(output.getvalue())["resolved_title"], "Yani Neko")
+
+    def test_old_show_does_not_create_tracking_state(self) -> None:
+        old_resolved = finder.ResolvedAnime(
+            title="Old Example",
+            aliases=["Old Example Alias"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            status="FINISHED",
+            episodes=12,
+            duration_min=24,
+        )
+        item = core.ClassifiedCandidate(
+            candidate("[Group] Old Example Season 1 - 01 [1080p]", "1.2 GiB", 10),
+            parse_release_identity("[Group] Old Example Season 1 - 01 [1080p]"),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SPECIFIC_EPISODE,
+            requested_season=1,
+            requested_episode=1,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", old_resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Old Example",
+                        "--season",
+                        "S01",
+                        "--episode",
+                        "1",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+            self.assertFalse((root / "state.json").exists())
+            self.assertEqual(json.loads(output.getvalue())["status"], "found")
+
+    def test_latest_uses_schedule_target(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example Season 4",
+            aliases=["Example 4th season"],
+            season="S04",
+            current=True,
+            trackable=True,
+            source="fixture",
+            status="RELEASING",
+            episodes=24,
+            duration_min=24,
+            anilist_id=123,
+            next_airing_episode=13,
+            next_airing_at=int(time.time()) + 3600,
+        )
+        resolved.format = 'TV'
+        resolved.evidence = (from_raw('anilist', {'id': resolved.anilist_id,
+            'title': {'english': resolved.title}, 'format': 'TV', 'status':'RELEASING',
+            'episodes': resolved.episodes, 'duration': resolved.duration_min,
+            'nextAiringEpisode': {'episode': resolved.next_airing_episode, 'airingAt': resolved.next_airing_at}}),)
+        item = core.ClassifiedCandidate(
+            candidate("[Group] Example Season 4 - 12 [1080p]", "1.2 GiB", 10),
+            parse_release_identity("[Group] Example Season 4 - 12 [1080p]"),
+            "match",
+        )
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.LATEST_REGULAR,
+            requested_season=4,
+            requested_episode=12,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"raw_count": 1},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", return_value=report),
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example",
+                        "--latest",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["status"], "found")
+            self.assertEqual(payload["target_episode"], 12)
+            self.assertTrue(payload["availability"]["official_target"])
+
+    def test_schedule_cache_survives_state_without_anilist_id(self) -> None:
+        base = finder.ResolvedAnime(title="Example Season 4", source="state")
+        fresh = finder.ResolvedAnime(
+            title="Example Season 4",
+            season="S04",
+            current=True,
+            trackable=True,
+            source="anilist",
+            status="RELEASING",
+            anilist_id=123,
+            next_airing_episode=13,
+            next_airing_at=int(time.time()) + 3600,
+        )
+        fresh.format = 'TV'
+        fresh.evidence = (from_raw('anilist', {'id':123,'title':{'english':fresh.title},'format':'TV',
+            'status':'RELEASING','nextAiringEpisode':{'episode':13,'airingAt':fresh.next_airing_at}}),)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = Path(temp_dir) / "schedule.json"
+            with patch.object(v2_providers, "resolve_title", return_value=("resolved", fresh)) as resolve:
+                hydrated, first_status = finder.hydrate_airing_metadata(base, 1, cache, False, finder.date.today())
+                hydrated.evidence = ()
+                _, second_status = finder.hydrate_airing_metadata(hydrated, 1, cache, False, finder.date.today())
+        self.assertEqual(first_status, "miss")
+        self.assertEqual(second_status, "hit")
+        self.assertEqual(resolve.call_count, 1)
+
+    def test_retired_authority_cache_cannot_supply_work_identity(self) -> None:
+        cached = finder.ResolvedAnime(
+            title="Cached Harbor Signals",
+            aliases=["Harbor Signals"],
+            search_titles=["Cached Harbor Signals"],
+            verified_search_titles=["Cached Harbor Signals"],
+            season="S01",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+            source="anilist",
+            anilist_id=9876,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            schedule_cache = root / "schedule.json"
+            finder.write_schedule_snapshot(
+                schedule_cache,
+                f"title:{finder.norm('Harbor Signals')}",
+                cached,
+            )
+            args = finder.build_parser().parse_args(
+                [
+                    "Harbor Signals",
+                    "--schedule-cache",
+                    str(schedule_cache),
+                    "--state",
+                    str(root / "state.json"),
+                ]
+            )
+            with patch.object(v2_providers, "resolve_title", return_value=("unresolved", None)):
+                identity = finder.resolve_work_identity(args, {"version": 1, "shows": []}, finder.date.today())
+        self.assertEqual(identity.status, "resolved")
+        self.assertNotIn("metadata_cache", identity.sources)
+        self.assertIsNone(identity.resolved.anilist_id)
+        self.assertIsNone(identity.resolved.season)
+
+    def test_latest_before_first_episode_skips_rss(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Future Example",
+            season="S01",
+            current=True,
+            trackable=True,
+            source="fixture",
+            status="RELEASING",
+            anilist_id=456,
+            next_airing_episode=1,
+            next_airing_at=int(time.time()) + 3600,
+        )
+        resolved.format = 'TV'
+        resolved.evidence = (from_raw('anilist', {'id': resolved.anilist_id,
+            'title': {'english': resolved.title}, 'format': 'TV', 'status':'RELEASING',
+            'episodes': resolved.episodes, 'duration': resolved.duration_min,
+            'nextAiringEpisode': {'episode': resolved.next_airing_episode, 'airingAt': resolved.next_airing_at}}),)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report") as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Future Example",
+                        "--latest",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+        self.assertEqual(json.loads(output.getvalue())["status"], "not_aired_yet")
+        search.assert_not_called()
+
+    def test_next_airing_context_detects_one_week_break(self) -> None:
+        target = {
+            "status": "not_aired_yet",
+            "airing_at": 1788449400,
+            "airing_date": "2026-09-03",
+        }
+        previous = {
+            "status": "found",
+            "airing_at": 1787239800,
+            "airing_date": "2026-08-20",
+        }
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(
+                v2_metadata,
+                "official_air_date_report",
+                side_effect=[target, previous],
+            ),
+        ):
+            context = finder.next_airing_context(
+                object(),
+                9,
+                Path(temp_dir) / "schedule.json",
+                1,
+                False,
+                date(2026, 8, 28),
+            )
+        self.assertEqual(context["status"], "weekly_break")
+        self.assertTrue(context["weekly_break"])
+        self.assertEqual(context["skipped_weeks"], 1)
+        self.assertEqual(context["gap_days"], 14.0)
+
+    def test_tracked_next_reports_weekly_break_without_searching_nyaa(self) -> None:
+        scheduled = finder.ResolvedAnime(
+            title="Yani Neko",
+            aliases=["Chainsmoker Cat"],
+            search_titles=["Yani Neko"],
+            verified_search_titles=["Yani Neko"],
+            season="S01",
+            current=True,
+            trackable=True,
+            source="anilist",
+            format="TV",
+            status="RELEASING",
+            anilist_id=207141,
+            next_airing_episode=9,
+            next_airing_at=1788449400,
+        )
+        break_context = {
+            "status": "weekly_break",
+            "episode": 9,
+            "airing_at": 1788449400,
+            "airing_date": "2026-09-03",
+            "previous_episode": 8,
+            "previous_airing_at": 1787239800,
+            "previous_airing_date": "2026-08-20",
+            "gap_days": 14.0,
+            "weekly_break": True,
+            "skipped_weeks": 1,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Yani Neko",
+                            "aliases": ["Chainsmoker Cat"],
+                            "search_titles": ["Yani Neko"],
+                            "verified_search_titles": ["Yani Neko"],
+                            "season": "S01",
+                            "watched_episode": 8,
+                            "latest_known_episode": 8,
+                            "next_episode": 9,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                            "anilist_id": 207141,
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(
+                    v2_metadata,
+                    "hydrate_airing_metadata",
+                    return_value=(scheduled, "hit"),
+                ),
+                patch.object(
+                    v2_metadata,
+                    "next_airing_context",
+                    return_value=break_context,
+                ),
+                patch.object(finder.time, "time", return_value=1787889600),
+                patch.object(v2_workflow, "search_release_report") as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Yani Neko",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "airing_schedule_break")
+        self.assertTrue(payload["availability"]["next_airing"]["weekly_break"])
+        self.assertEqual(payload["availability"]["next_airing"]["airing_date"], "2026-09-03")
+        self.assertEqual(payload["progress"]["next_episode"], 9)
+        self.assertIn("本周停更", payload["reply_text"])
+        self.assertIn("2026-09-03", payload["reply_text"])
+        search.assert_not_called()
+
+    def test_next_airing_context_marks_long_gap_unconfirmed(self) -> None:
+        target = {
+            "status": "not_aired_yet",
+            "airing_at": 1791487800,
+            "airing_date": "2026-10-08",
+        }
+        previous = {
+            "status": "found",
+            "airing_at": 1787239800,
+            "airing_date": "2026-08-20",
+        }
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(
+                v2_metadata,
+                "official_air_date_report",
+                side_effect=[target, previous],
+            ),
+        ):
+            context = finder.next_airing_context(
+                object(),
+                9,
+                Path(temp_dir) / "schedule.json",
+                1,
+                False,
+                date(2026, 8, 28),
+            )
+        self.assertEqual(context["status"], "long_break_unconfirmed")
+        self.assertTrue(context["long_break"])
+        self.assertFalse(context["weekly_break"])
+        self.assertGreaterEqual(context["gap_days"], 28)
+
+    def test_finished_part_with_explicit_part_two_skips_nyaa(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Example Anime Part 1",
+            aliases=[],
+            search_titles=["Example Anime"],
+            verified_search_titles=["Example Anime"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="anilist",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            anilist_id=321,
+            continuation_parts=[
+                {
+                    "anilist_id": 322,
+                    "title": "Example Anime Part 2",
+                    "status": "NOT_YET_RELEASED",
+                    "episodes": 12,
+                    "start_date": "2026-10-02",
+                    "next_airing_episode": None,
+                    "next_airing_at": None,
+                    "explicit_split_cour": True,
+                }
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Example Anime Part 1",
+                            "aliases": [],
+                            "search_titles": ["Example Anime"],
+                            "verified_search_titles": ["Example Anime"],
+                            "season": "S01",
+                            "watched_episode": 12,
+                            "latest_known_episode": 12,
+                            "next_episode": 13,
+                            "airing": True,
+                            "status": "airing",
+                            "format": "TV",
+                            "anilist_id": 321,
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(
+                    v2_metadata,
+                    "hydrate_airing_metadata",
+                    return_value=(resolved, "hit"),
+                ),
+                patch.object(v2_workflow, "search_release_report") as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Example Anime Part 1",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "split_cour_break")
+        self.assertEqual(payload["availability"]["state"], "split_cour_break")
+        self.assertEqual(payload["availability"]["part"]["return_date"], "2026-10-02")
+        self.assertIn("前半段已于第 12 集结束", payload["reply_text"])
+        self.assertIn("Example Anime Part 2", payload["reply_text"])
+        search.assert_not_called()
+
+    def test_media_resolution_preserves_explicit_split_cour_evidence(self) -> None:
+        media = {
+            "id": 100,
+            "format": "TV",
+            "status": "FINISHED",
+            "season": "SUMMER",
+            "seasonYear": 2026,
+            "episodes": 12,
+            "duration": 24,
+            "nextAiringEpisode": None,
+            "isAdult": False,
+            "title": {"english": "Example Anime Part 1", "romaji": None, "native": None},
+            "synonyms": [],
+            "relations": {
+                "edges": [
+                    {
+                        "relationType": "SEQUEL",
+                        "node": {
+                            "id": 101,
+                            "type": "ANIME",
+                            "format": "TV",
+                            "status": "NOT_YET_RELEASED",
+                            "episodes": 12,
+                            "startDate": {"year": 2026, "month": 10, "day": 2},
+                            "nextAiringEpisode": None,
+                            "title": {"english": "Example Anime Part 2", "romaji": None, "native": None},
+                            "synonyms": [],
+                        },
+                    }
+                ]
+            },
+        }
+        resolved, _ = finder.media_to_resolved("Example Anime Part 1", media, date(2026, 8, 28))
+        self.assertEqual(len(resolved.continuation_parts), 1)
+        self.assertTrue(resolved.continuation_parts[0]["explicit_split_cour"])
+        self.assertEqual(resolved.continuation_parts[0]["start_date"], "2026-10-02")
+
+    def test_explicit_other_season_never_inherits_tracked_next_episode(self) -> None:
+        report = core.ReleaseSearchReport(
+            intent=core.SearchIntent.NEXT_TRACKED,
+            requested_season=3,
+            requested_episode=3,
+            status="no_nyaa_release_for_target",
+            selected=[],
+            choices=[],
+            diagnostics={"raw_count": 0},
+            failures=[],
+            cache="miss",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state_path = root / "state.json"
+            finder.save_state(
+                state_path,
+                {
+                    "version": 1,
+                    "shows": [
+                        {
+                            "title": "Tracked Example",
+                            "season": "1",
+                            "next_episode": 3,
+                            "airing": True,
+                        }
+                    ],
+                },
+            )
+            output = io.StringIO()
+            with (
+                patch.object(v2_workflow, "search_release_report", return_value=report) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Tracked Example",
+                        "--season",
+                        "3",
+                        "--no-web-resolve",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(state_path),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        search_args = search.call_args.args[0]
+        self.assertEqual(payload["season"], "S03")
+        self.assertIsNone(payload["target_episode"])
+        self.assertEqual(search_args.season, "S03")
+        self.assertEqual(search.call_args.kwargs["intent"], core.SearchIntent.SEASON_BROWSE)
+        self.assertIsNone(search.call_args.kwargs["requested_episode"])
+
+
+class SeasonBatchSelectionTests(unittest.TestCase):
+    @staticmethod
+    def detail_page(work: str, seasons: dict[int, list[float]], extras: bool = False) -> str:
+        directories = []
+        for season, sizes in seasons.items():
+            files = "".join(
+                f'<li>{work} S{season:02d}E{episode:02d}.mkv '
+                f'<span class="file-size">({size} GiB)</span></li>'
+                for episode, size in enumerate(sizes, start=1)
+            )
+            directories.append(f"<li>{work} S{season:02d}<ul>{files}</ul></li>")
+        if extras:
+            directories.append(
+                f'<li>Extras<ul><li>{work} NCOP.mkv '
+                '<span class="file-size">(3.0 GiB)</span></li></ul></li>'
+            )
+        return (
+            f'<h3 class="panel-title">{work} Complete Season</h3>'
+            '<div class="torrent-file-list panel-body"><ul>'
+            + "".join(directories)
+            + "</ul></div>"
+        )
+
+    @staticmethod
+    def context(work: str = "Atlas Chronicle") -> core.SearchContext:
+        return core.SearchContext(
+            canonical_title=work,
+            search_titles=(work,),
+            mainline_scope="multi",
+            resolved_season=1,
+            expected_episodes=12,
+        )
+
+    @staticmethod
+    def args(tier: str = "browse") -> argparse.Namespace:
+        args = search_args()
+        args.query = "Atlas Chronicle"
+        args.season = "S01"
+        args.episodes = 12
+        args.tier = tier
+        args.min_gib_per_episode = {"browse": 1.0, "watch": 2.0, "premium": 6.0}[tier]
+        args.max_gib_per_episode = None
+        return args
+
+    def run_report(
+        self,
+        candidates: list[nyaa.Candidate],
+        pages: dict[str, str],
+        *,
+        args: argparse.Namespace | None = None,
+        context: core.SearchContext | None = None,
+    ) -> core.ReleaseSearchReport:
+        actual_args = args or self.args()
+        with (
+            patch.object(core, "collect_raw_candidates", return_value=(candidates, [], "fixture")),
+            patch.object(
+                nyaa,
+                "fetch_nyaa_detail_page",
+                side_effect=lambda url, _timeout: pages[url],
+            ),
+        ):
+            return core.search_release_report(
+                actual_args,
+                intent=core.SearchIntent.SEASON_BATCH,
+                context=context or self.context(),
+            )
+
+    def test_random_single_and_related_side_story_never_become_whole_season(self) -> None:
+        regular = candidate("[G] Atlas Chronicle S01E04 [1080p]", "1.5 GiB", 10)
+        side_story = candidate("[G] Atlas Chronicle Side Story S1 [01-04]", "8 GiB", 20)
+        context = self.context()
+        context = core.SearchContext(
+            **{**context.__dict__, "related_titles": ("Atlas Chronicle Side Story",)}
+        )
+        report = self.run_report([regular, side_story], {}, context=context)
+        self.assertEqual(report.status, "no_complete_season_release")
+        self.assertEqual(report.choices, [])
+
+    def test_aggregate_below_one_gib_per_episode_is_hidden_without_detail_fetch(self) -> None:
+        low = candidate("[G] Atlas Chronicle S1 [01-12] Complete", "6.5 GiB", 99)
+        args = self.args()
+        with (
+            patch.object(core, "collect_raw_candidates", return_value=([low], [], "fixture")),
+            patch.object(nyaa, "fetch_nyaa_detail_page") as fetch,
+        ):
+            report = core.search_release_report(
+                args,
+                intent=core.SearchIntent.SEASON_BATCH,
+                context=self.context(),
+            )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.selected, [])
+        self.assertEqual(report.choices, [])
+        self.assertEqual(report.diagnostics["aggregate_floor_rejected_count"], 1)
+        fetch.assert_not_called()
+
+    def test_exact_season_beats_higher_seeded_multi_season_collection(self) -> None:
+        exact = candidate("[A] Atlas Chronicle S1 [01-12] Complete", "18 GiB", 5)
+        multi = candidate("[B] Atlas Chronicle S1+S2 Complete", "36 GiB", 500)
+        pages = {
+            exact.url: self.detail_page("Atlas Chronicle", {1: [1.5] * 12}, extras=True),
+            multi.url: self.detail_page("Atlas Chronicle", {1: [1.5] * 12, 2: [1.5] * 12}),
+        }
+        report = self.run_report([exact, multi], pages)
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.title, exact.title)
+        self.assertEqual(report.selected[0].coverage.scope, "exact")
+
+    def test_qualified_multi_season_is_used_when_exact_package_fails_per_file_quality(self) -> None:
+        exact = candidate("[A] Atlas Chronicle S1 [01-12] Complete", "18 GiB", 50)
+        multi = candidate("[B] Atlas Chronicle S1+S2 Complete", "36 GiB", 10)
+        pages = {
+            exact.url: self.detail_page("Atlas Chronicle", {1: [0.8] * 12}),
+            multi.url: self.detail_page("Atlas Chronicle", {1: [1.5] * 12, 2: [1.5] * 12}),
+        }
+        report = self.run_report([exact, multi], pages)
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.selected[0].candidate.title, multi.title)
+        self.assertEqual(report.selected[0].coverage.scope, "multi")
+
+    def test_multi_season_collection_requires_every_regular_file_to_meet_tier(self) -> None:
+        multi = candidate("[B] Atlas Chronicle S1+S2 Complete", "36 GiB", 10)
+        second_season = [1.5] * 12
+        second_season[6] = 0.8
+        report = self.run_report(
+            [multi],
+            {multi.url: self.detail_page("Atlas Chronicle", {1: [1.5] * 12, 2: second_season})},
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.choices, [])
+        self.assertEqual(report.diagnostics["season_quality_rejected_count"], 1)
+
+    def test_named_watch_tier_rejects_below_tier_episode_even_when_average_passes(self) -> None:
+        args = self.args("watch")
+        args.episodes = 25
+        batch = candidate("[G] Atlas Chronicle S1 [01-25] Complete", "57 GiB", 30)
+        sizes = [
+            2.1, 2.2, 1.8, 2.1, 2.2, 1.9, 2.1, 1.7, 2.1, 2.7,
+            2.1, 3.0, 1.9, 2.1, 2.2, 2.2, 2.0, 2.6, 3.0, 2.3,
+            2.3, 2.8, 2.8, 2.3, 2.4,
+        ]
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            search_titles=("Atlas Chronicle",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=25,
+        )
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+            context=context,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["tier_per_file_rejected_count"], 1)
+        coverage = report.diagnostics["quality_rejection_samples"][0]
+        self.assertEqual(coverage["quality_basis"], "tier_per_file")
+        self.assertAlmostEqual(coverage["average_gib_per_episode"], 2.276, places=3)
+        self.assertEqual(coverage["min_gib_per_episode"], 1.7)
+        self.assertEqual(coverage["max_gib_per_episode"], 3.0)
+
+    def test_named_watch_tier_rejects_any_episode_below_absolute_floor(self) -> None:
+        args = self.args("watch")
+        batch = candidate("[G] Atlas Chronicle S1 [01-12] Complete", "28 GiB", 30)
+        sizes = [0.9] + [2.45] * 11
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["absolute_floor_rejected_count"], 1)
+        self.assertEqual(
+            report.diagnostics["quality_rejection_samples"][0]["reason"],
+            "per_episode_below_absolute_floor",
+        )
+
+    def test_named_premium_tier_requires_every_regular_episode_to_meet_floor(self) -> None:
+        args = self.args("premium")
+        batch = candidate("[G] Atlas Chronicle S1 [01-12] Complete", "80 GiB", 30)
+        sizes = [5.5] + [6.1] * 11
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["tier_per_file_rejected_count"], 1)
+        sample = report.diagnostics["quality_rejection_samples"][0]
+        self.assertEqual(sample["quality_basis"], "tier_per_file")
+        self.assertEqual(sample["reason"], "tier_per_file_size_out_of_range")
+
+    def test_cjk_title_batch_still_checks_file_list_but_skips_subtitle_detail_parse(self) -> None:
+        args = self.args("watch")
+        args.query = "缘之空"
+        args.alias = ["緣之空"]
+        args.require_zh = True
+        args.want_zh = True
+        args.trust_cjk_title_for_zh = True
+        batch = candidate(
+            "[字幕组] Atlas Chronicle 缘之空 S1 [01-12] Complete",
+            "28 GiB",
+            30,
+        )
+        batch.matched_queries = ["缘之空"]
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            search_titles=("Atlas Chronicle",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=12,
+        )
+        with patch.object(nyaa, "apply_detail_subtitle_signal") as inspect_subtitles:
+            report = self.run_report(
+                [batch],
+                {batch.url: self.detail_page("Atlas Chronicle", {1: [2.3] * 12})},
+                args=args,
+                context=context,
+            )
+
+        self.assertEqual(report.status, "found")
+        self.assertTrue(report.selected[0].coverage.complete)
+        self.assertIn("trusted Chinese release title", report.selected[0].candidate.subtitle_signal)
+        inspect_subtitles.assert_not_called()
+
+    def test_explicit_minimum_remains_strict_per_file(self) -> None:
+        args = self.args("watch")
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 2.0
+        args.max_gib_per_episode = None
+        batch = candidate("[G] Atlas Chronicle S1 [01-12] Complete", "27 GiB", 30)
+        sizes = [1.9] + [2.3] * 11
+        report = self.run_report(
+            [batch],
+            {batch.url: self.detail_page("Atlas Chronicle", {1: sizes})},
+            args=args,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        self.assertEqual(report.diagnostics["explicit_per_file_rejected_count"], 1)
+        self.assertEqual(
+            report.diagnostics["quality_rejection_samples"][0]["quality_basis"],
+            "explicit_per_file",
+        )
+
+    def test_missing_episode_is_conclusive_no_complete_release(self) -> None:
+        partial = candidate("[A] Atlas Chronicle S1 [01-12] Complete", "18 GiB", 20)
+        report = self.run_report(
+            [partial],
+            {partial.url: self.detail_page("Atlas Chronicle", {1: [1.5] * 11})},
+        )
+        self.assertEqual(report.status, "no_complete_season_release")
+        self.assertEqual(report.diagnostics["coverage_rejected_count"], 1)
+
+    def test_unreadable_file_list_is_check_incomplete(self) -> None:
+        batch = candidate("[A] Atlas Chronicle S1 [01-12] Complete", "18 GiB", 20)
+        report = self.run_report([batch], {batch.url: "<html><body>No file list</body></html>"})
+        self.assertEqual(report.status, "season_check_incomplete")
+        self.assertEqual(report.selected, [])
+
+    def test_bdmv_can_pass_premium_source_rule_after_coverage_check(self) -> None:
+        args = self.args("premium")
+        disc = candidate("[BDMV] Foxtrot Archive S1 [01-12] Complete", "180 GiB", 8)
+        files = "".join(
+            f'<li>BDMV/STREAM/{index:05d}.m2ts <span class="file-size">(0.5 GiB)</span></li>'
+            for index in range(1, 13)
+        )
+        page = (
+            '<h3 class="panel-title">[BDMV] Foxtrot Archive S1 [01-12] Complete</h3>'
+            f'<div class="torrent-file-list"><ul>{files}<li>BDMV/PLAYLIST/00001.mpls <span class="file-size">(1 KiB)</span></li></ul></div>'
+        )
+        context = core.SearchContext(
+            canonical_title="Foxtrot Archive",
+            search_titles=("Foxtrot Archive",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=12,
+        )
+        report = self.run_report([disc], {disc.url: page}, args=args, context=context)
+        self.assertEqual(report.status, "found")
+        self.assertTrue(report.selected[0].coverage.source_exempt)
+        self.assertTrue(report.selected[0].coverage.complete)
+        self.assertEqual(report.selected[0].coverage.quality_basis, "source_exempt")
+
+    def test_explicit_minimum_disables_remux_source_exemption(self) -> None:
+        args = self.args("premium")
+        args.size_policy_source = "explicit"
+        args.min_gib_per_episode = 6.0
+        args.max_gib_per_episode = None
+        remux = candidate("[G] Foxtrot Archive S1 BD Remux Complete", "80 GiB", 8)
+        context = core.SearchContext(
+            canonical_title="Foxtrot Archive",
+            search_titles=("Foxtrot Archive",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=12,
+        )
+        report = self.run_report(
+            [remux],
+            {remux.url: self.detail_page("Foxtrot Archive", {1: [5.5] * 12})},
+            args=args,
+            context=context,
+        )
+        self.assertEqual(report.status, "release_unqualified")
+        sample = report.diagnostics["quality_rejection_samples"][0]
+        self.assertEqual(sample["quality_basis"], "explicit_per_file")
+        self.assertEqual(sample["reason"], "explicit_per_file_size_out_of_range")
+
+    def test_season_only_remux_with_bit_depth_reaches_batch_verification(self) -> None:
+        args = self.args("premium")
+        args.query = "Atlas Chronicle"
+        args.episodes = 25
+        remux = candidate(
+            "[Group] Atlas Chronicle Season 1 (BD Remux 1080p x264 8-bit PCM)",
+            "141.2 GiB",
+            5,
+        )
+        context = core.SearchContext(
+            canonical_title="Atlas Chronicle",
+            search_titles=("Atlas Chronicle",),
+            mainline_scope="single",
+            resolved_season=1,
+            expected_episodes=25,
+        )
+        sizes = [5.2] * 24 + [6.1]
+        report = self.run_report(
+            [remux],
+            {remux.url: self.detail_page("Atlas Chronicle", {1: sizes}) + '<div id="torrent-description">Remux: untouched video; no re-encoding.</div>'},
+            args=args,
+            context=context,
+        )
+        self.assertEqual(report.status, "found")
+        self.assertEqual(report.diagnostics["aggregate_floor_rejected_count"], 0)
+        self.assertTrue(report.selected[0].coverage.source_exempt)
+        self.assertEqual(report.selected[0].coverage.main_file_count, 25)
+
+
+class SeasonBatchHighLevelTests(unittest.TestCase):
+    @staticmethod
+    def unavailable_batch_report(season: int = 1) -> core.ReleaseSearchReport:
+        return core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=season,
+            requested_episode=None,
+            status="no_complete_season_release",
+            selected=[],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+
+    def test_old_title_only_defaults_to_complete_season(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(
+                    v2_workflow,
+                    "search_release_report",
+                    return_value=self.unavailable_batch_report(),
+                ) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["intent"], "season_batch")
+        self.assertEqual(payload["season"], "S01")
+        self.assertEqual(search.call_args.kwargs["intent"], core.SearchIntent.SEASON_BATCH)
+
+    def test_finished_single_mainline_without_season_defaults_to_s01(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season=None,
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(
+                    v2_workflow,
+                    "search_release_report",
+                    return_value=self.unavailable_batch_report(),
+                ) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                        "--schedule-cache",
+                        str(root / "schedule.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["intent"], "season_batch")
+        self.assertEqual(payload["season"], "S01")
+        self.assertEqual(search.call_args.args[0].season, "S01")
+
+    def test_old_title_only_asks_before_search_when_season_is_unresolved(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Atlas Chronicle",
+            search_titles=["Atlas Chronicle"],
+            season=None,
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="multi",
+            related_titles=["Atlas Chronicle 2"],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report") as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Atlas Chronicle",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "needs_season_confirmation")
+        self.assertEqual(payload["intent"], "season_batch")
+        self.assertIsNone(payload["season"])
+        self.assertIn("第几季", payload["reply_text"])
+        self.assertNotIn("magnet:?", payload["reply_text"])
+        search.assert_not_called()
+
+    def test_premium_never_silently_downgrades(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+        )
+        primary = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=1,
+            requested_episode=None,
+            status="release_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="miss",
+        )
+        release = candidate("[G] Harbor Signals S1 [01-12] Complete", "36 GiB", 12)
+        coverage = core.SeasonCoverage(
+            scope="exact",
+            target_season=1,
+            expected_episodes=12,
+            covered_episodes=tuple(range(1, 13)),
+            covered_seasons=(1,),
+            confidence="verified",
+            main_file_count=12,
+            min_gib_per_episode=3.0,
+            max_gib_per_episode=3.0,
+            complete=True,
+            quality_fit=True,
+            reason="verified_complete_and_qualified",
+        )
+        item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+            effective_season=1,
+            season_source="title_coverage",
+            work_match="canonical",
+            coverage=coverage,
+        )
+        fallback = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=1,
+            requested_episode=None,
+            status="found",
+            selected=[item],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="hit",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(v2_workflow, "search_release_report", side_effect=[primary, fallback]) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--season",
+                        "S01",
+                        "--whole-season",
+                        "--tier",
+                        "premium",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(payload['quality']['effective_tier'], 'premium')
+        self.assertIsNone(payload['quality']['fallback'])
+        self.assertEqual(payload['status'], 'release_unqualified')
+
+    def test_watch_does_not_search_other_tiers_without_request(self) -> None:
+        resolved = finder.ResolvedAnime(
+            title="Harbor Signals",
+            search_titles=["Harbor Signals"],
+            season="S01",
+            current=False,
+            trackable=False,
+            source="fixture",
+            format="TV",
+            status="FINISHED",
+            episodes=12,
+            mainline_scope="single",
+        )
+        failed = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=1,
+            requested_episode=None,
+            status="release_unqualified",
+            selected=[],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="hit",
+        )
+        release = candidate("[G] Harbor Signals S1 BD Remux Complete", "132 GiB", 16)
+        coverage = core.SeasonCoverage(
+            scope="exact",
+            target_season=1,
+            expected_episodes=12,
+            covered_episodes=tuple(range(1, 13)),
+            covered_seasons=(1,),
+            confidence="verified",
+            main_file_count=12,
+            average_gib_per_episode=11.0,
+            min_gib_per_episode=10.5,
+            max_gib_per_episode=11.5,
+            quality_basis="source_exempt",
+            source_exempt=True,
+            complete=True,
+            quality_fit=True,
+            reason="verified_complete_and_qualified",
+        )
+        premium_item = core.ClassifiedCandidate(
+            release,
+            parse_release_identity(release.title),
+            "match",
+            effective_season=1,
+            season_source="title_coverage",
+            work_match="canonical",
+            coverage=coverage,
+        )
+        premium = core.ReleaseSearchReport(
+            intent=core.SearchIntent.SEASON_BATCH,
+            requested_season=1,
+            requested_episode=None,
+            status="found",
+            selected=[premium_item],
+            choices=[],
+            diagnostics={"size_policy": {}},
+            failures=[],
+            cache="hit",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = io.StringIO()
+            with (
+                patch.object(v2_providers, "resolve_title", return_value=("resolved", resolved)),
+                patch.object(
+                    v2_workflow,
+                    "search_release_report",
+                    side_effect=[failed, failed, premium],
+                ) as search,
+                contextlib.redirect_stdout(output),
+            ):
+                finder.main(
+                    [
+                        "Harbor Signals",
+                        "--tier",
+                        "watch",
+                        "--include-magnet",
+                        "--legal-ok",
+                        "--no-state-update",
+                        "--json",
+                        "--state",
+                        str(root / "state.json"),
+                        "--cache",
+                        str(root / "raw.json"),
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(payload['quality']['effective_tier'], 'watch')
+        self.assertIsNone(payload['quality']['upgrade'])
+        self.assertEqual(payload['status'], 'release_unqualified')
+
+
+if __name__ == "__main__":
+    unittest.main()

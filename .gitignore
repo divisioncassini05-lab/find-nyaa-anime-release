@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+node_modules/
+dist/
+*.tgz
+*.zip
+.env
+.env.*
+!.env.example

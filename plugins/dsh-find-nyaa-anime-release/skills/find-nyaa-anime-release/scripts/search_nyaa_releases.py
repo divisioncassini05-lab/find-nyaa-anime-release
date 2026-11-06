@@ -1,0 +1,1283 @@
+#!/usr/bin/env python3
+"""Search Nyaa RSS and rank anime release candidates.
+
+This helper intentionally omits magnet links unless both --include-magnets and
+--legal-ok are supplied by the caller.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+import math
+import re
+import sys
+import urllib.parse
+import xml.etree.ElementTree as ET
+import zlib
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timezone
+from email.utils import format_datetime, parsedate_to_datetime
+from pathlib import Path
+from typing import Iterable
+
+import nyaa_client as client_api
+from nyaa_client import (
+    NyaaClient,
+    NyaaClientError,
+    NyaaFileEntry,
+    NyaaNetworkError,
+    NyaaNotFoundError,
+    NyaaParseError,
+    NyaaRelease,
+    NyaaReleaseDetail,
+    NyaaSearchRequest,
+)
+from runtime_paths import DEFAULT_STATE
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
+NYAA_RSS = client_api.NYAA_BASE_URL
+NYAA_NS = client_api.NYAA_NS
+DEFAULT_CACHE = DEFAULT_STATE.parent / ".cache" / "find_nyaa_raw_cache.json"
+_TRANSPORT_CLIENT = NyaaClient()
+
+ASCII_CHINESE_PATTERNS = {
+    "CHS": r"(?<![a-z0-9])chs(?![a-z0-9])",
+    "CHT": r"(?<![a-z0-9])cht(?![a-z0-9])",
+    "SC": r"(?<![a-z0-9])sc(?![a-z0-9])",
+    "TC": r"(?<![a-z0-9])tc(?![a-z0-9])",
+    "GB": r"(?<![a-z0-9])gb(?![a-z0-9])",
+    "BIG5": r"(?<![a-z0-9])big5(?![a-z0-9])",
+    "Chinese": r"(?<![a-z0-9])chinese(?![a-z0-9])",
+    "zh-cn": r"(?<![a-z0-9])zh-cn(?![a-z0-9])",
+    "zh-tw": r"(?<![a-z0-9])zh-tw(?![a-z0-9])",
+}
+UNICODE_CHINESE_MARKERS = (
+    "\u7b80\u7e41",
+    "\u4e2d\u6587\u5b57\u5e55",
+    "\u4e2d\u6587",
+    "\u5167\u5c01",
+    "\u5185\u5c01",
+    "\u5916\u6302",
+    "\u5916\u639b",
+    "\u7b80",
+    "\u7e41",
+)
+DETAIL_SUBTITLE_CONTEXT_PATTERNS = (
+    r"subtitle(?:s| languages?)?",
+    r"sub languages?",
+    r"text\s*#",
+    r"caption(?:s)?",
+    "\u5b57\u5e55",
+    "\u5185\u5c01",
+    "\u5167\u5c01",
+    "\u5916\u6302",
+    "\u5916\u639b",
+)
+DETAIL_SUBTITLE_MODE_PATTERN = (
+    r"(?:hard|soft)[-_ ]?sub|hardsub|softsub|"
+    "\u5185\u5d4c|\u5167\u5d4c|\u5185\u5c01|\u5167\u5c01|\u5916\u6302|\u5916\u639b"
+)
+DETAIL_CHINESE_NEGATION_PATTERN = (
+    r"(?:no|not|without|exclude(?:s|d)?|except)\s+(?:simplified\s+|traditional\s+)?chinese|"
+    r"chinese(?:\s+subtitle(?:s)?)?\s*(?::|=|-)?\s*(?:no|none|false|absent|not\s+included)|"
+    "\u65e0\u4e2d\u6587|\u7121\u4e2d\u6587|\u4e0d\u542b\u4e2d\u6587|\u4e0d\u5305\u542b\u4e2d\u6587"
+)
+DETAIL_AUDIO_CONTEXT_PATTERN = (
+    r"(?<![a-z0-9])(?:audio|dub(?:bed)?)(?![a-z0-9])|"
+    "\u97f3\u8f68|\u97f3\u8ecc|\u97f3\u9891|\u97f3\u983b|\u914d\u97f3"
+)
+DETAIL_SUBTITLE_FILE_PATTERN = r"\.(?:ass|ssa|srt|vtt|sup)(?:\b|$)"
+DETAIL_CHINESE_PATTERNS = {
+    "Chinese": r"(?<![a-z0-9])chinese(?![a-z0-9])",
+    "Simplified Chinese": r"(?<![a-z0-9])simplified[-_ ]+chinese(?![a-z0-9])",
+    "Traditional Chinese": r"(?<![a-z0-9])traditional[-_ ]+chinese(?![a-z0-9])",
+    "zh-cn": r"(?<![a-z0-9])zh[-_ ]?cn(?![a-z0-9])",
+    "zh-tw": r"(?<![a-z0-9])zh[-_ ]?tw(?![a-z0-9])",
+    "zh-Hans": r"(?<![a-z0-9])zh[-_ ]?hans(?![a-z0-9])",
+    "zh-Hant": r"(?<![a-z0-9])zh[-_ ]?hant(?![a-z0-9])",
+    "CHS": r"(?<![a-z0-9])chs(?![a-z0-9])",
+    "CHT": r"(?<![a-z0-9])cht(?![a-z0-9])",
+    "BIG5": r"(?<![a-z0-9])big5(?![a-z0-9])",
+}
+DETAIL_CHINESE_LITERALS = (
+    "\u4e2d\u6587",
+    "\u4e2d\u6587\u5b57\u5e55",
+    "\u7b80\u4f53",
+    "\u7c21\u9ad4",
+    "\u7e41\u4f53",
+    "\u7e41\u9ad4",
+    "\u7b80\u4e2d",
+    "\u7e41\u4e2d",
+    "\u7b80\u65e5",
+    "\u7e41\u65e5",
+    "\u7b80\u7e41",
+    "\u7c21\u7e41",
+)
+DETAIL_STRONG_CHINESE_MARKERS = frozenset(
+    {
+        "Simplified Chinese",
+        "Traditional Chinese",
+        "zh-cn",
+        "zh-tw",
+        "zh-Hans",
+        "zh-Hant",
+        "CHS",
+        "CHT",
+        "BIG5",
+        "\u7b80\u4f53",
+        "\u7c21\u9ad4",
+        "\u7e41\u4f53",
+        "\u7e41\u9ad4",
+        "\u7b80\u4e2d",
+        "\u7e41\u4e2d",
+        "\u7b80\u65e5",
+        "\u7e41\u65e5",
+        "\u7b80\u7e41",
+        "\u7c21\u7e41",
+    }
+)
+DETAIL_GENERIC_CHINESE_VALUE_PATTERN = (
+    r"^(?:(?:language|lang)\s*[:=]\s*)?(?:chinese|\u4e2d\u6587)\s*$"
+)
+ORIGINAL_AUDIO_PATTERNS = {
+    "Japanese": r"(?<![a-z0-9])(?:japanese|jpn|jap|jp|ja)(?![a-z0-9])",
+    "JPN audio": r"(?<![a-z0-9])(?:jpn|jap|jp|ja)[-_ ]?audio(?![a-z0-9])",
+    "日本語": "\u65e5\u672c\u8a9e",
+    "日语": "\u65e5\u8bed",
+    "原声": "\u539f\u58f0",
+    "原配": "\u539f\u914d",
+}
+DUB_ONLY_PATTERNS = {
+    "English dub": r"(?<![a-z0-9])english[-_ ]?dub(?:bed)?(?![a-z0-9])",
+    "Chinese dub": r"(?<![a-z0-9])chinese[-_ ]?dub(?:bed)?(?![a-z0-9])",
+    "Dubbed": r"(?<![a-z0-9])dubbed(?![a-z0-9])",
+    "国语": "\u56fd\u8bed",
+    "國語": "\u570b\u8a9e",
+    "粤语": "\u7ca4\u8bed",
+    "粵語": "\u7cb5\u8a9e",
+    "中配": "\u4e2d\u914d",
+}
+MULTI_AUDIO_PATTERN = r"(?<![a-z0-9])(?:dual|multi)[-_ ]?audio(?![a-z0-9])"
+
+TIER_PROFILES = {
+    # Use actual single-episode size. Short runtimes never reduce these floors.
+    "browse": {"label": "casual/space-saving", "ideal_gib_per_episode": (1.0, 2.0)},
+    "watch": {"label": "normal watching", "ideal_gib_per_episode": (2.0, 4.0)},
+    "premium": {"label": "premium/BD-like", "ideal_gib_per_episode": (6.0, 999.0)},
+}
+DEFAULT_TIER_MIN_GIB = {"browse": 1.0, "watch": 2.0, "premium": 6.0}
+DEFAULT_MOVIE_MIN_TOTAL_GIB = 10.0
+TIER_ALIASES = {
+    "casual": "browse",
+    "browse": "browse",
+    "look": "browse",
+    "normal": "watch",
+    "watch": "watch",
+    "good": "watch",
+    "premium": "premium",
+    "best": "premium",
+    "4k": "premium",
+    "bd": "premium",
+}
+
+
+@dataclass
+class Candidate:
+    rank: int
+    score: float
+    title: str
+    group: str | None
+    resolution: str | None
+    codec: str | None
+    bit_depth: str | None
+    audio_signal: str
+    subtitle_signal: str
+    size: str | None
+    size_bytes: int | None
+    size_basis: str
+    bitrate_note: str
+    tier_fit: str
+    seeders: int
+    leechers: int
+    downloads: int
+    published: str | None
+    category: str | None
+    url: str | None
+    magnet: str | None
+    matched_queries: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    detail_checked: bool = False
+    detail_chinese_confirmed: bool = False
+    detail_subtitle_signal: str | None = None
+    info_hash: str | None = None
+    score_deprecated: bool = True
+    rank_basis: str = 'inspection_only_not_picture_quality'
+    preferred_group: bool = False
+    avoided_group: bool = False
+
+
+NyaaListingEntry = NyaaRelease
+
+
+def text_of(parent: ET.Element, tag: str, default: str = "") -> str:
+    node = parent.find(tag)
+    return (node.text or "").strip() if node is not None else default
+
+
+def nyaa_text(parent: ET.Element, name: str, default: str = "") -> str:
+    node = parent.find(f"{NYAA_NS}{name}")
+    return (node.text or "").strip() if node is not None else default
+
+
+def as_int(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def parse_size(value: str) -> int | None:
+    return client_api.parse_size(value)
+
+
+def bytes_to_gib(size_bytes: int) -> float:
+    return size_bytes / (1024**3)
+
+
+def detect_group(title: str) -> str | None:
+    match = re.match(r"^\s*[\[\u3010]([^\]\u3011]{1,64})[\]\u3011]", title)
+    if match:
+        return match.group(1).strip()
+    for suffix_group in ("VARYG", "Tsundere-Raws", "NanDesuKa"):
+        if re.search(rf"[- ]{re.escape(suffix_group)}(?:\s|$|\()", title, re.I):
+            return suffix_group
+    return None
+
+
+def detect_resolution(title: str) -> str | None:
+    match = re.search(r"(2160p|1440p|1080p|720p|480p|\d{3,4}x\d{3,4})", title, re.I)
+    return match.group(1) if match else None
+
+
+def detect_codec(title: str) -> str | None:
+    lowered = title.lower()
+    if any(token in lowered for token in ("hevc", "h.265", "h265", "x265")):
+        return "HEVC"
+    if any(token in lowered for token in ("avc", "h.264", "h264", "x264")):
+        return "AVC"
+    if "av1" in lowered:
+        return "AV1"
+    return None
+
+
+def detect_bit_depth(title: str) -> str | None:
+    match = re.search(r"(8|10|12)\s*-?\s*bit", title, re.I)
+    return f"{match.group(1)}bit" if match else None
+
+
+def detect_chinese(title: str) -> tuple[bool, str]:
+    hits = [name for name, pattern in ASCII_CHINESE_PATTERNS.items() if re.search(pattern, title, re.I)]
+    hits.extend(marker for marker in UNICODE_CHINESE_MARKERS if marker in title)
+    if hits:
+        return True, ", ".join(dict.fromkeys(hits))
+    return False, "not confirmed"
+
+
+def contains_cjk(value: str) -> bool:
+    return bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", value))
+
+
+def strip_html_to_text(value: str) -> str:
+    return client_api.strip_html_to_text(value)
+
+
+def extract_nyaa_description(page_html: str) -> str:
+    return client_api.extract_description(page_html)
+
+
+def decode_http_payload(payload: bytes, content_encoding: str | None = None) -> bytes:
+    return client_api.decode_http_payload(payload, content_encoding)
+
+
+def fetch_nyaa_detail_page(url: str, timeout: int | float) -> str:
+    return _TRANSPORT_CLIENT.fetch_detail_page(url, timeout)
+
+
+def fetch_nyaa_detail_text(url: str, timeout: int | float) -> str:
+    return extract_nyaa_description(fetch_nyaa_detail_page(url, timeout))
+
+
+def extract_nyaa_file_entries(page_html: str) -> list[NyaaFileEntry]:
+    return client_api.parse_file_entries(page_html)
+
+
+def parse_nyaa_listing(page_html: str) -> list[NyaaRelease]:
+    return client_api.parse_listing(page_html)
+
+
+def build_listing_url(category: str, nyaa_filter: str, page: int) -> str:
+    return client_api.build_listing_url(category, nyaa_filter, page)
+
+
+def build_search_listing_url(
+    query: str,
+    category: str,
+    nyaa_filter: str,
+    page: int,
+    sort: str = "size",
+    order: str = "desc",
+) -> str:
+    return client_api.build_listing_url(
+        category,
+        nyaa_filter,
+        page,
+        query=query,
+        sort=sort,
+        order=order,
+    )
+
+
+def fetch_listing_page(category: str, nyaa_filter: str, page: int, timeout: int) -> str:
+    return _TRANSPORT_CLIENT.fetch_listing(
+        "", category, nyaa_filter, page, timeout, sort="id", order="desc"
+    )
+
+
+def fetch_search_listing_page(
+    query: str,
+    category: str,
+    nyaa_filter: str,
+    page: int,
+    timeout: int,
+    sort: str = "size",
+    order: str = "desc",
+) -> str:
+    return _TRANSPORT_CLIENT.fetch_listing(
+        query,
+        category,
+        nyaa_filter,
+        page,
+        timeout,
+        sort=sort,
+        order=order,
+    )
+
+
+def extract_nyaa_detail_metadata(page_html: str, nyaa_id: str) -> dict[str, object]:
+    return asdict(client_api.parse_detail(nyaa_id, page_html).release)
+
+
+
+def detect_chinese_in_detail(detail_text: str) -> tuple[bool, str]:
+    lines = [line.strip() for line in detail_text.splitlines() if line.strip()]
+    page_has_subtitle_mode = bool(re.search(DETAIL_SUBTITLE_MODE_PATTERN, detail_text, re.I))
+    hits: list[str] = []
+    for index, line in enumerate(lines):
+        line_hits = [name for name, pattern in DETAIL_CHINESE_PATTERNS.items() if re.search(pattern, line, re.I)]
+        line_hits.extend(marker for marker in DETAIL_CHINESE_LITERALS if marker in line)
+        if not line_hits:
+            continue
+        prior_window = " | ".join(lines[max(0, index - 3) : index + 1])
+        if re.search(DETAIL_CHINESE_NEGATION_PATTERN, line, re.I):
+            continue
+        strong_hits = [hit for hit in line_hits if hit in DETAIL_STRONG_CHINESE_MARKERS]
+        line_has_context = any(
+            re.search(pattern, line, re.I) for pattern in DETAIL_SUBTITLE_CONTEXT_PATTERNS
+        )
+        prior_has_context = any(
+            re.search(pattern, prior_window, re.I) for pattern in DETAIL_SUBTITLE_CONTEXT_PATTERNS
+        )
+        direct_subtitle_file = bool(re.search(DETAIL_SUBTITLE_FILE_PATTERN, line, re.I))
+        audio_only_line = bool(re.search(DETAIL_AUDIO_CONTEXT_PATTERN, line, re.I)) and not line_has_context
+        if audio_only_line:
+            continue
+        contextual_language_value = bool(
+            re.search(DETAIL_GENERIC_CHINESE_VALUE_PATTERN, line, re.I)
+        )
+        if line_has_context or direct_subtitle_file:
+            hits.extend(line_hits)
+        elif prior_has_context and (strong_hits or contextual_language_value):
+            hits.extend(line_hits)
+        elif page_has_subtitle_mode and strong_hits:
+            hits.extend(strong_hits)
+    if hits:
+        return True, "detail-page: " + ", ".join(dict.fromkeys(hits))
+    return False, "detail-page: not confirmed"
+
+
+def apply_detail_subtitle_signal(candidate: Candidate, detail_text: str, want_zh: bool, airing_priority: bool) -> None:
+    has_zh, signal = detect_chinese_in_detail(detail_text)
+    candidate.detail_checked = True
+    candidate.detail_chinese_confirmed = has_zh
+    candidate.detail_subtitle_signal = signal
+    if not has_zh:
+        candidate.reasons.append(signal)
+        return
+
+    candidate.reasons = [
+        reason
+        for reason in candidate.reasons
+        if reason != "Chinese/mixed subtitles not confirmed"
+    ]
+    if candidate.subtitle_signal == "not confirmed":
+        candidate.subtitle_signal = signal
+    else:
+        candidate.subtitle_signal = f"{candidate.subtitle_signal}; {signal}"
+
+    if candidate.tier_fit != "in-tier":
+        candidate.reasons.append(f"Chinese/mixed subtitles confirmed in Nyaa details but not used for rank outside quality tier: {signal}")
+        return
+
+    if want_zh:
+        candidate.score = 0.0  # Deprecated: verified subtitles affect inspection order only.
+        reason_prefix = "airing same-tier" if airing_priority else "same-tier"
+        candidate.reasons.append(f"{reason_prefix} Chinese/mixed subtitle tie-breaker from Nyaa details: {signal}")
+    else:
+        candidate.score = 0.0  # Deprecated: verified subtitles affect inspection order only.
+        reason_prefix = "airing same-tier" if airing_priority else "same-tier"
+        candidate.reasons.append(f"{reason_prefix} subtitle signal in Nyaa details: {signal}")
+
+
+def detect_audio(title: str) -> tuple[float, str]:
+    original_hits = [name for name, pattern in ORIGINAL_AUDIO_PATTERNS.items() if re.search(pattern, title, re.I)]
+    dub_hits = [name for name, pattern in DUB_ONLY_PATTERNS.items() if re.search(pattern, title, re.I)]
+    multi_audio = bool(re.search(MULTI_AUDIO_PATTERN, title, re.I))
+
+    if original_hits:
+        return 12.0, "original audio confirmed: " + ", ".join(dict.fromkeys(original_hits))
+    if multi_audio and not dub_hits:
+        return 7.0, "dual/multi audio; original audio likely but not explicit"
+    if multi_audio and dub_hits:
+        return 4.0, "dual/multi audio with dub signal: " + ", ".join(dict.fromkeys(dub_hits))
+    if dub_hits:
+        return -28.0, "dub-only/alternate dub signal: " + ", ".join(dict.fromkeys(dub_hits))
+    return 0.0, "original audio not stated"
+
+
+def looks_batch(title: str) -> bool:
+    from release_identity import EpisodeKind, parse_release_identity
+
+    return parse_release_identity(title).kind is EpisodeKind.BATCH
+
+
+def normalize_tier(tier: str) -> str:
+    normalized = tier.strip().lower()
+    if normalized not in TIER_ALIASES:
+        allowed = ", ".join(sorted(TIER_PROFILES))
+        raise argparse.ArgumentTypeError(f"unknown tier '{tier}', choose one of: {allowed}")
+    return TIER_ALIASES[normalized]
+
+
+def bitrate_size_score(
+    size_bytes: int | None,
+    tier: str,
+    _duration_min: float,
+    episodes: int | None,
+    batch: bool,
+) -> tuple[float, str, str, str]:
+    if size_bytes is None:
+        return 0.0, "size unavailable; eligibility unknown", "unknown", "unknown"
+
+    total_gib = bytes_to_gib(size_bytes)
+    if batch and episodes and episodes > 0:
+        comparable_gib = total_gib / episodes
+        basis = f"{comparable_gib:.2f} GiB/episode from {episodes}-episode batch"
+    elif batch:
+        return 0.0, "batch size without --episodes; eligibility unknown", f"{total_gib:.2f} GiB batch", "unknown"
+    else:
+        comparable_gib = total_gib
+        basis = f"{comparable_gib:.2f} GiB single release"
+
+    profile = TIER_PROFILES[tier]
+    lower, upper = profile["ideal_gib_per_episode"]
+    fit = "below" if comparable_gib < lower else "above" if comparable_gib > upper else "in-tier"
+    return 0.0, f"size eligibility: {fit}; not a picture-quality score", basis, fit
+
+
+def comparable_gib_per_episode(candidate: Candidate, episodes: int | None) -> float | None:
+    if candidate.size_bytes is None:
+        return None
+    total_gib = bytes_to_gib(candidate.size_bytes)
+    if looks_batch(candidate.title):
+        return total_gib / episodes if episodes and episodes > 0 else None
+    return total_gib
+
+
+def normalize_season_number(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = re.search(r"\d+", value)
+    return int(match.group(0)) if match else None
+
+
+def has_season_marker(title: str, season_number: int) -> bool:
+    roman_markers = {
+        2: ("ii", "Ⅱ"),
+        3: ("iii", "Ⅲ"),
+        4: ("iv", "Ⅳ"),
+        5: ("v", "Ⅴ"),
+    }
+    chinese_markers = {
+        1: ("一", "壹"),
+        2: ("二", "两", "貳", "贰"),
+        3: ("三", "叁"),
+        4: ("四", "肆"),
+        5: ("五", "伍"),
+    }
+    return any(
+        re.search(pattern, title)
+        for pattern in (
+            rf"(?<![a-z0-9])s0*{season_number}(?![a-z0-9])",
+            rf"(?<![a-z0-9])season\s*0*{season_number}(?![a-z0-9])",
+            rf"第\s*{season_number}\s*季",
+            *(
+                rf"第\s*{re.escape(marker)}\s*季"
+                for marker in chinese_markers.get(season_number, ())
+            ),
+            *(
+                rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])"
+                for marker in roman_markers.get(season_number, ())
+            ),
+        )
+    )
+
+
+def generic_episode_match(title: str, episode: int) -> bool:
+    return bool(
+        re.search(
+            rf"(?:^|[\s_\-\[\]\(\)【】第])0*{episode}(?:v\d+)?(?:$|[\s_\-\]\)】话話集])",
+            title,
+        )
+    )
+
+
+def target_episode_label(season: str | None, episode: int | None) -> str:
+    if episode is None:
+        return season or "requested target"
+    season_number = normalize_season_number(season)
+    if season_number is not None:
+        return f"S{season_number:02d}E{episode:02d}"
+    return f"E{episode:02d}"
+
+
+def magnet_from_hash(info_hash: str, title: str) -> str | None:
+    return client_api.magnet_from_hash(info_hash, title)
+
+
+def nyaa_id_from_url(value: str | None) -> str | None:
+    return client_api.nyaa_id_from_url(value)
+
+
+def normalize_nyaa_url(link: str, guid: str) -> str | None:
+    source = guid or link
+    if not source:
+        return None
+    nyaa_id = nyaa_id_from_url(source)
+    if nyaa_id:
+        return client_api.view_url(nyaa_id)
+    return source
+
+
+def build_url(query: str, category: str, nyaa_filter: str) -> str:
+    return client_api.build_rss_url(query, category, nyaa_filter)
+
+
+def fetch_rss(query: str, category: str, nyaa_filter: str, timeout: int) -> bytes:
+    return _TRANSPORT_CLIENT.fetch_rss(query, category, nyaa_filter, timeout)
+
+
+class SkillNyaaClient(NyaaClient):
+    """Compatibility façade that keeps legacy test hooks outside the core workflow."""
+
+    def search(self, request: NyaaSearchRequest) -> list[NyaaRelease]:
+        if request.source == "rss":
+            return client_api.parse_rss(
+                fetch_rss(
+                    request.query,
+                    request.category,
+                    request.nyaa_filter,
+                    int(request.timeout),
+                )
+            )
+        if request.source != "listing":
+            raise ValueError(f"Unsupported Nyaa search source: {request.source}")
+        if request.query:
+            page_html = fetch_search_listing_page(
+                request.query,
+                request.category,
+                request.nyaa_filter,
+                request.page,
+                int(request.timeout),
+                sort=request.sort,
+                order=request.order,
+            )
+        else:
+            page_html = fetch_listing_page(
+                request.category,
+                request.nyaa_filter,
+                request.page,
+                int(request.timeout),
+            )
+        return parse_nyaa_listing(page_html)
+
+    def get(self, release_id: str, *, timeout: float = 20) -> NyaaReleaseDetail:
+        nyaa_id = nyaa_id_from_url(release_id)
+        target = (
+            client_api.view_url(nyaa_id)
+            if nyaa_id
+            else release_id
+        )
+        page_html = fetch_nyaa_detail_page(target, timeout)
+        return client_api.parse_detail(nyaa_id or "0", page_html)
+
+    def get_description(self, release_id: str, *, timeout: float = 20) -> str:
+        return fetch_nyaa_detail_text(release_id, timeout)
+
+
+DEFAULT_CLIENT = SkillNyaaClient()
+
+
+def score_release(release: NyaaRelease,
+    query: str,
+    want_zh: bool,
+    airing_priority: bool,
+    desired_resolution: str | None,
+    tier: str,
+    duration_min: float,
+    episodes: int | None,
+    prefer_groups: Iterable[str],
+    avoid_groups: Iterable[str],
+    include_magnets: bool,
+) -> Candidate:
+    title = release.title
+    url = release.url
+    size = release.size
+    size_bytes = release.size_bytes
+    seeders = release.seeders
+    leechers = release.leechers
+    downloads = release.downloads
+    category = release.category
+    info_hash = release.info_hash
+    published_raw = release.published
+
+    try:
+        if published_raw:
+            published = parsedate_to_datetime(published_raw).date().isoformat()
+        elif release.published_at is not None:
+            published = datetime.fromtimestamp(release.published_at, timezone.utc).date().isoformat()
+        else:
+            published = None
+    except (TypeError, ValueError, OverflowError):
+        published = published_raw or None
+
+    group = detect_group(title)
+    resolution = detect_resolution(title)
+    codec = detect_codec(title)
+    bit_depth = detect_bit_depth(title)
+    _, audio_signal = detect_audio(title)
+    has_zh, subtitle_signal = detect_chinese(title)
+    batch = looks_batch(title)
+    _, size_note, size_basis, tier_fit = bitrate_size_score(size_bytes, tier, duration_min, episodes, batch)
+
+    reasons = [size_note, f"{seeders} seeders", audio_signal,
+               "inspection order only; picture quality requires detail review"]
+    preferred = {g.casefold() for g in prefer_groups}
+    avoided = {g.casefold() for g in avoid_groups}
+    magnet = magnet_from_hash(info_hash, title) if include_magnets else None
+    return Candidate(
+        rank=0,
+        score=0.0,
+        preferred_group=bool(group and group.casefold() in preferred),
+        avoided_group=bool(group and group.casefold() in avoided),
+        title=title,
+        group=group,
+        resolution=resolution,
+        codec=codec,
+        bit_depth=bit_depth,
+        audio_signal=audio_signal,
+        subtitle_signal=subtitle_signal,
+        size=size,
+        size_bytes=size_bytes,
+        size_basis=size_basis,
+        bitrate_note=size_note,
+        tier_fit=tier_fit,
+        seeders=seeders,
+        leechers=leechers,
+        downloads=downloads,
+        published=published,
+        category=category,
+        url=url,
+        magnet=magnet,
+        info_hash=info_hash,
+        matched_queries=[query],
+        reasons=reasons,
+    )
+
+
+
+def score_item(
+    item: ET.Element,
+    query: str,
+    want_zh: bool,
+    airing_priority: bool,
+    desired_resolution: str | None,
+    tier: str,
+    duration_min: float,
+    episodes: int | None,
+    prefer_groups: Iterable[str],
+    avoid_groups: Iterable[str],
+    include_magnets: bool,
+) -> Candidate:
+    """Compatibility wrapper for callers that still provide one RSS XML item."""
+    return score_release(
+        client_api.release_from_rss_item(item),
+        query=query,
+        want_zh=want_zh,
+        airing_priority=airing_priority,
+        desired_resolution=desired_resolution,
+        tier=tier,
+        duration_min=duration_min,
+        episodes=episodes,
+        prefer_groups=prefer_groups,
+        avoid_groups=avoid_groups,
+        include_magnets=include_magnets,
+    )
+
+
+def _metadata_item(metadata: dict[str, object]) -> ET.Element:
+    item = ET.Element("item")
+    nyaa_id = str(metadata.get("nyaa_id") or "")
+    title = str(metadata.get("title") or "")
+    url = client_api.view_url(nyaa_id) if nyaa_id else ""
+    ET.SubElement(item, "title").text = title
+    ET.SubElement(item, "link").text = url
+    ET.SubElement(item, "guid").text = url
+    published_at = metadata.get("published_at")
+    if isinstance(published_at, int):
+        ET.SubElement(item, "pubDate").text = format_datetime(
+            datetime.fromtimestamp(published_at, timezone.utc)
+        )
+    fields = {
+        "size": metadata.get("size"),
+        "seeders": metadata.get("seeders"),
+        "leechers": metadata.get("leechers"),
+        "downloads": metadata.get("downloads"),
+        "category": metadata.get("category"),
+        "infoHash": metadata.get("info_hash"),
+    }
+    for name, value in fields.items():
+        if value is not None and value != "":
+            ET.SubElement(item, f"{NYAA_NS}{name}").text = str(value)
+    return item
+
+
+def listing_entry_as_item(entry: NyaaListingEntry) -> ET.Element:
+    return _metadata_item(
+        {
+            "nyaa_id": entry.nyaa_id,
+            "title": entry.title,
+            "category": entry.category,
+            "size": entry.size,
+            "published_at": entry.published_at,
+            "seeders": entry.seeders,
+            "leechers": entry.leechers,
+            "downloads": entry.downloads,
+            "info_hash": entry.info_hash,
+        }
+    )
+
+
+def detail_page_as_item(nyaa_id: str, page_html: str) -> ET.Element:
+    return _metadata_item(extract_nyaa_detail_metadata(page_html, nyaa_id))
+
+
+def merge_candidate(existing: Candidate, incoming: Candidate) -> Candidate:
+    existing.matched_queries.extend(q for q in incoming.matched_queries if q not in existing.matched_queries)
+    if (incoming.detail_checked, incoming.published or "") > (existing.detail_checked, existing.published or ""):
+        incoming.matched_queries = existing.matched_queries
+        return incoming
+    return existing
+
+
+def render_markdown(candidates: list[Candidate], include_magnets: bool, magnet_only: bool) -> str:
+    if not candidates:
+        return "No matching Nyaa RSS results found."
+
+    lines: list[str] = []
+    for candidate in candidates:
+        meta = " ".join(part for part in (candidate.resolution, candidate.codec, candidate.bit_depth) if part)
+        suffix = f" ({meta})" if meta else ""
+        lines.append(f"{candidate.rank}. {candidate.title}{suffix}")
+        lines.append(
+            "   Inspection only | Group: {group} | Size: {size} | Basis: {basis}".format(
+                score=candidate.score,
+                group=candidate.group or "unknown",
+                size=candidate.size or "unknown",
+                basis=candidate.size_basis,
+            )
+        )
+        lines.append(
+            "   Seeds: {seeders} | Downloads: {downloads} | Audio: {audio} | Chinese/mixed subs: {zh}".format(
+                seeders=candidate.seeders,
+                downloads=candidate.downloads,
+                audio=candidate.audio_signal,
+                zh=candidate.subtitle_signal,
+            )
+        )
+        if candidate.matched_queries:
+            lines.append(f"   Query: {', '.join(candidate.matched_queries)}")
+        if candidate.published or candidate.category:
+            lines.append(f"   Published: {candidate.published or 'unknown'} | Category: {candidate.category or 'unknown'}")
+        lines.append(f"   Why: {'; '.join(candidate.reasons)}")
+        if include_magnets and candidate.magnet:
+            lines.append(f"   Magnet: {candidate.magnet}")
+        if candidate.url and not magnet_only:
+            lines.append(f"   Nyaa: {candidate.url}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Search and rank lawful Nyaa anime releases.")
+    parser.add_argument("query", help="Primary anime/work title or search query. Prefer famous English/romaji titles.")
+    parser.add_argument("--alias", action="append", default=[], help="Additional famous title/search alias; repeatable.")
+    parser.add_argument("--category", default="1_0", help="Nyaa category, default anime all: 1_0.")
+    parser.add_argument("--filter", default="0", help="Nyaa filter: 0 all, 1 no remakes, 2 trusted only.")
+    parser.add_argument("--limit", type=int, default=10, help="Number of ranked results to print.")
+    parser.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds per query.")
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Return up to 20 recent compact candidates without size or subtitle qualification.",
+    )
+    parser.add_argument(
+        "--fast-verify",
+        action="store_true",
+        help="For one simple exact episode, discover and verify the recommended candidate in one process.",
+    )
+    parser.add_argument(
+        "--recent-since",
+        type=date.fromisoformat,
+        help="Discovery-only fallback: scan Nyaa listings from this official episode air date.",
+    )
+    parser.add_argument(
+        "--recent-until",
+        type=date.fromisoformat,
+        help="Optional inclusive end date for an official post-airing window; span may not exceed seven days.",
+    )
+    parser.add_argument(
+        "--current-new-anime",
+        action="store_true",
+        help="Confirm the official resolver identified a currently releasing new TV/TV_SHORT/ONA; required for historical air windows.",
+    )
+    parser.add_argument(
+        "--candidate-id",
+        action="append",
+        default=[],
+        help="Only validate this Nyaa candidate ID; repeat for up to five candidates.",
+    )
+    parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="Short-term RSS cache path.")
+    parser.add_argument("--refresh-cache", action="store_true", help="Bypass and replace the RSS cache.")
+    parser.add_argument("--want-zh", action="store_true", help="Use Chinese or mixed subtitle signals only as a near-tie breaker.")
+    parser.add_argument(
+        "--require-zh",
+        action="store_true",
+        help=(
+            "Require Simplified or Traditional Chinese subtitles confirmed from the Nyaa "
+            "detail page, unless the explicit supplemental CJK-title trust path is used."
+        ),
+    )
+    parser.add_argument(
+        "--trust-cjk-title-for-zh",
+        action="store_true",
+        help=(
+            "Supplemental strict-Chinese fast path: trust a release title that contains the "
+            "matched CJK query, skip subtitle detail inspection, and prefer the largest "
+            "size-qualified exact-episode candidate."
+        ),
+    )
+    parser.add_argument(
+        "--server-sort-size-desc",
+        action="store_true",
+        help=(
+            "Use Nyaa's HTML search with s=size&o=desc before local hard filtering. "
+            "This is automatic for exact episodes, whole-season searches, the CJK-title "
+            "trust lane, premium tier, and explicit size bounds."
+        ),
+    )
+    parser.add_argument("--airing-priority", action="store_true", help="For current-season/new anime, raise same-quality Chinese subtitle/detail priority without crossing quality tiers.")
+    parser.add_argument("--resolution", help="Desired resolution, e.g. 1080p or 2160p.")
+    parser.add_argument("--tier", type=normalize_tier, default="browse", help="Need tier: browse, watch, or premium. Default: browse.")
+    parser.add_argument(
+        "--allow-upward-compatibility",
+        action="store_true",
+        help=(
+            "For named tiers only, make the upper size target a soft preference "
+            "and accept a higher tier when the lower floor and other checks pass; "
+            "explicit max bounds remain hard."
+        ),
+    )
+    parser.add_argument("--season", help="Target season such as S02; filters obvious other-season results.")
+    parser.add_argument("--episode", type=int, help="Target episode; filters previous/other episodes from noisy RSS results.")
+    parser.add_argument(
+        "--movie",
+        action="store_true",
+        help="Select a movie release and apply a total-file-size policy instead of per-episode bounds.",
+    )
+    parser.add_argument("--duration-min", type=float, default=22.0, help="Runtime metadata only; quality tiers use actual file size. Default: 22.")
+    parser.add_argument("--episodes", type=int, help="Episode count for batch scoring; divides total size by this count.")
+    parser.add_argument("--min-gib-per-episode", type=float, help="Hard lower size floor in GiB per 22-minute episode.")
+    parser.add_argument("--max-gib-per-episode", type=float, help="Optional hard upper size bound in GiB per episode.")
+    parser.add_argument(
+        "--min-total-gib",
+        type=float,
+        help="Movie-only hard lower bound in GiB total. Default with --movie: 10 GiB.",
+    )
+    parser.add_argument(
+        "--max-total-gib",
+        type=float,
+        help="Movie-only optional hard upper bound in GiB total.",
+    )
+    parser.add_argument(
+        "--allow-sub-1g",
+        action="store_true",
+        help="Explicitly allow a hard minimum below 1 GiB per episode.",
+    )
+    parser.add_argument("--prefer-group", action="append", default=[], help="Preferred release group; repeatable.")
+    parser.add_argument("--avoid-group", action="append", default=[], help="Avoided release group; repeatable.")
+    parser.add_argument("--inspect-details", action="store_true", help="Fetch Nyaa detail pages and detect subtitle language signals in descriptions.")
+    parser.add_argument(
+        "--detail-limit",
+        type=int,
+        default=5,
+        help="Maximum candidates for ordinary detail inspection; strict Chinese checks use adaptive batches.",
+    )
+    parser.add_argument(
+        "--detail-budget-seconds",
+        type=float,
+        default=30.0,
+        help="Wall-clock budget for a strict Chinese-subtitle detail check.",
+    )
+    parser.add_argument(
+        "--intent",
+        choices=["specific_episode", "next_tracked", "latest_regular", "season_browse", "season_batch", "movie"],
+        help="Structured selection intent. Defaults to specific_episode when --episode is set.",
+    )
+    parser.add_argument("--include-specials", action="store_true", help="Select special/OVA candidates after explicit confirmation.")
+    parser.add_argument("--whole-season", action="store_true", help="Select one verified complete-season package.")
+    parser.add_argument("--report", action="store_true", help="Emit structured selection and filter diagnostics.")
+    parser.add_argument("--include-magnets", action="store_true", help="Print magnet links.")
+    parser.add_argument("--magnet-only", action="store_true", help="When printing magnets, omit Nyaa page links.")
+    parser.add_argument("--legal-ok", action="store_true", help="Confirm the caller has lawful access to these releases.")
+    parser.add_argument("--json", action="store_true", help="Print JSON instead of Markdown.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    if args.movie and any(
+        value is not None
+        for value in (args.season, args.episode, args.episodes)
+    ):
+        print("--movie cannot be combined with --season, --episode, or --episodes.", file=sys.stderr)
+        return 2
+    if args.movie and (args.whole_season or args.include_specials):
+        print("--movie cannot be combined with whole-season or special selection.", file=sys.stderr)
+        return 2
+    if args.movie and (
+        args.min_gib_per_episode is not None
+        or args.max_gib_per_episode is not None
+        or args.allow_sub_1g
+    ):
+        print(
+            "Movie searches use --min-total-gib/--max-total-gib, not per-episode bounds.",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.movie and (
+        args.min_total_gib is not None or args.max_total_gib is not None
+    ):
+        print("--min-total-gib/--max-total-gib require --movie.", file=sys.stderr)
+        return 2
+    if args.movie and args.intent not in {None, "movie"}:
+        print("--movie is only compatible with --intent movie.", file=sys.stderr)
+        return 2
+    if args.discover and args.fast_verify:
+        print("--discover and --fast-verify are separate paths.", file=sys.stderr)
+        return 2
+    if args.discover and args.candidate_id:
+        print("--discover and --candidate-id are separate stages and cannot be combined.", file=sys.stderr)
+        return 2
+    if args.fast_verify:
+        if args.episode is None:
+            print("--fast-verify requires an exact --episode.", file=sys.stderr)
+            return 2
+        if args.candidate_id:
+            print("--fast-verify chooses its own candidate ID.", file=sys.stderr)
+            return 2
+        if (
+            (args.require_zh and not args.trust_cjk_title_for_zh)
+            or args.whole_season
+            or args.include_specials
+        ):
+            print(
+                "--fast-verify is only for a simple regular episode without detail-verified "
+                "strict Chinese, whole-season, or special-release checks; the explicit "
+                "CJK-title trust path is allowed.",
+                file=sys.stderr,
+            )
+            return 2
+        if not args.include_magnets or not args.legal_ok:
+            print(
+                "--fast-verify requires --include-magnets and --legal-ok.",
+                file=sys.stderr,
+            )
+            return 2
+    if args.trust_cjk_title_for_zh and not args.require_zh:
+        print("--trust-cjk-title-for-zh requires --require-zh.", file=sys.stderr)
+        return 2
+    if args.trust_cjk_title_for_zh and not any(
+        contains_cjk(value) for value in [args.query, *args.alias]
+    ):
+        print(
+            "--trust-cjk-title-for-zh requires a Simplified or Traditional Chinese query.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.recent_until is not None and args.recent_since is None:
+        print("--recent-until requires --recent-since.", file=sys.stderr)
+        return 2
+    if args.recent_since is not None:
+        if not args.discover:
+            print("--recent-since requires --discover.", file=sys.stderr)
+            return 2
+        if args.episode is None:
+            print("--recent-since requires an exact --episode.", file=sys.stderr)
+            return 2
+        age_days = (date.today() - args.recent_since).days
+        if age_days < 0:
+            print("--recent-since cannot be in the future.", file=sys.stderr)
+            return 2
+        scan_until = args.recent_until or date.today()
+        if scan_until > date.today():
+            print("--recent-until cannot be in the future.", file=sys.stderr)
+            return 2
+        if scan_until < args.recent_since:
+            print("--recent-until cannot be earlier than --recent-since.", file=sys.stderr)
+            return 2
+        if (scan_until - args.recent_since).days > 7:
+            print("The official Nyaa scan window cannot exceed seven days.", file=sys.stderr)
+            return 2
+        if age_days > 7 and (
+            args.recent_until is None or not args.current_new_anime
+        ):
+            print(
+                "A historical air window requires --recent-until and "
+                "--current-new-anime from a successful official-air-date result.",
+                file=sys.stderr,
+            )
+            return 2
+    if len(args.candidate_id) > 5:
+        print("At most five --candidate-id values may be verified at once.", file=sys.stderr)
+        return 2
+    invalid_candidate_ids = [value for value in args.candidate_id if nyaa_id_from_url(value) is None]
+    if invalid_candidate_ids:
+        print("--candidate-id must be a numeric Nyaa ID or Nyaa view URL.", file=sys.stderr)
+        return 2
+    if args.discover:
+        # Discovery deliberately never exposes magnets or spends requests on detail pages.
+        args.include_magnets = False
+        args.inspect_details = False
+    if args.require_zh:
+        args.want_zh = True
+        if not args.trust_cjk_title_for_zh:
+            args.inspect_details = True
+            args.detail_limit = max(args.detail_limit, 5)
+    if args.include_magnets and not args.legal_ok:
+        print("Refusing to print magnet links without --legal-ok. Re-run without --include-magnets for metadata only.", file=sys.stderr)
+        return 2
+    if args.magnet_only and not args.include_magnets:
+        print("--magnet-only requires --include-magnets and --legal-ok.", file=sys.stderr)
+        return 2
+    explicit_min = args.min_gib_per_episode
+    explicit_max = args.max_gib_per_episode
+    explicit_movie_min = args.min_total_gib
+    explicit_movie_max = args.max_total_gib
+    if args.movie:
+        if explicit_movie_min is not None and explicit_movie_min <= 0:
+            print("--min-total-gib must be greater than zero.", file=sys.stderr)
+            return 2
+        if explicit_movie_max is not None and explicit_movie_max <= 0:
+            print("--max-total-gib must be greater than zero.", file=sys.stderr)
+            return 2
+        if (
+            explicit_movie_min is not None
+            and explicit_movie_max is not None
+            and explicit_movie_max < explicit_movie_min
+        ):
+            print("--max-total-gib must be greater than or equal to --min-total-gib.", file=sys.stderr)
+            return 2
+    if explicit_min is not None and explicit_min < 1.0 and not args.allow_sub_1g:
+        print(
+            "A minimum below 1 GiB requires --allow-sub-1g; the default hard floor is 1 GiB.",
+            file=sys.stderr,
+        )
+        return 2
+    if explicit_min is not None and explicit_max is not None and explicit_max < explicit_min:
+        print("--max-gib-per-episode must be greater than or equal to --min-gib-per-episode.", file=sys.stderr)
+        return 2
+    if args.movie:
+        args.size_policy_source = (
+            "movie_explicit"
+            if explicit_movie_min is not None or explicit_movie_max is not None
+            else "movie_default"
+        )
+        if args.min_total_gib is None:
+            args.min_total_gib = DEFAULT_MOVIE_MIN_TOTAL_GIB
+    else:
+        args.size_policy_source = (
+            "explicit" if explicit_min is not None or explicit_max is not None else "tier"
+        )
+        if args.size_policy_source == "tier":
+            args.min_gib_per_episode = DEFAULT_TIER_MIN_GIB[args.tier]
+    from release_search_core import SearchIntent, discover_release_candidates, search_release_report
+
+    if args.discover:
+        discovery = discover_release_candidates(
+            args,
+            cache_path=args.cache,
+            refresh_cache=args.refresh_cache,
+            limit=20,
+        )
+        from failure_recovery import recovery_plan, transport_diagnostic
+        transport = transport_diagnostic(discovery)
+        if transport:
+            discovery.setdefault("diagnostic", {})["network"] = transport
+        discovery["recovery"] = recovery_plan(discovery)
+        print(json.dumps(discovery, ensure_ascii=False, indent=2))
+        return {
+            "network_error": 1,
+            "incomplete": 1,
+            "no_rss_candidates": 4,
+        }.get(discovery["status"], 0)
+
+    if args.fast_verify:
+        discovery = discover_release_candidates(
+            args,
+            cache_path=args.cache,
+            refresh_cache=args.refresh_cache,
+            limit=20,
+        )
+        fast_path = discovery.get("fast_path")
+        if not fast_path:
+            print(
+                json.dumps(
+                    {
+                        "status": "fast_path_unavailable",
+                        "discovery_status": discovery["status"],
+                        "queries": discovery["queries"],
+                        "failures": discovery["failures"],
+                        "cache": discovery["cache"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 4
+        args.candidate_id = [fast_path["candidate_id"]]
+        args.limit = 1
+        report = search_release_report(
+            args,
+            intent=SearchIntent.SPECIFIC_EPISODE,
+            requested_episode=args.episode,
+            include_specials=False,
+            cache_path=args.cache,
+            refresh_cache=False,
+        )
+        report.diagnostics["fast_path"] = fast_path
+        if args.report:
+            print(json.dumps(report.as_dict(explain=True), ensure_ascii=False, indent=2))
+        else:
+            candidates = [item.candidate for item in report.selected]
+            if args.magnet_only:
+                for candidate in candidates:
+                    candidate.url = None
+            if args.json:
+                print(
+                    json.dumps(
+                        [asdict(candidate) for candidate in candidates],
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print(
+                    render_markdown(
+                        candidates,
+                        include_magnets=True,
+                        magnet_only=args.magnet_only,
+                    )
+                )
+        return {
+            "network_error": 1,
+            "release_unqualified": 3,
+            "no_nyaa_release_for_target": 4,
+            "candidate_not_found": 4,
+        }.get(report.status, 0)
+
+    intent = args.intent or (
+        SearchIntent.MOVIE.value
+        if args.movie
+        else SearchIntent.SPECIFIC_EPISODE.value
+        if args.episode is not None
+        else (
+            SearchIntent.SEASON_BATCH.value
+            if args.whole_season
+            else SearchIntent.SEASON_BROWSE.value
+        )
+    )
+    report = search_release_report(
+        args,
+        intent=intent,
+        requested_episode=args.episode,
+        include_specials=args.include_specials,
+        cache_path=args.cache,
+        refresh_cache=args.refresh_cache,
+    )
+    if report.failures:
+        print("Search warnings: " + " | ".join(report.failures), file=sys.stderr)
+
+    if args.report:
+        print(json.dumps(report.as_dict(explain=True), ensure_ascii=False, indent=2))
+    else:
+        candidates = [item.candidate for item in report.selected]
+        if args.magnet_only:
+            for candidate in candidates:
+                candidate.url = None
+        if args.json:
+            print(json.dumps([asdict(candidate) for candidate in candidates], ensure_ascii=False, indent=2))
+        else:
+            print(render_markdown(candidates, include_magnets=args.include_magnets, magnet_only=args.magnet_only))
+
+    return {
+        "network_error": 1,
+        "release_unqualified": 3,
+        "subtitle_unqualified": 3,
+        "subtitle_check_incomplete": 3,
+        "season_check_incomplete": 3,
+        "no_complete_season_release": 4,
+        "no_nyaa_release_for_target": 4,
+        "candidate_not_found": 4,
+    }.get(report.status, 0)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

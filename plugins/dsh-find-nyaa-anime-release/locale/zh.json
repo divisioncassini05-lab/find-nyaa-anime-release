@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "动漫搜索与自动追番",
+    "description": "用自然语言找 Nyaa 动漫资源，核对季集、画质和中文字幕，返回磁力或交给 qBittorrent，并支持定时追番。",
+    "detail": "DETAILS.zh.md"
+  }
+}

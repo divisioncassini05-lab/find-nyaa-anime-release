@@ -1,0 +1,75 @@
+# 定时运行
+
+DSH: first read [dsh-host-runtime.md](dsh-host-runtime.md) for scheduler readback, state isolation and tool mapping. It replaces Codex-specific host behavior.
+
+按任务保存的范围和条件执行，选择规则见 SKILL.md。
+本文件用于现有任务执行；创建请求另读 scheduled-new-anime.md。
+
+## 1. 定位和分流
+
+读取本任务实际配置、确切 Automation ID、memory.md 的 scheduled_watch 段，
+运行 `python scripts/watch.py inspect "TITLE"` 查看任务固定 track_id 的 v3 状态。
+核对身份和全部目标，不按标题猜归属。固定记录已不存在则结束，不重建、不下载。
+未知身份或冲突先报告并停止检索，不通过猜测消除歧义。
+
+按顺序选择首个适用分支：
+
+| 状态 | 下一步 |
+| --- | --- |
+| 只查/磁力/不下载 | 只读检查；跳过恢复、绑定写入、交付及删除，进入步骤 3 |
+| 有未完成 operation | `watch.py recover --operation OPERATION_ID`，保持原 hash；未解决就结束检索，已恢复交付则进入步骤 4 |
+| completed、cleanup_pending 或待执行 outbox | 读取 [completion.md](completion.md)，只处理本任务相关清理 |
+| finale_pending_evidence 且没有目标集 | 读取 [completion.md](completion.md)，只核验官方完结证据，不虚构下一集 |
+| 其他可检索状态 | 进入步骤 2 |
+
+涉及调度时先进入步骤 2 的计划校对；恢复和清理不能被旧窗口成功记录跳过。
+
+## 2. 校对计划和归属
+
+正常每周触发且没有补查/未完成调度意图时，先做下方时间门禁，再进入归属核验。
+存在临时计划、补查、未完成 intent，或本次不是常规时点时，读取
+[scheduled-retry.md](scheduled-retry.md) 校对记忆与实际配置。
+常规触发先用 `python scripts/scheduled_watch.py gate --rrule "当前实际规则"`
+核对真实当前时间。提前不超过 5 分钟时返回 `wait_until_due`：保持本轮运行，
+按 wait_seconds 等待（每次最多 60 秒），再运行 gate，直到 due；不得直接结束，
+不得记成功/失败、消耗补查次数或假设调度器到点还会再次唤醒。
+等待后读回实际配置；暂停、改时或范围变化则重新校对，不能沿用旧授权范围。
+DSH 计划消息的触发时间是触发时间，不是等待后的当前时间；实时 gate 不传 --now。
+这只是对提前唤醒的有限等待，不提前检索，也不增加新任务或改动常规时间。
+补查使用已核实 retry_due 作为 gate 的 --due-at，详见 scheduled-retry.md。
+到点后仍核验本窗口执行记录；重复触发不重复交付。人工暂停或改时不覆盖。新窗口重置次数，
+不能沿用上周成功；同一补查重入不再增加次数。
+
+交付前按 [completion.md](completion.md) 的“Bind real ownership”核验
+确切 ID、当前完整 prompt 的 UTF-8 SHA-256 和所有目标。未绑定或 hash 变化时，
+审阅完整范围再绑定；失败则停止交付。不把自身 ID/hash 回填 prompt。
+
+## 3. 检索与交付
+
+读取 [retrieval-workflow.md](retrieval-workflow.md)，执行 workspace、discover、
+detail、Agent review、验证和交付。创建 review 时才读 agent-review.md；
+其他专题仅在该分支出现时加载。
+
+每轮最多交付一个未处理的最新常规正片。默认 browse 1–2 GiB、允许向上兼容、
+中文软偏好，review 和 deliver 使用相同条件；有显式上限/硬字幕要求则保留。
+客户端接受且进度提交才算成功，不等下载完成。失败恢复原操作，不换候选重投。
+只读模式只返回审阅结果，不更新 handled progress，也不执行完结删除。
+
+## 4. 收尾
+
+检索失败也进入收尾：按工具返回的 outcome（连接失败用 transport.scheduled_outcome）
+及本窗口状态，读取 [scheduled-retry.md](scheduled-retry.md) 调用只读 planner；
+需要变更计划时由 app 工具修改原任务，不能在报告网络失败后跳过这一阶段。
+未更新、无合格资源、临时网络或详情不完整可 4 小时后补查，最多 3 次，
+不跨下次常规检查；成功或耗尽恢复常规。已确认未开播/停播、歧义、权限拒绝、
+永久失败不盲目补查；客户端失败只恢复原 operation。
+上周已处理的集数不能证明本窗口成功。只读任务用 read_only_done 结束窗口。
+
+出现最终集证据或清理请求才读 completion.md。只有整个固定范围的官方完结证据
+和最终集 accepted receipt 都齐全，才能按 outbox 删除所属任务和本地记录。
+只清本次范围及必要关联目标，不删除视频、字幕或客户端任务。
+
+无新资源/只读等正常结束执行 `watch.py cleanup --run RUN_DIR`；
+交付成功由脚本清理，未完成操作/未持久化回执保留。临时文件只放托管 run_dir。
+无变化且无需行动时安静；交付、补查安排/耗尽、失败、完结简短通知。
+只报告工具确认的状态，区分已加入客户端、下载完成和已观看。

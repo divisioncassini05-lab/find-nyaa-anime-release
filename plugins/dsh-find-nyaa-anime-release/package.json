@@ -1,0 +1,26 @@
+{
+  "name": "dsh-find-nyaa-anime-release",
+  "version": "0.1.0",
+  "description": "Evidence-reviewed Nyaa anime search, Chinese subtitle checks and qBittorrent delivery for DeepSeek Harness.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "cordis.patch.yml", "icon.svg", "locale", "assets", "skills", "README.md", "DETAILS.zh.md", "COMPATIBILITY.md", "MARKETPLACE.md", "BUILD-REPORT.md", "UPSTREAM.json", "LICENSE"],
+  "engines": { "node": ">=24.9.0", "dsh": ">=0.2.2-rc.1 <0.3.0" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "keywords": ["dsh-plugin", "deepseek-harness", "anime", "nyaa", "qbittorrent", "skill"],
+  "author": "divisioncassini05-lab",
+  "repository": { "type": "git", "url": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release.git", "directory": "plugins/dsh-find-nyaa-anime-release" },
+  "homepage": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release/tree/main/plugins/dsh-find-nyaa-anime-release",
+  "bugs": { "url": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release/issues" },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:python": "python -m pytest tests/test_dsh_adapter.py -q -p no:cacheprovider"
+  }
+}

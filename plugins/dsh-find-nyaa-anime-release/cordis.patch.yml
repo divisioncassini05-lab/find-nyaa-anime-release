@@ -1,0 +1,4 @@
+- insert:
+    - id: find-nyaa-anime-release
+      name: dsh-find-nyaa-anime-release
+      config: {}

@@ -1,1 +1,4 @@
 skills/find-nyaa-anime-release/** -text
+plugins/dsh-find-nyaa-anime-release/** -text
+tools/** text eol=lf
+.github/** text eol=lf

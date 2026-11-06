@@ -1,0 +1,4292 @@
+{
+  "captured_at": "2026-09-24T01:58:15.948347+00:00",
+  "provider": "bangumi",
+  "response": {
+    "data": [
+      {
+        "date": "2026-04-08",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/8e/70/547888_46dnk.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/8e/70/547888_46dnk.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/8e/70/547888_46dnk.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/8e/70/547888_46dnk.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/8e/70/547888_46dnk.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/8e/70/547888_46dnk.jpg",
+        "summary": "在水门都市朴利斯提拉的死战中，昴等人虽然勉强取得胜利，但付出的代价，却过于沉重。因「暴食」权能而陷入沉睡的雷姆，被夺走记忆的库珥修，以及，被夺去名字的由里乌斯。\r\n为了寻找拯救他们的线索，昴得知了一位据说能看透一切、拥有无尽知识的存在——「贤者」夏乌拉。\r\n下一个目的地，是贤者所居住的「普莱迪斯监视塔」。那是一座矗立于大砂漠「奥吉拉沙丘」最深处的最果之塔，就连最强的「剑圣」莱因哈鲁特，也未曾成功攻略。\r\n狂暴的自然——\r\n未知的魔兽——\r\n以及，超越想象的威胁接连袭来。\r\n为了夺回一切——\r\n少年与伙伴们，赌上性命的旅程，就此展开。\r\n\r\n\r\n[简介原文]\r\n水門都市プリステラの死闘で辛くも勝利を収めたスバルたちだったが、その代償はあまりに大きかった。“暴食“の権能によって眠り続けるレム、記憶を奪われたクルシュ、そして名前を奪われてしまったユリウス。\r\n彼らを救う手がかりを求める中、スバルは全てを見通し、あらゆる知識を持つと言われる『賢者』シャウラの存在を知る。\r\n次の目的地は賢者の住まう「プレアデス監視塔」──そこは、最強の『剣聖』ラインハルトですら攻略できなかった大砂漠「アウグリア砂丘」にそびえ立つ最果ての塔。\r\n猛威を振るう自然、未知なる魔獣、そして想像を絶する脅威が立ちはだかる。仲間と共に、すべてを取り戻すため、命を懸けた少年の旅路が始まる──",
+        "name": "Re:ゼロから始める異世界生活 4th season 喪失編",
+        "name_cn": "Re：从零开始的异世界生活 第四季 丧失篇",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 1500,
+            "total_count": 266101
+          },
+          {
+            "name": "奇幻",
+            "count": 1131,
+            "total_count": 479025
+          },
+          {
+            "name": "2026年4月",
+            "count": 1044,
+            "total_count": 25820
+          },
+          {
+            "name": "战斗",
+            "count": 938,
+            "total_count": 478061
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 917,
+            "total_count": 33722
+          },
+          {
+            "name": "TV",
+            "count": 868,
+            "total_count": 1419965
+          },
+          {
+            "name": "轻小说改",
+            "count": 806,
+            "total_count": 500641
+          },
+          {
+            "name": "小说改",
+            "count": 600,
+            "total_count": 162710
+          },
+          {
+            "name": "冒险",
+            "count": 558,
+            "total_count": 54995
+          },
+          {
+            "name": "轮回",
+            "count": 523,
+            "total_count": 17234
+          },
+          {
+            "name": "日本",
+            "count": 473,
+            "total_count": 303634
+          },
+          {
+            "name": "2026",
+            "count": 440,
+            "total_count": 46660
+          },
+          {
+            "name": "Re：從零開始的異世界生活",
+            "count": 354,
+            "total_count": 1047
+          },
+          {
+            "name": "轻改",
+            "count": 212,
+            "total_count": 153777
+          },
+          {
+            "name": "续作",
+            "count": 79,
+            "total_count": 47360
+          },
+          {
+            "name": "悬疑",
+            "count": 61,
+            "total_count": 114930
+          },
+          {
+            "name": "穿越",
+            "count": 28,
+            "total_count": 63958
+          },
+          {
+            "name": "恋爱",
+            "count": 26,
+            "total_count": 571640
+          },
+          {
+            "name": "未定档",
+            "count": 25,
+            "total_count": 4172
+          },
+          {
+            "name": "热血",
+            "count": 25,
+            "total_count": 215417
+          },
+          {
+            "name": "筱原正宽",
+            "count": 23,
+            "total_count": 141
+          },
+          {
+            "name": "篠原正寛",
+            "count": 21,
+            "total_count": 99
+          },
+          {
+            "name": "后宫",
+            "count": 19,
+            "total_count": 306466
+          },
+          {
+            "name": "re0",
+            "count": 14,
+            "total_count": 257
+          },
+          {
+            "name": "Re:從零開始的異世界生活",
+            "count": 13,
+            "total_count": 15
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 12,
+            "total_count": 4117
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 11,
+            "total_count": 427
+          },
+          {
+            "name": "横谷昌宏",
+            "count": 9,
+            "total_count": 569
+          },
+          {
+            "name": "2026年",
+            "count": 9,
+            "total_count": 2003
+          },
+          {
+            "name": "高桥李依",
+            "count": 8,
+            "total_count": 2966
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 第四季 丧失篇"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season"
+              },
+              {
+                "v": "Re:ZERO -Starting Life in Another World- Season 4"
+              },
+              {
+                "v": "Re Zero kara Hajimeru Isekai Seikatsu 4th Season"
+              },
+              {
+                "v": "Re：從零開始的異世界生活 第四季 喪失篇"
+              },
+              {
+                "v": "re0 第四季 丧失篇"
+              },
+              {
+                "v": "re0 第四季 喪失篇"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "11"
+          },
+          {
+            "key": "放送开始",
+            "value": "2026年4月8日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/tv/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "TOKYO MX"
+          },
+          {
+            "key": "其他电视台",
+            "value": "AT-X"
+          },
+          {
+            "key": "播放结束",
+            "value": "2026年6月17日"
+          },
+          {
+            "key": "导演",
+            "value": "篠原正寛"
+          },
+          {
+            "key": "Copyright",
+            "value": "©長月達平・株式会社KADOKAWA刊／ Re:ゼロから始める異世界生活4製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J『Re:ゼロから始める異世界生活』/KADOKAWA刊）"
+          },
+          {
+            "key": "人物设定",
+            "value": "佐川遥"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活4製作委員会（KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、DAXEL、メモリーテック）"
+          },
+          {
+            "key": "企画",
+            "value": "工藤大丈"
+          },
+          {
+            "key": "执行制片人",
+            "value": "田中翔、神部宗之、佐野圭介、岡庭幸春、國府田英則"
+          },
+          {
+            "key": "制片人",
+            "value": "瀬戸口尚斗、深尾聡志、飯塚彩、鈴木健、青木絵理子"
+          },
+          {
+            "key": "宣传制片人",
+            "value": "西宮万柚子"
+          },
+          {
+            "key": "宣传",
+            "value": "後藤みづ紀"
+          },
+          {
+            "key": "副制片人",
+            "value": "目黒大樹"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "制作管理",
+            "value": "清水航"
+          },
+          {
+            "key": "设定制作",
+            "value": "佐藤智基"
+          },
+          {
+            "key": "制作进行",
+            "value": "岩前大暉、栗林ひかり"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 ライトノベルIP課（小木曽正泰、駒井紀之、本郷駿之介、川村詩織、加藤隆志、山本莉沙）、月刊コミックアライブ編集部（松井健太、赤坂泰基、有村政輝、堀場海、大久保有紗）、滝澤圭一、胡桃彩乃"
+          },
+          {
+            "key": "协力",
+            "value": "尾形光広、梅田正勝、清原誠巳、中山卓也、千葉誠、川野耕一、上野真実、棚橋真由美、大野和正、村上遥香、北嶋政哉、足立咲季子、若狭澪奈"
+          },
+          {
+            "key": "制作助理",
+            "value": "林藤さちこ、涼風海斗、神崎綿、佐久間悠吏、城岡祐介、野梶ゆうか、花添礼奈"
+          },
+          {
+            "key": "怪物设计",
+            "value": "千葉啓太郎"
+          },
+          {
+            "key": "主动画师",
+            "value": "关键动画师：ハミル[Hamil]"
+          },
+          {
+            "key": "动作导演",
+            "value": "动作监修：ハミル[Hamil]"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "摄影监督",
+            "value": "宮城己織；摄影监修：峰岸健太郎"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "茶畑満里奈；主题歌制作人：竹山沙織"
+          },
+          {
+            "key": "脚本",
+            "value": "横谷昌宏(67,70,73,76)、中村能子(68,71,74,77)、梅原英司(69,72,75)"
+          },
+          {
+            "key": "分镜",
+            "value": "頂真司(67,68,74-75)、篠原正寛(67,72)、原英和(69)、大槻一恵(70)、藤井康晶(71)、岩畑剛一(72)、おざわかずひろ(73,77)、及川啓(76)"
+          },
+          {
+            "key": "演出",
+            "value": "篠原正寛(67)、正木陽南子(68,75)、原英和(69)、中津環(70)、永吉隆志(71)、江口大輔(72)、おざわかずひろ(73)、川部真也(75)、後藤真人(76)、石川雄大(77)"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "小嶋慶祐 / 篠原正寛"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "小嶋慶祐 / 篠原正寛"
+          },
+          {
+            "key": "总作画监督",
+            "value": "佐川遥、三島千枝"
+          },
+          {
+            "key": "作画监督",
+            "value": "三浦瞳、齊藤貴巳一、平松伸行"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫、村山夏子；美术设定协力：中島美佳"
+          },
+          {
+            "key": "CG 导演",
+            "value": "居嶋健太郎；CG Line导演：伊藤仁美"
+          },
+          {
+            "key": "3DCG",
+            "value": "3DCGI：FelixFilm"
+          },
+          {
+            "key": "CG 制作人",
+            "value": "田中臥竜"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "高橋秀地"
+          },
+          {
+            "key": "摄影",
+            "value": "T2 Studio"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳；剪辑辅佐：仙土真希"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "Imagica EMS（今吉李枝、中村恰央）"
+          },
+          {
+            "key": "音响",
+            "value": "マジックカプセル"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "見留滉平"
+          },
+          {
+            "key": "录音",
+            "value": "根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "久保田未萌"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二(スワラ・プロ)"
+          },
+          {
+            "key": "主题歌演出",
+            "value": "鈴木このみ feat. Ashnikko / MYTH & ROID feat. TK (凛として時雨)"
+          },
+          {
+            "key": "主题歌作词",
+            "value": "TeddyLoid、Ashnikko / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作曲",
+            "value": "Giga (ギガP)、TeddyLoid / MYTH & ROID、TK"
+          },
+          {
+            "key": "主题歌编曲",
+            "value": "Giga (ギガP)、TeddyLoid"
+          }
+        ],
+        "rating": {
+          "rank": 470,
+          "total": 6351,
+          "count": {
+            "1": 18,
+            "2": 7,
+            "3": 10,
+            "4": 39,
+            "5": 67,
+            "6": 350,
+            "7": 1666,
+            "8": 3132,
+            "9": 726,
+            "10": 336
+          },
+          "score": 7.8
+        },
+        "collection": {
+          "on_hold": 217,
+          "dropped": 98,
+          "wish": 3040,
+          "collect": 10225,
+          "doing": 3892
+        },
+        "id": 547888,
+        "eps": 11,
+        "total_episodes": 11,
+        "meta_tags": [
+          "TV",
+          "冒险",
+          "奇幻",
+          "小说改",
+          "战斗",
+          "日本"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2026-08-12",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/43/ca/633836_ql0f3.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/43/ca/633836_ql0f3.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/43/ca/633836_ql0f3.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/43/ca/633836_ql0f3.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/43/ca/633836_ql0f3.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/43/ca/633836_ql0f3.jpg",
+        "summary": "在水门都市朴利斯提拉的死战中，昴等人虽然勉强取得胜利，但付出的代价，却过于沉重。因「暴食」权能而陷入沉睡的雷姆，被夺走记忆的库珥修，以及，被夺去名字的由里乌斯。\r\n为了寻找拯救他们的线索，昴得知了一位据说能看透一切、拥有无尽知识的存在——「贤者」夏乌拉。\r\n下一个目的地，是贤者所居住的「普莱迪斯监视塔」。那是一座矗立于大砂漠「奥吉拉沙丘」最深处的最果之塔，就连最强的「剑圣」莱因哈鲁特，也未曾成功攻略。\r\n狂暴的自然——\r\n未知的魔兽——\r\n以及，超越想象的威胁接连袭来。\r\n为了夺回一切——\r\n少年与伙伴们，赌上性命的旅程，就此展开。\r\n\r\n\r\n[简介原文]\r\n水門都市プリステラの死闘で辛くも勝利を収めたスバルたちだったが、その代償はあまりに大きかった。“暴食“の権能によって眠り続けるレム、記憶を奪われたクルシュ、そして名前を奪われてしまったユリウス。\r\n彼らを救う手がかりを求める中、スバルは全てを見通し、あらゆる知識を持つと言われる『賢者』シャウラの存在を知る。\r\n次の目的地は賢者の住まう「プレアデス監視塔」──そこは、最強の『剣聖』ラインハルトですら攻略できなかった大砂漠「アウグリア砂丘」にそびえ立つ最果ての塔。\r\n猛威を振るう自然、未知なる魔獣、そして想像を絶する脅威が立ちはだかる。仲間と共に、すべてを取り戻すため、命を懸けた少年の旅路が始まる──",
+        "name": "Re:ゼロから始める異世界生活 4th season 奪還編",
+        "name_cn": "Re：从零开始的异世界生活 第四季 夺还篇",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 528,
+            "total_count": 266093
+          },
+          {
+            "name": "2026年7月",
+            "count": 519,
+            "total_count": 25423
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 427,
+            "total_count": 33722
+          },
+          {
+            "name": "TV",
+            "count": 387,
+            "total_count": 1419945
+          },
+          {
+            "name": "奇幻",
+            "count": 378,
+            "total_count": 479008
+          },
+          {
+            "name": "战斗",
+            "count": 348,
+            "total_count": 478055
+          },
+          {
+            "name": "轻小说改",
+            "count": 342,
+            "total_count": 500616
+          },
+          {
+            "name": "小说改",
+            "count": 234,
+            "total_count": 162710
+          },
+          {
+            "name": "轮回",
+            "count": 220,
+            "total_count": 17234
+          },
+          {
+            "name": "冒险",
+            "count": 205,
+            "total_count": 54995
+          },
+          {
+            "name": "2026",
+            "count": 204,
+            "total_count": 46660
+          },
+          {
+            "name": "穿越",
+            "count": 199,
+            "total_count": 63958
+          },
+          {
+            "name": "日本",
+            "count": 197,
+            "total_count": 303637
+          },
+          {
+            "name": "轻改",
+            "count": 137,
+            "total_count": 153777
+          },
+          {
+            "name": "续作",
+            "count": 89,
+            "total_count": 47360
+          },
+          {
+            "name": "2026年8月",
+            "count": 23,
+            "total_count": 49
+          },
+          {
+            "name": "筱原正宽",
+            "count": 20,
+            "total_count": 141
+          },
+          {
+            "name": "后宫",
+            "count": 16,
+            "total_count": 306458
+          },
+          {
+            "name": "re0",
+            "count": 14,
+            "total_count": 257
+          },
+          {
+            "name": "悬疑",
+            "count": 13,
+            "total_count": 114930
+          },
+          {
+            "name": "热血",
+            "count": 11,
+            "total_count": 215417
+          },
+          {
+            "name": "横谷昌宏",
+            "count": 9,
+            "total_count": 569
+          },
+          {
+            "name": "Re：從零開始的異世界生活",
+            "count": 9,
+            "total_count": 1047
+          },
+          {
+            "name": "动画",
+            "count": 8,
+            "total_count": 35764
+          },
+          {
+            "name": "恋爱",
+            "count": 8,
+            "total_count": 571641
+          },
+          {
+            "name": "篠原正寛",
+            "count": 7,
+            "total_count": 99
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 7,
+            "total_count": 427
+          },
+          {
+            "name": "2026年",
+            "count": 6,
+            "total_count": 2003
+          },
+          {
+            "name": "長月達平",
+            "count": 4,
+            "total_count": 1208
+          },
+          {
+            "name": "从零开始的异世界生活",
+            "count": 4,
+            "total_count": 468
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 第四季 夺还篇"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season"
+              },
+              {
+                "v": "Re:ZERO -Starting Life in Another World- Season 4"
+              },
+              {
+                "v": "Re Zero kara Hajimeru Isekai Seikatsu 4th Season"
+              },
+              {
+                "v": "Re：從零開始的異世界生活 第四季 奪還篇"
+              },
+              {
+                "v": "re0 第四季 夺还篇"
+              },
+              {
+                "v": "re0 第四季 奪還篇"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "8"
+          },
+          {
+            "key": "放送开始",
+            "value": "2026年8月12日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/tv/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "TOKYO MX"
+          },
+          {
+            "key": "导演",
+            "value": "篠原正寛"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "Copyright",
+            "value": "©長月達平・株式会社KADOKAWA刊／ Re:ゼロから始める異世界生活4製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J『Re:ゼロから始める異世界生活』/KADOKAWA刊）"
+          },
+          {
+            "key": "系列构成",
+            "value": "横谷昌宏"
+          },
+          {
+            "key": "监修",
+            "value": "長月達平"
+          },
+          {
+            "key": "人物设定",
+            "value": "佐川遥"
+          },
+          {
+            "key": "怪物设计",
+            "value": "千葉啓太郎"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫、村山夏子"
+          },
+          {
+            "key": "美术监督",
+            "value": "木下了香"
+          },
+          {
+            "key": "色彩设计",
+            "value": "坂本いづみ"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "主动画师",
+            "value": "关键动画师：ハミル[Hamil]"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活4製作委員会（KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、DAXEL、メモリーテック）"
+          },
+          {
+            "key": "企画",
+            "value": "工藤大丈"
+          },
+          {
+            "key": "执行制片人",
+            "value": "田中翔、神部宗之、佐野圭介、岡庭幸春、國府田英則"
+          },
+          {
+            "key": "制片人",
+            "value": "瀬戸口尚斗、深尾聡志、飯塚彩、鈴木健、青木絵理子"
+          },
+          {
+            "key": "副制片人",
+            "value": "目黒大樹"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "音响监督",
+            "value": "明田川仁"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "茶畑満里奈；主题歌制作人：竹山沙織"
+          },
+          {
+            "key": "主题歌演出",
+            "value": "鈴木このみ feat. Ashnikko / MYTH & ROID feat. TK (凛として時雨)"
+          },
+          {
+            "key": "主题歌作词",
+            "value": "TeddyLoid、Ashnikko / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作曲",
+            "value": "Giga (ギガP)、TeddyLoid / MYTH & ROID、TK"
+          },
+          {
+            "key": "主题歌编曲",
+            "value": "Giga (ギガP)、TeddyLoid"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "小嶋慶祐 / 篠原正寛"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "小嶋慶祐 / 篠原正寛"
+          },
+          {
+            "key": "原作协力",
+            "value": "福きつね"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 ライトノベルIP課（小木曽正泰、駒井紀之、本郷駿之介、川村詩織、加藤隆志、山本莉沙）、月刊コミックアライブ編集部（松井健太、赤坂泰基、有村政輝、堀場海、大久保有紗）、滝澤圭一、胡桃彩乃"
+          },
+          {
+            "key": "协力",
+            "value": "尾形光広、梅田正勝、清原誠巳、中山卓也、千葉誠、川野耕一、上野真実、棚橋真由美、大野和正、村上遥香、北嶋政哉、足立咲季子、若狭澪奈"
+          },
+          {
+            "key": "制作助理",
+            "value": "林藤さちこ、涼風海斗、神崎綿、佐久間悠吏、城岡祐介、野梶ゆうか、花添礼奈"
+          },
+          {
+            "key": "宣传制片人",
+            "value": "西宮万柚子"
+          },
+          {
+            "key": "宣传",
+            "value": "後藤みづ紀"
+          },
+          {
+            "key": "制作管理",
+            "value": "制作デスク：清水航"
+          },
+          {
+            "key": "设定制作",
+            "value": "佐藤トモキ（佐藤智基）"
+          },
+          {
+            "key": "制作进行",
+            "value": "礒部幸一郎"
+          },
+          {
+            "key": "3DCG",
+            "value": "3DCGI：FelixFilm"
+          },
+          {
+            "key": "CG 导演",
+            "value": "居嶋健太郎；CG Line导演：伊藤仁美"
+          },
+          {
+            "key": "CG 制作人",
+            "value": "田中臥竜"
+          },
+          {
+            "key": "摄影监督",
+            "value": "宮城己織；摄影监修：峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "高橋秀地"
+          },
+          {
+            "key": "摄影",
+            "value": "T2 Studio（宮城己織、高橋秀地、兼久卓、山中雅斗、堀越弘伸、大簱忍、本間綾子、峰岸健太郎）"
+          },
+          {
+            "key": "2D 设计",
+            "value": "加藤絵梨"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳"
+          },
+          {
+            "key": "剪辑助理",
+            "value": "仙土真希"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "Imagica EMS（今吉李枝、中村恰央）"
+          },
+          {
+            "key": "音响",
+            "value": "マジックカプセル"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "見留滉平"
+          },
+          {
+            "key": "录音",
+            "value": "根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "久保田未萌"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二(スワラ・プロ)"
+          },
+          {
+            "key": "脚本",
+            "value": "梅原英司"
+          },
+          {
+            "key": "分镜",
+            "value": "頂真司、篠原正寛"
+          },
+          {
+            "key": "演出",
+            "value": "中津環"
+          },
+          {
+            "key": "总作画监督",
+            "value": "佐川遥、三島千枝"
+          },
+          {
+            "key": "作画监督",
+            "value": "三浦瞳、杉浦圭一、滝吾郎"
+          }
+        ],
+        "rating": {
+          "rank": 701,
+          "total": 1492,
+          "count": {
+            "1": 17,
+            "2": 4,
+            "3": 6,
+            "4": 8,
+            "5": 38,
+            "6": 103,
+            "7": 407,
+            "8": 654,
+            "9": 151,
+            "10": 104
+          },
+          "score": 7.6
+        },
+        "collection": {
+          "on_hold": 98,
+          "dropped": 57,
+          "wish": 2086,
+          "collect": 667,
+          "doing": 7268
+        },
+        "id": 633836,
+        "eps": 8,
+        "total_episodes": 8,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "奇幻",
+          "战斗",
+          "冒险",
+          "穿越",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2016-04-03",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/cb/78/140001_Ew1mo.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/cb/78/140001_Ew1mo.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/cb/78/140001_Ew1mo.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/cb/78/140001_Ew1mo.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/cb/78/140001_Ew1mo.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/cb/78/140001_Ew1mo.jpg",
+        "summary": "　　从便利店回来的路上突然被召唤到异世界的少年，菜月昴。在无可依赖的异世界，无力的少年所唯一拥有的力量……那就是死后便会使时间倒转的“死亡回归”的力量。为了守护重要的人，并取回那些无可替代的时间，少年向绝望抗争，挺身面对残酷的命运。",
+        "name": "Re:ゼロから始める異世界生活",
+        "name_cn": "Re：从零开始的异世界生活",
+        "tags": [
+          {
+            "name": "轻小说改",
+            "count": 4836,
+            "total_count": 500625
+          },
+          {
+            "name": "异世界",
+            "count": 3868,
+            "total_count": 266093
+          },
+          {
+            "name": "穿越",
+            "count": 3116,
+            "total_count": 63958
+          },
+          {
+            "name": "2016年4月",
+            "count": 3105,
+            "total_count": 24879
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 3002,
+            "total_count": 33722
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 2917,
+            "total_count": 4117
+          },
+          {
+            "name": "奇幻",
+            "count": 2556,
+            "total_count": 479017
+          },
+          {
+            "name": "TV",
+            "count": 2076,
+            "total_count": 1419953
+          },
+          {
+            "name": "轮回",
+            "count": 1465,
+            "total_count": 17234
+          },
+          {
+            "name": "轻改",
+            "count": 1394,
+            "total_count": 153777
+          },
+          {
+            "name": "2016",
+            "count": 1239,
+            "total_count": 71762
+          },
+          {
+            "name": "战斗",
+            "count": 908,
+            "total_count": 478055
+          },
+          {
+            "name": "小说改",
+            "count": 546,
+            "total_count": 162710
+          },
+          {
+            "name": "日本",
+            "count": 346,
+            "total_count": 303636
+          },
+          {
+            "name": "恋爱",
+            "count": 345,
+            "total_count": 571640
+          },
+          {
+            "name": "小林裕介",
+            "count": 324,
+            "total_count": 1145
+          },
+          {
+            "name": "中村悠一",
+            "count": 168,
+            "total_count": 11899
+          },
+          {
+            "name": "后宫",
+            "count": 164,
+            "total_count": 306458
+          },
+          {
+            "name": "2016年四月番",
+            "count": 118,
+            "total_count": 302
+          },
+          {
+            "name": "渡边政治",
+            "count": 106,
+            "total_count": 561
+          },
+          {
+            "name": "長月達平",
+            "count": 94,
+            "total_count": 1208
+          },
+          {
+            "name": "渡邊政治",
+            "count": 93,
+            "total_count": 626
+          },
+          {
+            "name": "高桥李依",
+            "count": 61,
+            "total_count": 2966
+          },
+          {
+            "name": "冒险",
+            "count": 59,
+            "total_count": 54995
+          },
+          {
+            "name": "悬疑",
+            "count": 57,
+            "total_count": 114930
+          },
+          {
+            "name": "热血",
+            "count": 56,
+            "total_count": 215417
+          },
+          {
+            "name": "2016年",
+            "count": 53,
+            "total_count": 4624
+          },
+          {
+            "name": "剧情",
+            "count": 38,
+            "total_count": 16245
+          },
+          {
+            "name": "re0",
+            "count": 34,
+            "total_count": 257
+          },
+          {
+            "name": "半年番",
+            "count": 32,
+            "total_count": 4411
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu"
+              },
+              {
+                "v": "rezero"
+              },
+              {
+                "v": "Re0"
+              },
+              {
+                "v": "Re: Life a Different World from Zero"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "25"
+          },
+          {
+            "key": "放送开始",
+            "value": "2016年4月3日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期日"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "テレビ東京"
+          },
+          {
+            "key": "其他电视台",
+            "value": "テレビ愛知 / テレビ大阪 / AT-X"
+          },
+          {
+            "key": "播放结束",
+            "value": "2016年9月18日"
+          },
+          {
+            "key": "导演",
+            "value": "渡邊政治"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "Copyright",
+            "value": "©長月達平・株式会社KADOKAWA刊／Re:ゼロから始める異世界生活製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J「Re:ゼロから始める異世界生活」/KADOKAWA刊）"
+          },
+          {
+            "key": "监修",
+            "value": "剧本监修：長月達平"
+          },
+          {
+            "key": "系列构成",
+            "value": "横谷昌宏"
+          },
+          {
+            "key": "人物原案",
+            "value": "大塚真一郎"
+          },
+          {
+            "key": "人物设定",
+            "value": "坂井久太"
+          },
+          {
+            "key": "副人物设定",
+            "value": "小柳達也・田中一真(12-25)"
+          },
+          {
+            "key": "道具设计",
+            "value": "鈴木典孝、岩畑剛一"
+          },
+          {
+            "key": "怪物设计",
+            "value": "小柳達也(1-11)"
+          },
+          {
+            "key": "设定",
+            "value": "コレサワシゲユキ、灯夢、坂井ユウスケ"
+          },
+          {
+            "key": "标题设计",
+            "value": "新井隼也"
+          },
+          {
+            "key": "美术设计",
+            "value": "金城沙綾"
+          },
+          {
+            "key": "美术监督",
+            "value": "高峯義人"
+          },
+          {
+            "key": "色彩设计",
+            "value": "坂本いづみ"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "摄影监督",
+            "value": "峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "本間綾子"
+          },
+          {
+            "key": "3DCG 导演",
+            "value": "軽部優"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "IMAGICA (今吉李枝)"
+          },
+          {
+            "key": "音响监督",
+            "value": "明田川仁"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二 (スワラ・プロ)"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "田中理恵、宮本かおり(12-25)"
+          },
+          {
+            "key": "音响",
+            "value": "マジックカプセル"
+          },
+          {
+            "key": "录音助理",
+            "value": "進藤公隆"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "动画制片人",
+            "value": "吉川綱樹"
+          },
+          {
+            "key": "动画制作",
+            "value": "WHITE FOX"
+          },
+          {
+            "key": "主题歌演出",
+            "value": "鈴木このみ / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作词",
+            "value": "ミズノゲンキ / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作曲",
+            "value": "宮崎誠 / MYTH & ROID"
+          },
+          {
+            "key": "主题歌编曲",
+            "value": "宮崎誠 / MYTH & ROID"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活製作委員会（KADOKAWA、テレビ東京、AT-X、博報堂DYメディアパートナーズ、メモリーテック）"
+          },
+          {
+            "key": "企画",
+            "value": "堀内大示、三坂泰二、押田裕一、山田昇、村田嘉邦、高岸亮樹"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 (万木壮、駒井紀之)、月刊コミックアライブ編集部 (土方隆、赤坂泰基、楠怜也)、月刊ビッグガンガン編集部 (藤田健馬)"
+          },
+          {
+            "key": "制片人",
+            "value": "田中翔、池本昌仁、紅谷佳和、飯塚彩、大貫一雄、青木絵理子"
+          },
+          {
+            "key": "宣传制片人",
+            "value": "吉武真太郎、間野由美子"
+          },
+          {
+            "key": "设定制作",
+            "value": "设定管理：平野宏樹"
+          },
+          {
+            "key": "制作协力",
+            "value": "Nexus(4-6,10,12,16,19,21,23)"
+          },
+          {
+            "key": "总作画监督",
+            "value": "坂井久太"
+          },
+          {
+            "key": "作画监督",
+            "value": "怪物作画监督：小柳達也；坂井久太、小柳達也、山田まり子、今田茜、世良コータ、森川侑紀、野田康行、北原大地、明珍宇作、楡木哲郎、山岡峻、豆塚あす香、阿部島瑠珠、水竹修治、渡邉八恵子、中西和也、中田正彦、浅利歩惟、永吉隆志、梶浦紳一郎、中村和久、木宮亮介、又賀大介、岩田景子、齊藤佳子、池田有、田中一真"
+          },
+          {
+            "key": "总作画监督助理",
+            "value": "田中一真"
+          },
+          {
+            "key": "动作作画监督",
+            "value": "中西和也"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "渡邊政治(OP1&2) / 小柳達也(ED1&2)、岡本学(ED3)"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "渡邊政治(OP1)、武市直子(OP2) / 小柳達也(ED1&2)、岡本学(ED3)"
+          },
+          {
+            "key": "插画",
+            "value": "中山知世(ED3)"
+          },
+          {
+            "key": "视觉效果",
+            "value": "峰岸健太郎(ED3)"
+          }
+        ],
+        "rating": {
+          "rank": 1016,
+          "total": 24850,
+          "count": {
+            "1": 95,
+            "2": 51,
+            "3": 77,
+            "4": 225,
+            "5": 702,
+            "6": 2741,
+            "7": 8411,
+            "8": 8956,
+            "9": 2422,
+            "10": 1170
+          },
+          "score": 7.5
+        },
+        "collection": {
+          "on_hold": 1147,
+          "dropped": 1031,
+          "wish": 2554,
+          "collect": 42873,
+          "doing": 2254
+        },
+        "id": 140001,
+        "eps": 25,
+        "total_episodes": 25,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "穿越",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2019-06-07",
+        "platform": "OVA",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/12/61/225462_j7I3O.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/12/61/225462_j7I3O.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/12/61/225462_j7I3O.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/12/61/225462_j7I3O.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/12/61/225462_j7I3O.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/12/61/225462_j7I3O.jpg",
+        "summary": "昴等人打倒了诅咒的元凶——魔兽沃尔加姆，拯救了阿拉姆村的孩子们。终于到来的安稳并未持续很久，昴就瞒着所有人前去挑战某个极秘任务。尽管昴做了变装，但很快就被以佩特拉为首的村里的孩子们识破了真实身份。开始后5秒就曝光的这一任务，是事前调查和艾米莉亚约会的路线……。",
+        "name": "Re:ゼロから始める異世界生活 Memory Snow",
+        "name_cn": "Re：从零开始的异世界生活 雪之回忆",
+        "tags": [
+          {
+            "name": "OVA",
+            "count": 1525,
+            "total_count": 368030
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 963,
+            "total_count": 33723
+          },
+          {
+            "name": "异世界",
+            "count": 943,
+            "total_count": 266092
+          },
+          {
+            "name": "轻小说改",
+            "count": 819,
+            "total_count": 500631
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 718,
+            "total_count": 4117
+          },
+          {
+            "name": "奇幻",
+            "count": 576,
+            "total_count": 479009
+          },
+          {
+            "name": "2018",
+            "count": 509,
+            "total_count": 78667
+          },
+          {
+            "name": "轻改",
+            "count": 429,
+            "total_count": 153770
+          },
+          {
+            "name": "2018年10月",
+            "count": 396,
+            "total_count": 27141
+          },
+          {
+            "name": "恋爱",
+            "count": 327,
+            "total_count": 571633
+          },
+          {
+            "name": "剧场版",
+            "count": 327,
+            "total_count": 730790
+          },
+          {
+            "name": "小说改",
+            "count": 157,
+            "total_count": 162702
+          },
+          {
+            "name": "高桥李依",
+            "count": 137,
+            "total_count": 2966
+          },
+          {
+            "name": "日本",
+            "count": 126,
+            "total_count": 303623
+          },
+          {
+            "name": "穿越",
+            "count": 73,
+            "total_count": 63956
+          },
+          {
+            "name": "日常",
+            "count": 49,
+            "total_count": 405807
+          },
+          {
+            "name": "战斗",
+            "count": 45,
+            "total_count": 478048
+          },
+          {
+            "name": "轮回",
+            "count": 44,
+            "total_count": 17234
+          },
+          {
+            "name": "WHITE_FOX",
+            "count": 39,
+            "total_count": 711
+          },
+          {
+            "name": "渡边政治",
+            "count": 34,
+            "total_count": 561
+          },
+          {
+            "name": "渡邊政治",
+            "count": 33,
+            "total_count": 626
+          },
+          {
+            "name": "后宫",
+            "count": 24,
+            "total_count": 306461
+          },
+          {
+            "name": "搞笑",
+            "count": 22,
+            "total_count": 646103
+          },
+          {
+            "name": "re0",
+            "count": 19,
+            "total_count": 257
+          },
+          {
+            "name": "治愈",
+            "count": 17,
+            "total_count": 304656
+          },
+          {
+            "name": "2019",
+            "count": 15,
+            "total_count": 77229
+          },
+          {
+            "name": "2018年",
+            "count": 15,
+            "total_count": 4542
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 14,
+            "total_count": 427
+          },
+          {
+            "name": "横谷昌宏",
+            "count": 12,
+            "total_count": 569
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 12,
+            "total_count": 2363
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 雪之回忆"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re：从零开始的异世界生活 Memory Snow"
+              },
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu (2018)"
+              },
+              {
+                "v": "Re:Zero - Starting Life in Another World (2018)"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "1"
+          },
+          {
+            "key": "发售日",
+            "value": "2019年6月7日"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/"
+          },
+          {
+            "key": "上映年度",
+            "value": "2018年10月6日"
+          },
+          {
+            "key": "Copyright",
+            "value": "© 長月達平・株式会社KADOKAWA刊／Re:ゼロから始める異世界生活製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J「Re:ゼロから始める異世界生活」/KADOKAWA刊）"
+          },
+          {
+            "key": "导演",
+            "value": "渡邊政治"
+          },
+          {
+            "key": "系列监督",
+            "value": "首席监督：小柳達也"
+          },
+          {
+            "key": "人物原案",
+            "value": "大塚真一郎"
+          },
+          {
+            "key": "企画",
+            "value": "菊池剛、三坂泰二、村田嘉邦、山田昇、押田裕一、國府田英則"
+          },
+          {
+            "key": "制片人",
+            "value": "田中翔、池本昌仁、深尾聡志、飯塚彩、紅谷佳和、青木絵理子"
+          },
+          {
+            "key": "监修",
+            "value": "長月達平"
+          },
+          {
+            "key": "脚本",
+            "value": "横谷昌宏"
+          },
+          {
+            "key": "人物设定",
+            "value": "坂井久太"
+          },
+          {
+            "key": "怪物设计",
+            "value": "小柳達也"
+          },
+          {
+            "key": "作画监督",
+            "value": "坂井久太、小柳達也"
+          },
+          {
+            "key": "作画监督助理",
+            "value": "池田有、中村和久、みやち"
+          },
+          {
+            "key": "分镜",
+            "value": "小柳達也"
+          },
+          {
+            "key": "演出",
+            "value": "美甘義人、古賀一臣"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫"
+          },
+          {
+            "key": "设定",
+            "value": "コレサワシゲユキ、灯夢、坂井ユウスケ、唯一"
+          },
+          {
+            "key": "美术监督",
+            "value": "高峯義人"
+          },
+          {
+            "key": "色彩设计",
+            "value": "坂本いづみ"
+          },
+          {
+            "key": "色彩指定",
+            "value": "サイトウチヅエ、熊田真子、坂本いづみ"
+          },
+          {
+            "key": "色彩检查",
+            "value": "サイトウチヅエ、熊田真子、坂本いづみ；检查辅佐：品地奈々絵、滝沢いづみ"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "摄影监督",
+            "value": "峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "本間綾子"
+          },
+          {
+            "key": "3DCG 导演",
+            "value": "コレサワシゲユキ"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳"
+          },
+          {
+            "key": "音响监督",
+            "value": "明田川仁"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二 (スワラ・プロ)"
+          },
+          {
+            "key": "音响",
+            "value": "マジックカプセル"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "飯塚和奏"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "田中理恵、宮本かおり"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪"
+          },
+          {
+            "key": "音乐监督",
+            "value": "三浦華子"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "制作管理",
+            "value": "现场管理：吉川綱樹"
+          },
+          {
+            "key": "设定制作",
+            "value": "设定管理：吉川綱樹"
+          },
+          {
+            "key": "制作进行",
+            "value": "吉川綱樹、原口勇気"
+          },
+          {
+            "key": "副制片人",
+            "value": "関口諒"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 (万木壮、駒井紀之)、月刊コミックアライブ編集部 (土方隆、赤坂泰基、有村政輝)、月刊ビックガンガン編集部 (藤田健馬)"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "动画制片人",
+            "value": "吉川綱樹"
+          },
+          {
+            "key": "动画制作",
+            "value": "WHITE FOX"
+          }
+        ],
+        "rating": {
+          "rank": 3072,
+          "total": 5750,
+          "count": {
+            "1": 6,
+            "2": 7,
+            "3": 12,
+            "4": 51,
+            "5": 306,
+            "6": 1452,
+            "7": 2689,
+            "8": 918,
+            "9": 134,
+            "10": 175
+          },
+          "score": 6.9
+        },
+        "collection": {
+          "on_hold": 176,
+          "dropped": 78,
+          "wish": 1095,
+          "collect": 12252,
+          "doing": 304
+        },
+        "id": 225462,
+        "eps": 1,
+        "total_episodes": 1,
+        "meta_tags": [
+          "恋爱",
+          "日本",
+          "奇幻",
+          "OVA",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2019-11-08",
+        "platform": "OVA",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/29/f6/261805_0XD0Z.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/29/f6/261805_0XD0Z.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/29/f6/261805_0XD0Z.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/29/f6/261805_0XD0Z.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/29/f6/261805_0XD0Z.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/29/f6/261805_0XD0Z.jpg",
+        "summary": "かつて世界を滅ぼしかけ、四百年を過ぎた今なお人々にとっての\r\n恐怖の対象であり、忌み嫌われ続ける存在である《嫉妬の魔女》。\r\n伝説によれば、彼女は紫紺の瞳を持つ銀髪のハーフエルフであったという。\r\n雪と氷に覆われたエリオール大森林に、たった一人で暮らすエミリアは、\r\n嫉妬の魔女に瓜二つという理由から、魔女と恐れられていた。\r\n誤解され、傷つき、それでも小さな希望を持って、孤独を生きていた\r\nエミリアの前に現れたのは、小さな猫の姿をした精霊だった。",
+        "name": "Re:ゼロから始める異世界生活 氷結の絆",
+        "name_cn": "Re：从零开始的异世界生活 冰结之绊",
+        "tags": [
+          {
+            "name": "OVA",
+            "count": 1171,
+            "total_count": 368030
+          },
+          {
+            "name": "剧场版",
+            "count": 870,
+            "total_count": 730790
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 847,
+            "total_count": 33723
+          },
+          {
+            "name": "异世界",
+            "count": 829,
+            "total_count": 266092
+          },
+          {
+            "name": "轻小说改",
+            "count": 722,
+            "total_count": 500631
+          },
+          {
+            "name": "奇幻",
+            "count": 609,
+            "total_count": 479009
+          },
+          {
+            "name": "2019",
+            "count": 566,
+            "total_count": 77229
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 358,
+            "total_count": 2363
+          },
+          {
+            "name": "战斗",
+            "count": 322,
+            "total_count": 478048
+          },
+          {
+            "name": "轻改",
+            "count": 277,
+            "total_count": 153770
+          },
+          {
+            "name": "2019年11月",
+            "count": 230,
+            "total_count": 710
+          },
+          {
+            "name": "小说改",
+            "count": 157,
+            "total_count": 162702
+          },
+          {
+            "name": "日本",
+            "count": 118,
+            "total_count": 303623
+          },
+          {
+            "name": "渡边政治",
+            "count": 64,
+            "total_count": 561
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 48,
+            "total_count": 4117
+          },
+          {
+            "name": "穿越",
+            "count": 40,
+            "total_count": 63956
+          },
+          {
+            "name": "轮回",
+            "count": 39,
+            "total_count": 17234
+          },
+          {
+            "name": "恋爱",
+            "count": 26,
+            "total_count": 571633
+          },
+          {
+            "name": "渡邊政治",
+            "count": 24,
+            "total_count": 626
+          },
+          {
+            "name": "2019年",
+            "count": 20,
+            "total_count": 3694
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 18,
+            "total_count": 427
+          },
+          {
+            "name": "re0",
+            "count": 16,
+            "total_count": 257
+          },
+          {
+            "name": "后宫",
+            "count": 15,
+            "total_count": 306461
+          },
+          {
+            "name": "2019年10月",
+            "count": 14,
+            "total_count": 18393
+          },
+          {
+            "name": "冒险",
+            "count": 11,
+            "total_count": 54993
+          },
+          {
+            "name": "续作",
+            "count": 10,
+            "total_count": 47358
+          },
+          {
+            "name": "高桥李依",
+            "count": 8,
+            "total_count": 2966
+          },
+          {
+            "name": "横谷昌宏",
+            "count": 8,
+            "total_count": 569
+          },
+          {
+            "name": "WHITE_FOX",
+            "count": 7,
+            "total_count": 711
+          },
+          {
+            "name": "悬疑",
+            "count": 7,
+            "total_count": 114930
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 冰结之绊"
+          },
+          {
+            "key": "话数",
+            "value": "1"
+          },
+          {
+            "key": "发售日",
+            "value": "2019年11月8日"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/hyoketsu/"
+          },
+          {
+            "key": "企画",
+            "value": "菊池剛、三坂泰二"
+          },
+          {
+            "key": "执行制片人",
+            "value": "工藤大丈、万木壮、村田嘉邦、山田昇、山岸義幸、平岡利介、國府田英則"
+          },
+          {
+            "key": "制片人",
+            "value": "田中翔、池本昌仁、深尾聡志、飯塚彩、鈴木健、紅谷佳和、青木絵理子"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J「Re:ゼロから始める異世界生活」/KADOKAWA刊）"
+          },
+          {
+            "key": "监修",
+            "value": "脚本监修：長月達平"
+          },
+          {
+            "key": "导演",
+            "value": "渡邊政治"
+          },
+          {
+            "key": "系列监督",
+            "value": "首席监督：川村賢一"
+          },
+          {
+            "key": "分镜",
+            "value": "川村賢一、久保雄介"
+          },
+          {
+            "key": "分镜协力",
+            "value": "中山奈緒美"
+          },
+          {
+            "key": "演出",
+            "value": "川村賢一、久保雄介"
+          },
+          {
+            "key": "人物原案",
+            "value": "大塚真一郎"
+          },
+          {
+            "key": "人物设定",
+            "value": "坂井久太"
+          },
+          {
+            "key": "总作画监督",
+            "value": "坂井久太"
+          },
+          {
+            "key": "怪物设计",
+            "value": "小柳達也"
+          },
+          {
+            "key": "作画监督",
+            "value": "大田和寛、中田正彦、渡邉八恵子；怪物作画监督：小柳達也"
+          },
+          {
+            "key": "动作作画监督",
+            "value": "大田和寛"
+          },
+          {
+            "key": "作画监督助理",
+            "value": "豆塚あす香、寺尾憲治；作监协力：服部憲知、江崎稔、申榮淳、福江光恵"
+          },
+          {
+            "key": "协力",
+            "value": "作画协力：武元一貴、谷翔太郎、楠田悟、亀谷知宏、小川円、谷中沙也加"
+          },
+          {
+            "key": "原画",
+            "value": "大田和寛、中田正彦、木宮亮介、渡邉八恵子、豆塚あす香、佐々木舞、中村和久、岩田景子、藤岡三徳、永吉隆志、稲吉智重、稲吉朝子、平村直紀、富永武志、坂井久太、松原豊、藤部生馬、宮脇直央、國井実可子、山内玲奈、平山剛士、楡木哲郎、岡垣優、鈴木克、武本大介、蜷川貴弘、梶山亜里沙、富沢和雄、田仲マイケル、werkbau"
+          },
+          {
+            "key": "第二原画",
+            "value": "中村純、村田幸也、陽本百香、冨田智子、金井亜希子、齊藤貴巳一、古賀智大、小川貴司、鳥之海恋子、生島遥、立川綾香、鴨宮弘樹、鴨宮瑞貴、林麟太朗、宮路統子、三浦瞳、平松伸行、阿部大樹、岩間莉奈、友廣愛、佐田雄、岡田雅人"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "设定",
+            "value": "コレサワシゲユキ、灯夢、加藤千絵"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫"
+          },
+          {
+            "key": "美术监督",
+            "value": "吉原俊一郎、高峯義人"
+          },
+          {
+            "key": "美术",
+            "value": "美峰"
+          },
+          {
+            "key": "色彩设计",
+            "value": "坂本いづみ"
+          },
+          {
+            "key": "色彩指定",
+            "value": "サイトウチヅエ、熊田真子"
+          },
+          {
+            "key": "色彩检查",
+            "value": "サイトウチヅエ、熊田真子"
+          },
+          {
+            "key": "上色",
+            "value": "Wish (井上泉、北沢理絵、石原裕介、山﨑久美子[山崎久美子]、小川真紗代、田場涼、國井彩香、田中結有菜、三澤桃乃、臼田資史、吉木絵理、西脇洋平、本田怜也、時尾愛華、高栁美優、田沼彩花)"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "3DCG 导演",
+            "value": "軽部優"
+          },
+          {
+            "key": "3DCG",
+            "value": "T2 Studio (軽部優、尚載燁、亀田彩乃)"
+          },
+          {
+            "key": "摄影监督",
+            "value": "峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "本間綾子"
+          },
+          {
+            "key": "摄影",
+            "value": "T2 Studio (高橋秀地、福島敏行、宮城己織、志村豪、本間綾子、峰岸健太郎)"
+          },
+          {
+            "key": "标题设计",
+            "value": "新井隼也"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "IMAGICA lab. (安田斐人、平野郁也)"
+          },
+          {
+            "key": "音响监督",
+            "value": "明田川仁"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二 (スワラ・プロ)"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "飯塚和奏"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "宮本かおり"
+          },
+          {
+            "key": "音响",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪"
+          },
+          {
+            "key": "宣传制片人",
+            "value": "間野由美子"
+          },
+          {
+            "key": "副制片人",
+            "value": "関口諒、中川亜佐子"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 (駒井紀之)、月刊コミックアライブ編集部 (土方隆、有村政輝、赤坂泰基)"
+          },
+          {
+            "key": "动画制作",
+            "value": "WHITE FOX"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "动画制片人",
+            "value": "吉川綱樹"
+          },
+          {
+            "key": "制作管理",
+            "value": "现场管理：田中聖也"
+          },
+          {
+            "key": "设定制作",
+            "value": "设定管理：田中聖也"
+          },
+          {
+            "key": "制作进行",
+            "value": "田中聖也"
+          },
+          {
+            "key": "制作进行协力",
+            "value": "弘中聡一"
+          },
+          {
+            "key": "发行",
+            "value": "角川ANIMATION"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活製作委員会 (KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、ダイコク電機、テレビ東京、メモリーテック)"
+          }
+        ],
+        "rating": {
+          "rank": 4182,
+          "total": 4795,
+          "count": {
+            "1": 5,
+            "2": 9,
+            "3": 19,
+            "4": 73,
+            "5": 379,
+            "6": 1524,
+            "7": 1980,
+            "8": 600,
+            "9": 83,
+            "10": 123
+          },
+          "score": 6.7
+        },
+        "collection": {
+          "on_hold": 191,
+          "dropped": 61,
+          "wish": 1027,
+          "collect": 10436,
+          "doing": 395
+        },
+        "id": 261805,
+        "eps": 1,
+        "total_episodes": 1,
+        "meta_tags": [
+          "日本",
+          "奇幻",
+          "OVA",
+          "战斗",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2020-07-08",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/16/79/278826_w85gd.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/16/79/278826_w85gd.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/16/79/278826_w85gd.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/16/79/278826_w85gd.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/16/79/278826_w85gd.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/16/79/278826_w85gd.jpg",
+        "summary": "我一定会拯救你的。\r\n打倒了担任「怠惰」的魔女教大罪司教，贝特鲁吉乌斯·罗曼尼康帝后，菜月昴和爱蜜莉雅又再度相遇了。在跨越了痛苦的诀别，两人终于和解，而新的篇章却又开始了。\r\n超乎想象九死一生的危机，以及冷酷无情的现实。少年将再次起身，面对残酷的命运。",
+        "name": "Re:ゼロから始める異世界生活 2nd season",
+        "name_cn": "Re：从零开始的异世界生活 第二季",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 3814,
+            "total_count": 266093
+          },
+          {
+            "name": "轻小说改",
+            "count": 2931,
+            "total_count": 500625
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 2183,
+            "total_count": 33722
+          },
+          {
+            "name": "奇幻",
+            "count": 1903,
+            "total_count": 479017
+          },
+          {
+            "name": "2020年7月",
+            "count": 1846,
+            "total_count": 12791
+          },
+          {
+            "name": "TV",
+            "count": 1581,
+            "total_count": 1419953
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 1166,
+            "total_count": 2363
+          },
+          {
+            "name": "轮回",
+            "count": 1099,
+            "total_count": 17234
+          },
+          {
+            "name": "战斗",
+            "count": 1020,
+            "total_count": 478055
+          },
+          {
+            "name": "轻改",
+            "count": 840,
+            "total_count": 153777
+          },
+          {
+            "name": "2020",
+            "count": 837,
+            "total_count": 64469
+          },
+          {
+            "name": "后宫",
+            "count": 427,
+            "total_count": 306458
+          },
+          {
+            "name": "小说改",
+            "count": 392,
+            "total_count": 162710
+          },
+          {
+            "name": "日本",
+            "count": 292,
+            "total_count": 303636
+          },
+          {
+            "name": "穿越",
+            "count": 196,
+            "total_count": 63958
+          },
+          {
+            "name": "恋爱",
+            "count": 129,
+            "total_count": 571640
+          },
+          {
+            "name": "续作",
+            "count": 88,
+            "total_count": 47360
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 84,
+            "total_count": 4117
+          },
+          {
+            "name": "2020年4月",
+            "count": 69,
+            "total_count": 17357
+          },
+          {
+            "name": "渡边政治",
+            "count": 56,
+            "total_count": 561
+          },
+          {
+            "name": "渡邊政治",
+            "count": 52,
+            "total_count": 626
+          },
+          {
+            "name": "冒险",
+            "count": 51,
+            "total_count": 54995
+          },
+          {
+            "name": "悬疑",
+            "count": 47,
+            "total_count": 114930
+          },
+          {
+            "name": "re0",
+            "count": 33,
+            "total_count": 257
+          },
+          {
+            "name": "热血",
+            "count": 31,
+            "total_count": 215417
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 27,
+            "total_count": 427
+          },
+          {
+            "name": "2020年",
+            "count": 26,
+            "total_count": 3097
+          },
+          {
+            "name": "长月达平",
+            "count": 20,
+            "total_count": 220
+          },
+          {
+            "name": "高桥李依",
+            "count": 17,
+            "total_count": 2966
+          },
+          {
+            "name": "WHITE_FOX",
+            "count": 17,
+            "total_count": 711
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 第二季"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu (2020)"
+              },
+              {
+                "v": "Re0 第二季"
+              },
+              {
+                "v": "Re:ゼロから始める異世界生活2"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "13"
+          },
+          {
+            "key": "放送开始",
+            "value": "2020年7月8日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "テレビ東京"
+          },
+          {
+            "key": "其他电视台",
+            "value": "AT-X"
+          },
+          {
+            "key": "播放结束",
+            "value": "2020年9月30日"
+          },
+          {
+            "key": "导演",
+            "value": "渡邊政治"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "Copyright",
+            "value": "© 長月達平・株式会社KADOKAWA刊／Re:ゼロから始める異世界生活2製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J「Re:ゼロから始める異世界生活」/KADOKAWA刊）"
+          },
+          {
+            "key": "监修",
+            "value": "剧本监修：長月達平"
+          },
+          {
+            "key": "系列构成",
+            "value": "横谷昌宏"
+          },
+          {
+            "key": "人物设定",
+            "value": "坂井久太"
+          },
+          {
+            "key": "总作画监督",
+            "value": "坂井久太"
+          },
+          {
+            "key": "怪物设计",
+            "value": "小柳達也"
+          },
+          {
+            "key": "标题设计",
+            "value": "新井隼也"
+          },
+          {
+            "key": "动作导演",
+            "value": "动作监修：大田和寛"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "设定",
+            "value": "加藤千恵、コレサワシゲユキ、灯夢、坂井ユウスケ"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫"
+          },
+          {
+            "key": "美术监督",
+            "value": "高峯義人"
+          },
+          {
+            "key": "色彩设计",
+            "value": "坂本いづみ"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "摄影监督",
+            "value": "峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "本間綾子"
+          },
+          {
+            "key": "3DCG 导演",
+            "value": "軽部優"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "IMAGICA Lab. (今吉李枝、平野郁也)"
+          },
+          {
+            "key": "音响监督",
+            "value": "明田川仁"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二 (スワラ・プロ)"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "佐藤翔"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "宮本かおり"
+          },
+          {
+            "key": "音响",
+            "value": "マジックカプセル"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "企画",
+            "value": "菊池剛、三坂泰二"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 (駒井紀之)、月刊コミックアライブ編集部 (松井健太、赤坂泰基、有村政輝)、スクウェア・エニックス (熨斗洸太)"
+          },
+          {
+            "key": "执行制片人",
+            "value": "工藤大丈、万木壮、山崎史紀、山田昇、岡庭幸春、國府田英則、篠崎文彦"
+          },
+          {
+            "key": "制片人",
+            "value": "田中翔、池本昌仁、深尾聡志、飯塚彩、鈴木健、青木絵理子、尾形光広"
+          },
+          {
+            "key": "副制片人",
+            "value": "石川義洋、梅田正勝"
+          },
+          {
+            "key": "宣传制片人",
+            "value": "間野由美子"
+          },
+          {
+            "key": "动画制片人",
+            "value": "吉川綱樹"
+          },
+          {
+            "key": "制作管理",
+            "value": "现场管理：田中聖也"
+          },
+          {
+            "key": "设定制作",
+            "value": "设定管理：弘中聡一"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "动画制作",
+            "value": "WHITE FOX"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活2製作委員会（KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、メモリーテック、角川メディアハウス）"
+          },
+          {
+            "key": "演出",
+            "value": "渡邊政治、武市直子、土屋浩幸、川村賢一、美甘義人、赤井倍人(30,33,36)、おざわかずひろ、古賀一臣"
+          },
+          {
+            "key": "作画监督",
+            "value": "怪物作画监督：小柳達也；坂井久太、大田和寛、兵渡勝、岡垣優、平村直紀、木宮亮介、稲吉智重、藤部生馬、大髙雄太、渡邉八恵子、中田正彦、臼田美夫、岩田景子、平村直紀、寺尾憲治、碇谷敦、永井里奈、山本無以、藤岡三徳、岡垣優、千葉啓太郎"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "小柳達也 / 渡邊政治"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "小柳達也 / 渡邊政治"
+          }
+        ],
+        "rating": {
+          "rank": 1047,
+          "total": 16229,
+          "count": {
+            "1": 31,
+            "2": 22,
+            "3": 39,
+            "4": 128,
+            "5": 399,
+            "6": 1807,
+            "7": 5810,
+            "8": 6029,
+            "9": 1293,
+            "10": 671
+          },
+          "score": 7.4
+        },
+        "collection": {
+          "on_hold": 721,
+          "dropped": 363,
+          "wish": 2184,
+          "collect": 30138,
+          "doing": 1474
+        },
+        "id": 278826,
+        "eps": 13,
+        "total_episodes": 13,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "奇幻",
+          "战斗",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2020-01-01",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/72/ef/296195_n0KqL.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/72/ef/296195_n0KqL.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/72/ef/296195_n0KqL.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/72/ef/296195_n0KqL.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/72/ef/296195_n0KqL.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/72/ef/296195_n0KqL.jpg",
+        "summary": "2016年に放送されたTVアニメ『Re:ゼロから始める異世界生活』が新たに1時間番組として放送決定！ 新規カットを追加し、1時間番組として再編集を行った《新編集版》となる『Re:ゼロから始める異世界生活』は2020年1月1日(水)よりAT-X、TOKYO MX、BS11ほかにて放送スタート。",
+        "name": "Re:ゼロから始める異世界生活 新編集版",
+        "name_cn": "Re：从零开始的异世界生活 新编集版",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 2002,
+            "total_count": 266092
+          },
+          {
+            "name": "轻小说改",
+            "count": 1396,
+            "total_count": 500631
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 990,
+            "total_count": 33723
+          },
+          {
+            "name": "2020年1月",
+            "count": 865,
+            "total_count": 25170
+          },
+          {
+            "name": "奇幻",
+            "count": 848,
+            "total_count": 479009
+          },
+          {
+            "name": "TV",
+            "count": 736,
+            "total_count": 1419925
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 607,
+            "total_count": 2363
+          },
+          {
+            "name": "战斗",
+            "count": 557,
+            "total_count": 478048
+          },
+          {
+            "name": "轻改",
+            "count": 447,
+            "total_count": 153770
+          },
+          {
+            "name": "2020",
+            "count": 404,
+            "total_count": 64469
+          },
+          {
+            "name": "轮回",
+            "count": 321,
+            "total_count": 17234
+          },
+          {
+            "name": "小说改",
+            "count": 175,
+            "total_count": 162702
+          },
+          {
+            "name": "日本",
+            "count": 136,
+            "total_count": 303623
+          },
+          {
+            "name": "渡邊政治",
+            "count": 94,
+            "total_count": 626
+          },
+          {
+            "name": "穿越",
+            "count": 90,
+            "total_count": 63956
+          },
+          {
+            "name": "恋爱",
+            "count": 64,
+            "total_count": 571633
+          },
+          {
+            "name": "后宫",
+            "count": 46,
+            "total_count": 306461
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 39,
+            "total_count": 4117
+          },
+          {
+            "name": "总集篇",
+            "count": 32,
+            "total_count": 18715
+          },
+          {
+            "name": "渡边政治",
+            "count": 26,
+            "total_count": 561
+          },
+          {
+            "name": "热血",
+            "count": 22,
+            "total_count": 215416
+          },
+          {
+            "name": "冒险",
+            "count": 22,
+            "total_count": 54993
+          },
+          {
+            "name": "re0",
+            "count": 22,
+            "total_count": 257
+          },
+          {
+            "name": "横谷昌宏",
+            "count": 20,
+            "total_count": 569
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 17,
+            "total_count": 427
+          },
+          {
+            "name": "剧情",
+            "count": 16,
+            "total_count": 16245
+          },
+          {
+            "name": "2020年",
+            "count": 15,
+            "total_count": 3097
+          },
+          {
+            "name": "长月达平",
+            "count": 14,
+            "total_count": 220
+          },
+          {
+            "name": "高桥李依",
+            "count": 11,
+            "total_count": 2966
+          },
+          {
+            "name": "神作",
+            "count": 9,
+            "total_count": 48103
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 新编集版"
+          },
+          {
+            "key": "话数",
+            "value": "25"
+          },
+          {
+            "key": "放送开始",
+            "value": "2020年1月1日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "AT-X、TOKYO MX、BS11"
+          },
+          {
+            "key": "播放结束",
+            "value": "2020年4月1日"
+          },
+          {
+            "key": "导演",
+            "value": "渡邊政治"
+          },
+          {
+            "key": "Copyright",
+            "value": "©長月達平・株式会社KADOKAWA刊／Re:ゼロから始める異世界生活1製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J「Re:ゼロから始める異世界生活」/KADOKAWA刊）"
+          },
+          {
+            "key": "人物设定",
+            "value": "坂井久太"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活製作委員会（KADOKAWA"
+          }
+        ],
+        "rating": {
+          "rank": 630,
+          "total": 7809,
+          "count": {
+            "1": 18,
+            "2": 9,
+            "3": 9,
+            "4": 43,
+            "5": 161,
+            "6": 646,
+            "7": 2306,
+            "8": 3286,
+            "9": 869,
+            "10": 462
+          },
+          "score": 7.7
+        },
+        "collection": {
+          "on_hold": 421,
+          "dropped": 256,
+          "wish": 1255,
+          "collect": 16095,
+          "doing": 783
+        },
+        "id": 296195,
+        "eps": 25,
+        "total_episodes": 25,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "奇幻",
+          "战斗",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2021-01-06",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/aa/64/316247_Yd3F5.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/aa/64/316247_Yd3F5.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/aa/64/316247_Yd3F5.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/aa/64/316247_Yd3F5.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/aa/64/316247_Yd3F5.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/aa/64/316247_Yd3F5.jpg",
+        "summary": "俺が必ず、お前を救ってみせる。\r\n\r\n魔女教大罪司教「怠惰」担当ペテルギウス・ロマネコンティを打倒し、エミリアとの再開を果たしたナツキ・スバル。\r\n辛い決別を乗り越え、ようやく和解した二人だったが、それは新たな波乱の幕開けだった。\r\n\r\n想像を超える絶体絶命の危機、そして襲い来る無慈悲な現実。\r\n少年は再び過酷な運命に立ち向かう。",
+        "name": "Re:ゼロから始める異世界生活 2nd season 後半クール",
+        "name_cn": "Re：从零开始的异世界生活 第二季 后半部分",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 3477,
+            "total_count": 266097
+          },
+          {
+            "name": "轻小说改",
+            "count": 2530,
+            "total_count": 500636
+          },
+          {
+            "name": "2021年1月",
+            "count": 1766,
+            "total_count": 31728
+          },
+          {
+            "name": "奇幻",
+            "count": 1684,
+            "total_count": 479015
+          },
+          {
+            "name": "轮回",
+            "count": 1683,
+            "total_count": 17234
+          },
+          {
+            "name": "TV",
+            "count": 1377,
+            "total_count": 1419945
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 1328,
+            "total_count": 33723
+          },
+          {
+            "name": "穿越",
+            "count": 942,
+            "total_count": 63956
+          },
+          {
+            "name": "WHITE-FOX",
+            "count": 803,
+            "total_count": 869
+          },
+          {
+            "name": "2021",
+            "count": 781,
+            "total_count": 79644
+          },
+          {
+            "name": "战斗",
+            "count": 752,
+            "total_count": 478053
+          },
+          {
+            "name": "轻改",
+            "count": 665,
+            "total_count": 153770
+          },
+          {
+            "name": "小说改",
+            "count": 400,
+            "total_count": 162706
+          },
+          {
+            "name": "日本",
+            "count": 265,
+            "total_count": 303627
+          },
+          {
+            "name": "续集",
+            "count": 224,
+            "total_count": 5172
+          },
+          {
+            "name": "渡邊政治",
+            "count": 162,
+            "total_count": 626
+          },
+          {
+            "name": "恋爱",
+            "count": 114,
+            "total_count": 571636
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 81,
+            "total_count": 4117
+          },
+          {
+            "name": "后宫",
+            "count": 74,
+            "total_count": 306462
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 66,
+            "total_count": 2363
+          },
+          {
+            "name": "续作",
+            "count": 65,
+            "total_count": 47359
+          },
+          {
+            "name": "渡边政治",
+            "count": 48,
+            "total_count": 561
+          },
+          {
+            "name": "re0",
+            "count": 40,
+            "total_count": 257
+          },
+          {
+            "name": "冒险",
+            "count": 37,
+            "total_count": 54993
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 31,
+            "total_count": 427
+          },
+          {
+            "name": "热血",
+            "count": 30,
+            "total_count": 215417
+          },
+          {
+            "name": "悬疑",
+            "count": 24,
+            "total_count": 114930
+          },
+          {
+            "name": "2021年",
+            "count": 24,
+            "total_count": 3676
+          },
+          {
+            "name": "长月达平",
+            "count": 21,
+            "total_count": 220
+          },
+          {
+            "name": "高橋李依",
+            "count": 17,
+            "total_count": 2088
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 第二季 后半部分"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu (2021)"
+              },
+              {
+                "v": "Re0 第二季后半"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "12"
+          },
+          {
+            "key": "放送开始",
+            "value": "2021年1月6日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "AT-X"
+          },
+          {
+            "key": "其他电视台",
+            "value": "TOKYO MX / テレビ北海道 / KHB東日本放送 / テレビ愛知 / KBS京都 / サンテレビ / TVQ九州放送 / BS11"
+          },
+          {
+            "key": "播放结束",
+            "value": "2021年3月24日"
+          },
+          {
+            "key": "导演",
+            "value": "渡邊政治"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "Copyright",
+            "value": "© 長月達平・株式会社KADOKAWA刊／Re:ゼロから始める異世界生活2製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J「Re:ゼロから始める異世界生活」/KADOKAWA刊）"
+          },
+          {
+            "key": "监修",
+            "value": "剧本监修：長月達平"
+          },
+          {
+            "key": "系列构成",
+            "value": "横谷昌宏"
+          },
+          {
+            "key": "人物设定",
+            "value": "坂井久太"
+          },
+          {
+            "key": "总作画监督",
+            "value": "坂井久太"
+          },
+          {
+            "key": "怪物设计",
+            "value": "小柳達也"
+          },
+          {
+            "key": "标题设计",
+            "value": "新井隼也"
+          },
+          {
+            "key": "主动画师",
+            "value": "大田和寛"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "设定",
+            "value": "加藤千恵、コレサワシゲユキ、灯夢、坂井ユウスケ"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫"
+          },
+          {
+            "key": "美术监督",
+            "value": "高峯義人"
+          },
+          {
+            "key": "色彩设计",
+            "value": "坂本いづみ"
+          },
+          {
+            "key": "特效",
+            "value": "川西美保"
+          },
+          {
+            "key": "摄影监督",
+            "value": "峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "本間綾子"
+          },
+          {
+            "key": "3DCG 导演",
+            "value": "軽部優"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "IMAGICA Lab. (今吉李枝、平野郁也)"
+          },
+          {
+            "key": "音响监督",
+            "value": "明田川仁"
+          },
+          {
+            "key": "音效",
+            "value": "古谷友二 (スワラ・プロ)"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "佐藤翔"
+          },
+          {
+            "key": "音响制作担当",
+            "value": "宮本かおり"
+          },
+          {
+            "key": "音响",
+            "value": "マジックカプセル"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "企画",
+            "value": "菊池剛、三坂泰二"
+          },
+          {
+            "key": "企画协力",
+            "value": "MF文庫J編集部 (駒井紀之)、月刊コミックアライブ編集部 (松井健太、赤坂泰基、有村政輝)、スクウェア・エニックス (熨斗洸太)"
+          },
+          {
+            "key": "执行制片人",
+            "value": "工藤大丈、万木壮、山崎史紀、山田昇、岡庭幸春、國府田英則、篠崎文彦"
+          },
+          {
+            "key": "制片人",
+            "value": "田中翔、池本昌仁、深尾聡志、飯塚彩、鈴木健、青木絵理子、尾形光広"
+          },
+          {
+            "key": "副制片人",
+            "value": "石川義洋、梅田正勝"
+          },
+          {
+            "key": "宣传制片人",
+            "value": "間野由美子"
+          },
+          {
+            "key": "动画制片人",
+            "value": "吉川綱樹"
+          },
+          {
+            "key": "制作管理",
+            "value": "现场管理：田中聖也"
+          },
+          {
+            "key": "设定制作",
+            "value": "设定管理：弘中聡一"
+          },
+          {
+            "key": "制作统括",
+            "value": "岩佐岳"
+          },
+          {
+            "key": "动画制作",
+            "value": "WHITE FOX"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活2製作委員会（KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、メモリーテック、角川メディアハウス）"
+          },
+          {
+            "key": "作画监督",
+            "value": "怪物作画监督：小柳達也；木宮亮介、渡邉八恵子、藤岡三徳、藤部生馬、寺尾憲治、大髙雄太、兵渡勝、永吉隆志、岡垣優、中田正彦、平村直紀、都築遥、奥田泰弘、寺尾憲治、千葉啓太郎、二林翔太、冨田佳亨、鈴木健史、橋本真希、池津寿恵、福地和浩、蓮沼一樹、中村進也、渡辺真紗子、小柳達也、坂井久太、徳田夢之介、いしいいよ子、二林翔太、寺尾洋之"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "渡邊政治 / 佐久間貴史"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "武市直子・渡邊政治 / 佐久間貴史"
+          }
+        ],
+        "rating": {
+          "rank": 760,
+          "total": 13972,
+          "count": {
+            "1": 26,
+            "2": 18,
+            "3": 30,
+            "4": 115,
+            "5": 339,
+            "6": 1375,
+            "7": 4242,
+            "8": 5638,
+            "9": 1467,
+            "10": 722
+          },
+          "score": 7.6
+        },
+        "collection": {
+          "on_hold": 497,
+          "dropped": 238,
+          "wish": 1739,
+          "collect": 26154,
+          "doing": 1146
+        },
+        "id": 316247,
+        "eps": 12,
+        "total_episodes": 12,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "奇幻",
+          "穿越",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2024-10-02",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/26/d6/425998_dnzr8.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/26/d6/425998_dnzr8.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/26/d6/425998_dnzr8.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/26/d6/425998_dnzr8.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/26/d6/425998_dnzr8.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/26/d6/425998_dnzr8.jpg",
+        "summary": "抵挡艾尔莎等人的猛攻，并在与大兔的战斗中和碧翠丝结下契约解放「圣域」之后，已经过了一年。\r\n爱蜜莉雅阵营为了即将到来的王选团结一致，菜月昴每天都过得相当充实。这段平稳时光，却因使者送来的一封书信而告终。\r\n那是王选候补者之一，安娜塔西亚寄给爱蜜莉雅的一封邀请函，招待她们前往鲁格尼卡五大都市之一──水门都市朴利斯提拉。\r\n昴一行人接受邀请前往朴利斯提拉，等待着他们的是各种重逢。\r\n有的是意外，有的是不经意，有的则是无可避免。台面下蠢蠢欲动的恶意与前所未有的危机逐渐浮现。\r\n少年即将再次面对残酷的命运。\r\n\r\n\r\n\r\n[简介原文]\r\n襲い来るエルザたちの猛攻を退け、大兎との戦いでベアトリスとの契約を果たした「聖域」の解放から1年が過ぎた。\r\n王選に臨むエミリア陣営は一致団結、充実した日々を送っていたナツキ・スバルだったが、平穏は使者によって届けられた一枚の書状によって終わりを告げる。\r\nそれは王選候補者の一人、アナスタシアがエミリアへ宛てたルグニカの五大都市に数えられる水門都市プリステラへの招待状だった。\r\n招待を受け、プリステラへ向かうスバルたち一行を待っていたのは様々な再会。\r\n一つは意外な、一つは意図せぬ、そして一つは来るべき。水面下で蠢く悪意の胎動と降りかかる未曾有の危機。\r\n少年は再び過酷な運命に立ち向かう。",
+        "name": "Re:ゼロから始める異世界生活 3rd season 襲擊編",
+        "name_cn": "Re：从零开始的异世界生活 第三季 袭击篇",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 2243,
+            "total_count": 266092
+          },
+          {
+            "name": "奇幻",
+            "count": 1493,
+            "total_count": 479009
+          },
+          {
+            "name": "2024年10月",
+            "count": 1448,
+            "total_count": 26578
+          },
+          {
+            "name": "轻小说改",
+            "count": 1306,
+            "total_count": 500631
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 1271,
+            "total_count": 33723
+          },
+          {
+            "name": "战斗",
+            "count": 1244,
+            "total_count": 478049
+          },
+          {
+            "name": "TV",
+            "count": 1185,
+            "total_count": 1419925
+          },
+          {
+            "name": "冒险",
+            "count": 659,
+            "total_count": 54993
+          },
+          {
+            "name": "Re：從零開始的異世界生活",
+            "count": 644,
+            "total_count": 1047
+          },
+          {
+            "name": "轮回",
+            "count": 536,
+            "total_count": 17234
+          },
+          {
+            "name": "日本",
+            "count": 522,
+            "total_count": 303623
+          },
+          {
+            "name": "2024",
+            "count": 475,
+            "total_count": 72274
+          },
+          {
+            "name": "小说改",
+            "count": 458,
+            "total_count": 162702
+          },
+          {
+            "name": "轻改",
+            "count": 383,
+            "total_count": 153770
+          },
+          {
+            "name": "少年向",
+            "count": 181,
+            "total_count": 7719
+          },
+          {
+            "name": "青年向",
+            "count": 125,
+            "total_count": 4287
+          },
+          {
+            "name": "续作",
+            "count": 92,
+            "total_count": 47358
+          },
+          {
+            "name": "恋爱",
+            "count": 63,
+            "total_count": 571633
+          },
+          {
+            "name": "穿越",
+            "count": 61,
+            "total_count": 63956
+          },
+          {
+            "name": "高橋李依",
+            "count": 56,
+            "total_count": 2088
+          },
+          {
+            "name": "催泪",
+            "count": 39,
+            "total_count": 60839
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 30,
+            "total_count": 4117
+          },
+          {
+            "name": "后宫",
+            "count": 30,
+            "total_count": 306461
+          },
+          {
+            "name": "不评论",
+            "count": 29,
+            "total_count": 215
+          },
+          {
+            "name": "筱原正宽",
+            "count": 29,
+            "total_count": 141
+          },
+          {
+            "name": "篠原正寛",
+            "count": 26,
+            "total_count": 99
+          },
+          {
+            "name": "智斗",
+            "count": 26,
+            "total_count": 23333
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 26,
+            "total_count": 427
+          },
+          {
+            "name": "re0",
+            "count": 23,
+            "total_count": 257
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 22,
+            "total_count": 2363
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 第三季 袭击篇"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re：從零開始的異世界生活 第三季 襲擊篇"
+              },
+              {
+                "v": "Re0 第三季"
+              },
+              {
+                "v": "Re0 3"
+              },
+              {
+                "v": "rezero s3"
+              },
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu (2024)"
+              },
+              {
+                "v": "Re:ゼロから始める異世界生活 (2024)"
+              },
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season Shuugeki Hen"
+              },
+              {
+                "v": "Re:ZERO -Starting Life in Another World- Season 3 Shuugeki Hen"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "8"
+          },
+          {
+            "key": "放送开始",
+            "value": "2024年10月2日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/tv/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "AT-X"
+          },
+          {
+            "key": "其他电视台",
+            "value": "TOKYO MX / KBS京都 / サンテレビ / BS11 / テレビ北海道 / テレビ愛知 / TVQ九州放送 / IBC岩手放送 / tbc東北放送 / とちぎテレビ / 群馬テレビ / 長野朝日放送 / NST新潟総合テレビ / 福井放送 / 静岡放送 / 中国放送 / TSKさんいん中央テレビ / 長崎放送 / 熊本朝日放送 / 鹿児島放送"
+          },
+          {
+            "key": "播放结束",
+            "value": "2024年11月20日"
+          },
+          {
+            "key": "导演",
+            "value": "篠原正寛"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "Copyright",
+            "value": "©長月達平・株式会社KADOKAWA刊／ Re:ゼロから始める異世界生活3製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J『Re:ゼロから始める異世界生活』/KADOKAWA刊）"
+          },
+          {
+            "key": "监修",
+            "value": "剧本监修：長月達平"
+          },
+          {
+            "key": "人物设定",
+            "value": "佐川遥"
+          },
+          {
+            "key": "总作画监督",
+            "value": "佐川遥、三島千枝"
+          },
+          {
+            "key": "怪物设计",
+            "value": "千葉啓太郎"
+          },
+          {
+            "key": "主动画师",
+            "value": "ハミル[Hamil]"
+          },
+          {
+            "key": "动作导演",
+            "value": "动作监修：ハミル[Hamil]"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫、村山夏子"
+          },
+          {
+            "key": "摄影监督",
+            "value": "宮城己織；摄影监修：峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "高橋秀地"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "久保田未萌"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳；剪辑辅佐：仙土真希"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "Imagica EMS"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪、茶畑満里奈"
+          },
+          {
+            "key": "主题歌编曲",
+            "value": "Tom-H@ck / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作曲",
+            "value": "Tom-H@ck / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作词",
+            "value": "烏屋茶房 / MYTH & ROID"
+          },
+          {
+            "key": "主题歌演出",
+            "value": "鈴木このみ / MYTH & ROID"
+          },
+          {
+            "key": "企画",
+            "value": "菊池剛、工藤大丈、青柳昌行"
+          },
+          {
+            "key": "企画协力",
+            "value": "武石広平、駒井紀之、本郷駿之介、黃士豪、中村壮志、川村詩織、加藤隆志、松井健太、赤坂泰基、有村政輝、堀場海"
+          },
+          {
+            "key": "执行制片人",
+            "value": "田中翔、万木壮、小岐須泰世、佐野圭介、岡庭幸春、國府田英則"
+          },
+          {
+            "key": "制片人",
+            "value": "瀬戸口尚斗、池本昌仁、深尾聡志、飯塚彩、鈴木健、青木絵理子"
+          },
+          {
+            "key": "副制片人",
+            "value": "目黒大樹"
+          },
+          {
+            "key": "协力",
+            "value": "尾形光広、梅田正勝、渡部竜平、伊藤誠、滝澤圭一、有賀彩乃、清原誠巳、藤原竜我、中山卓也"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活3製作委員会（KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、DAXEL、メモリーテック）"
+          },
+          {
+            "key": "作画监督",
+            "value": "怪物作画监督：千葉啓太郎；三島千枝、横山隆、新村香奈、鈴木理沙、持丸彰親、宋善永、五月麻帆、三浦瞳、永吉隆志、森川侑紀、北村晋哉、寺尾憲治、千葉啓太郎、佐川遥、西川莉央、佐田雄、杉浦圭一、李文婧、閻志燚、崔芝兰、谭亚雄、寧貞嘉"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "篠原正寛／豆塚隆"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "篠原正寛／豆塚隆"
+          }
+        ],
+        "rating": {
+          "rank": 2037,
+          "total": 9207,
+          "count": {
+            "1": 25,
+            "2": 11,
+            "3": 24,
+            "4": 79,
+            "5": 322,
+            "6": 1543,
+            "7": 4090,
+            "8": 2479,
+            "9": 369,
+            "10": 265
+          },
+          "score": 7.1
+        },
+        "collection": {
+          "on_hold": 574,
+          "dropped": 219,
+          "wish": 3635,
+          "collect": 16743,
+          "doing": 2789
+        },
+        "id": 425998,
+        "eps": 8,
+        "total_episodes": 8,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "奇幻",
+          "战斗",
+          "冒险",
+          "少年向",
+          "小说改",
+          "青年向"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      },
+      {
+        "date": "2025-02-05",
+        "platform": "TV",
+        "images": {
+          "small": "https://lain.bgm.tv/r/200/pic/cover/l/2e/d7/510728_P22GO.jpg",
+          "grid": "https://lain.bgm.tv/r/100/pic/cover/l/2e/d7/510728_P22GO.jpg",
+          "large": "https://lain.bgm.tv/pic/cover/l/2e/d7/510728_P22GO.jpg",
+          "medium": "https://lain.bgm.tv/r/800/pic/cover/l/2e/d7/510728_P22GO.jpg",
+          "common": "https://lain.bgm.tv/r/400/pic/cover/l/2e/d7/510728_P22GO.jpg"
+        },
+        "image": "https://lain.bgm.tv/pic/cover/l/2e/d7/510728_P22GO.jpg",
+        "summary": "襲い来るエルザたちの猛攻を退け、大兎との戦いでベアトリスとの契約を果たした「聖域」の解放から1年が過ぎた。\r\n王選に臨むエミリア陣営は一致団結、充実した日々を送っていたナツキ・スバルだったが、平穏は使者によって届けられた一枚の書状によって終わりを告げる。\r\nそれは王選候補者の一人、アナスタシアがエミリアへ宛てたルグニカの五大都市に数えられる水門都市プリステラへの招待状だった。\r\n招待を受け、プリステラへ向かうスバルたち一行を待っていたのは様々な再会。\r\n一つは意外な、一つは意図せぬ、そして一つは来るべき。水面下で蠢く悪意の胎動と降りかかる未曾有の危機。\r\n少年は再び過酷な運命に立ち向かう。",
+        "name": "Re:ゼロから始める異世界生活 3rd season 反擊編",
+        "name_cn": "Re：从零开始的异世界生活 第三季 反击篇",
+        "tags": [
+          {
+            "name": "异世界",
+            "count": 1767,
+            "total_count": 266092
+          },
+          {
+            "name": "奇幻",
+            "count": 1301,
+            "total_count": 479009
+          },
+          {
+            "name": "战斗",
+            "count": 1230,
+            "total_count": 478049
+          },
+          {
+            "name": "WHITEFOX",
+            "count": 1118,
+            "total_count": 33723
+          },
+          {
+            "name": "2025年1月",
+            "count": 1058,
+            "total_count": 27166
+          },
+          {
+            "name": "轻小说改",
+            "count": 981,
+            "total_count": 500631
+          },
+          {
+            "name": "TV",
+            "count": 945,
+            "total_count": 1419925
+          },
+          {
+            "name": "冒险",
+            "count": 575,
+            "total_count": 54993
+          },
+          {
+            "name": "小说改",
+            "count": 539,
+            "total_count": 162702
+          },
+          {
+            "name": "2025",
+            "count": 514,
+            "total_count": 73684
+          },
+          {
+            "name": "日本",
+            "count": 510,
+            "total_count": 303623
+          },
+          {
+            "name": "从零开始的异世界生活",
+            "count": 412,
+            "total_count": 468
+          },
+          {
+            "name": "轻改",
+            "count": 346,
+            "total_count": 153770
+          },
+          {
+            "name": "续作",
+            "count": 230,
+            "total_count": 47358
+          },
+          {
+            "name": "轮回",
+            "count": 180,
+            "total_count": 17234
+          },
+          {
+            "name": "穿越",
+            "count": 51,
+            "total_count": 63956
+          },
+          {
+            "name": "2025年2月",
+            "count": 42,
+            "total_count": 106
+          },
+          {
+            "name": "恋爱",
+            "count": 40,
+            "total_count": 571633
+          },
+          {
+            "name": "后宫",
+            "count": 34,
+            "total_count": 306461
+          },
+          {
+            "name": "Re:从零开始异世界生活",
+            "count": 31,
+            "total_count": 4117
+          },
+          {
+            "name": "筱原正宽",
+            "count": 31,
+            "total_count": 141
+          },
+          {
+            "name": "篠原正寛",
+            "count": 20,
+            "total_count": 99
+          },
+          {
+            "name": "热血",
+            "count": 18,
+            "total_count": 215417
+          },
+          {
+            "name": "悬疑",
+            "count": 18,
+            "total_count": 114930
+          },
+          {
+            "name": "re0",
+            "count": 15,
+            "total_count": 257
+          },
+          {
+            "name": "Re：从零开始的异世界生活",
+            "count": 13,
+            "total_count": 427
+          },
+          {
+            "name": "长月达平",
+            "count": 12,
+            "total_count": 220
+          },
+          {
+            "name": "Re:ゼロから始める異世界生活",
+            "count": 12,
+            "total_count": 2363
+          },
+          {
+            "name": "2025年",
+            "count": 12,
+            "total_count": 3543
+          },
+          {
+            "name": "横谷昌宏",
+            "count": 10,
+            "total_count": 569
+          }
+        ],
+        "infobox": [
+          {
+            "key": "中文名",
+            "value": "Re：从零开始的异世界生活 第三季 反击篇"
+          },
+          {
+            "key": "别名",
+            "value": [
+              {
+                "v": "Re：從零開始的異世界生活 第三季 反擊篇"
+              },
+              {
+                "v": "Re:Zero kara Hajimeru Isekai Seikatsu (2025)"
+              },
+              {
+                "v": "Re:Zero - Starting Life in Another World (2025)"
+              },
+              {
+                "v": "re0 第三季 反击篇"
+              },
+              {
+                "v": "re0 第三季 反擊篇"
+              }
+            ]
+          },
+          {
+            "key": "话数",
+            "value": "8"
+          },
+          {
+            "key": "放送开始",
+            "value": "2025年2月5日"
+          },
+          {
+            "key": "放送星期",
+            "value": "星期三"
+          },
+          {
+            "key": "官方网站",
+            "value": "http://re-zero-anime.jp/tv/"
+          },
+          {
+            "key": "播放电视台",
+            "value": "AT-X"
+          },
+          {
+            "key": "其他电视台",
+            "value": "TOKYO MX / KBS京都 / サンテレビ / BS11 / テレビ北海道 / テレビ愛知 / TVQ九州放送 / IBC岩手放送 / tbc東北放送 / とちぎテレビ / 群馬テレビ / 長野朝日放送 / NST新潟総合テレビ / 福井放送 / 静岡放送 / 中国放送 / TSKさんいん中央テレビ / 長崎放送 / 熊本朝日放送 / 鹿児島放送"
+          },
+          {
+            "key": "播放结束",
+            "value": "2025年3月26日"
+          },
+          {
+            "key": "导演",
+            "value": "篠原正寛"
+          },
+          {
+            "key": "音乐",
+            "value": "末廣健一郎"
+          },
+          {
+            "key": "Copyright",
+            "value": "©長月達平・株式会社KADOKAWA刊／ Re:ゼロから始める異世界生活3製作委員会"
+          },
+          {
+            "key": "原作",
+            "value": "長月達平（MF文庫J『Re:ゼロから始める異世界生活』/KADOKAWA刊）"
+          },
+          {
+            "key": "监修",
+            "value": "剧本监修：長月達平"
+          },
+          {
+            "key": "人物设定",
+            "value": "佐川遥"
+          },
+          {
+            "key": "总作画监督",
+            "value": "佐川遥、三島千枝"
+          },
+          {
+            "key": "怪物设计",
+            "value": "千葉啓太郎"
+          },
+          {
+            "key": "主动画师",
+            "value": "ハミル[Hamil]"
+          },
+          {
+            "key": "动作导演",
+            "value": "动作监修：ハミル[Hamil]"
+          },
+          {
+            "key": "道具设计",
+            "value": "岩畑剛一、鈴木典孝"
+          },
+          {
+            "key": "美术设计",
+            "value": "青木薫、村山夏子"
+          },
+          {
+            "key": "摄影监督",
+            "value": "宮城己織；摄影监修：峰岸健太郎"
+          },
+          {
+            "key": "摄影监督助理",
+            "value": "高橋秀地"
+          },
+          {
+            "key": "录音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "整音",
+            "value": "录音调整：根岸信洋"
+          },
+          {
+            "key": "录音助理",
+            "value": "久保田未萌"
+          },
+          {
+            "key": "剪辑",
+            "value": "須藤瞳；剪辑辅佐：仙土真希"
+          },
+          {
+            "key": "离线剪辑",
+            "value": "REAL-T"
+          },
+          {
+            "key": "在线剪辑",
+            "value": "Imagica EMS"
+          },
+          {
+            "key": "音乐制作人",
+            "value": "若林豪、茶畑満里奈"
+          },
+          {
+            "key": "主题歌编曲",
+            "value": "Tom-H@ck / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作曲",
+            "value": "Tom-H@ck / MYTH & ROID"
+          },
+          {
+            "key": "主题歌作词",
+            "value": "烏屋茶房 / MYTH & ROID"
+          },
+          {
+            "key": "主题歌演出",
+            "value": "鈴木このみ / MYTH & ROID"
+          },
+          {
+            "key": "企画",
+            "value": "菊池剛、工藤大丈、青柳昌行"
+          },
+          {
+            "key": "企画协力",
+            "value": "武石広平、駒井紀之、本郷駿之介、黃士豪、中村壮志、川村詩織、加藤隆志、松井健太、赤坂泰基、有村政輝、堀場海"
+          },
+          {
+            "key": "执行制片人",
+            "value": "田中翔、万木壮、小岐須泰世、佐野圭介、岡庭幸春、國府田英則"
+          },
+          {
+            "key": "制片人",
+            "value": "瀬戸口尚斗、池本昌仁、深尾聡志、飯塚彩、鈴木健、青木絵理子"
+          },
+          {
+            "key": "副制片人",
+            "value": "目黒大樹"
+          },
+          {
+            "key": "协力",
+            "value": "尾形光広、梅田正勝、渡部竜平、伊藤誠、滝澤圭一、有賀彩乃、清原誠巳、藤原竜我、中山卓也"
+          },
+          {
+            "key": "音乐制作",
+            "value": "KADOKAWA"
+          },
+          {
+            "key": "製作",
+            "value": "Re:ゼロから始める異世界生活3製作委員会（KADOKAWA、博報堂DYミュージック&ピクチャーズ、AT-X、DAXEL、メモリーテック）"
+          },
+          {
+            "key": "作画监督",
+            "value": "怪物作画监督：千葉啓太郎；五月麻帆、三浦瞳、王國年、中村岳志、安藤勘作、佐川遥、岩田景子、後藤真人、稲吉智重、佐々木舞、杉浦圭一、和泉百香、崔芝兰、李文婧、王昱凯、寧貞嘉[宁贞嘉]、永吉隆志、西川莉央、持丸彰親、大髙雄大[大髙雄太]、平松伸行、佐田雄、小谷ひとみ、孫威軍、菅原美由紀、ハン･ミンギ、二宮奈那子、齊藤貴巳一、ハシモトダイスケ、外崎小鉄、中熊太一、池津寿恵、小井聖令奈、李欣然"
+          },
+          {
+            "key": "OP・ED 分镜",
+            "value": "篠原正寛／豆塚隆"
+          },
+          {
+            "key": "OP・ED 演出",
+            "value": "篠原正寛／豆塚隆"
+          }
+        ],
+        "rating": {
+          "rank": 2775,
+          "total": 7685,
+          "count": {
+            "1": 19,
+            "2": 11,
+            "3": 15,
+            "4": 84,
+            "5": 318,
+            "6": 1654,
+            "7": 3663,
+            "8": 1534,
+            "9": 226,
+            "10": 161
+          },
+          "score": 7
+        },
+        "collection": {
+          "on_hold": 348,
+          "dropped": 147,
+          "wish": 2492,
+          "collect": 14393,
+          "doing": 1886
+        },
+        "id": 510728,
+        "eps": 8,
+        "total_episodes": 8,
+        "meta_tags": [
+          "TV",
+          "日本",
+          "奇幻",
+          "战斗",
+          "冒险",
+          "小说改"
+        ],
+        "volumes": 0,
+        "series": false,
+        "locked": false,
+        "nsfw": false,
+        "type": 2
+      }
+    ],
+    "total": 69,
+    "limit": 10,
+    "offset": 0
+  }
+}

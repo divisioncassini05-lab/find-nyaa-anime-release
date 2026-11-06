@@ -1,0 +1,2940 @@
+"""Reusable RSS collection, release classification, and selection core."""
+
+from __future__ import annotations
+
+from quality_review import inspection_key
+
+import argparse
+import hashlib
+import json
+import re
+import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
+from dataclasses import replace
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+import search_nyaa_releases as nyaa
+from nyaa_client import NyaaClient, NyaaRelease, NyaaSearchRequest
+from release_identity import Confidence, EpisodeKind, ReleaseIdentity, normalize_season_number, parse_release_identity, season_relation
+from chinese_search import exact_chinese_queries
+from retrieval_decisions import (ACTIVE_RUN, TITLE_CONTEXT, SearchRun, TargetDecision,
+    EligibilityDecision, RecordingClient, REPORT_VERSION, plan_queries)
+
+
+RAW_CACHE_VERSION = 5
+RAW_CACHE_SECONDS = 5 * 60
+MAX_RAW_CACHE_ENTRIES = 120
+MAX_RECENT_CACHE_PAGES = 96
+MAX_RECENT_SCAN_PAGES = 32
+RECENT_SCAN_BATCH_SIZE = 4
+MAX_SIZE_SORT_PAGES = 3
+NYAA_LISTING_PAGE_SIZE = 75
+TIER_SIZE_BOUNDS: dict[str, tuple[float, float | None]] = {
+    "browse": (1.0, 2.0),
+    "watch": (2.0, 4.0),
+    "premium": (6.0, None),
+}
+DEFAULT_MOVIE_MIN_TOTAL_GIB = 10.0
+DEFAULT_NYAA_CLIENT = nyaa.DEFAULT_CLIENT
+
+
+class SearchIntent(str, Enum):
+    SPECIFIC_EPISODE = "specific_episode"
+    NEXT_TRACKED = "next_tracked"
+    LATEST_REGULAR = "latest_regular"
+    SEASON_BROWSE = "season_browse"
+    SEASON_BATCH = "season_batch"
+    MOVIE = "movie"
+
+
+@dataclass(frozen=True)
+class SearchContext:
+    canonical_title: str | None = None
+    aliases: tuple[str, ...] = ()
+    search_titles: tuple[str, ...] = ()
+    related_titles: tuple[str, ...] = ()
+    mainline_scope: str = "unknown"
+    resolved_season: int | None = None
+    expected_episodes: int | None = None
+    flexible_title_match: bool = False
+    identifiers: tuple[tuple[str, int], ...] = ()
+    episode_mappings: tuple[dict[str, Any], ...] = ()
+    source_numbering: str | None = None
+    target_numbering: str | None = None
+
+
+@dataclass(frozen=True)
+class SizePolicy:
+    source: str
+    hard_min_gib: float | None
+    hard_max_gib: float | None
+    preferred_min_gib: float
+    preferred_max_gib: float | None
+    scope: str = "per_episode"
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if self.scope == "per_episode":
+            payload.pop("scope")
+        return payload
+
+
+@dataclass(frozen=True)
+class SeasonCoverage:
+    scope: str
+    target_season: int | None
+    expected_episodes: int | None
+    covered_episodes: tuple[int, ...] = ()
+    covered_seasons: tuple[int, ...] = ()
+    confidence: str = "unknown"
+    main_file_count: int = 0
+    average_gib_per_episode: float | None = None
+    min_gib_per_episode: float | None = None
+    max_gib_per_episode: float | None = None
+    quality_basis: str = "tier_per_file"
+    source_exempt: bool = False
+    complete: bool = False
+    quality_fit: bool = False
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["covered_episodes"] = list(self.covered_episodes)
+        payload["covered_seasons"] = list(self.covered_seasons)
+        return payload
+
+
+@dataclass(frozen=True)
+class WorkMatchEvidence:
+    outcome: str
+    positive_source: str | None = None
+    positive_title: str | None = None
+    positive_length: int = 0
+    related_title: str | None = None
+    related_length: int = 0
+    decision: str = "no_evidence"
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ClassifiedCandidate:
+    candidate: nyaa.Candidate
+    identity: ReleaseIdentity
+    season_match: str
+    effective_season: int | None = None
+    season_source: str = "unknown"
+    work_match: str = "unknown"
+    coverage: SeasonCoverage | None = None
+    work_match_evidence: WorkMatchEvidence | None = None
+
+    def as_dict(
+        self,
+        include_reasons: bool = False,
+        include_work_evidence: bool = False,
+    ) -> dict[str, Any]:
+        payload = {
+            "nyaa_id": nyaa.nyaa_id_from_url(self.candidate.url),
+            "title": self.candidate.title,
+            "size": self.candidate.size,
+            "seeders": self.candidate.seeders,
+            "resolution": self.candidate.resolution,
+            "url": self.candidate.url,
+            "magnet": self.candidate.magnet,
+            "published": self.candidate.published,
+            "score": self.candidate.score,
+            "score_deprecated": True,
+            "rank_basis": "inspection_only_not_picture_quality",
+            "matched_queries": self.candidate.matched_queries,
+            "subtitle_signal": self.candidate.subtitle_signal,
+            "detail_checked": self.candidate.detail_checked,
+            "detail_chinese_confirmed": self.candidate.detail_chinese_confirmed,
+            "detail_subtitle_signal": self.candidate.detail_subtitle_signal,
+            "identity": self.identity.as_dict(),
+            "season_match": self.season_match,
+            "effective_season": self.effective_season,
+            "season_source": self.season_source,
+            "work_match": self.work_match,
+            "coverage": self.coverage.as_dict() if self.coverage else None,
+        }
+        if include_reasons:
+            payload["reasons"] = self.candidate.reasons
+        if include_work_evidence and self.work_match_evidence is not None:
+            payload["work_match_evidence"] = self.work_match_evidence.as_dict()
+        return payload
+
+
+@dataclass
+class ReleaseSearchReport:
+    intent: SearchIntent
+    requested_season: int | None
+    requested_episode: int | None
+    status: str
+    selected: list[ClassifiedCandidate]
+    choices: list[ClassifiedCandidate]
+    diagnostics: dict[str, Any]
+    failures: list[str]
+    cache: str
+    search_run: SearchRun | None = None
+
+    def as_dict(self, explain: bool = False) -> dict[str, Any]:
+        selected = [item.as_dict(explain, explain) for item in self.selected]
+        choices = [item.as_dict(True, explain) for item in (self.choices if explain else self.choices[:2])]
+        if self.status != "found":
+            for item in [*selected, *choices]:
+                item.pop("magnet", None)
+        return {
+            "report_version": REPORT_VERSION,
+            "search_run": self.search_run.as_dict() if self.search_run else None,
+            "target_decision": asdict(self.search_run.target) if self.search_run and self.search_run.target else None,
+            "choice_count": len(self.choices),
+            "choices_returned": len(choices),
+            "choices_truncated": len(choices) < len(self.choices),
+            "status": self.status,
+            "intent": self.intent.value,
+            "requested_season": self.requested_season,
+            "requested_episode": self.requested_episode,
+            "selected": selected,
+            "choices": choices,
+            "diagnostic": self.diagnostics,
+            "failures": self.failures,
+            "cache": self.cache,
+        }
+
+
+@dataclass
+class DetailInspectionResult:
+    attempted_count: int = 0
+    checked_count: int = 0
+    rejected_count: int = 0
+    verified_count: int = 0
+    failed_count: int = 0
+    missing_url_count: int = 0
+    unchecked_count: int = 0
+    budget_exhausted: bool = False
+    elapsed_ms: int = 0
+    failures: list[str] = field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        return not (
+            self.budget_exhausted
+            or self.failed_count
+            or self.missing_url_count
+            or self.unchecked_count
+        )
+
+    def as_diagnostics(self) -> dict[str, Any]:
+        return {
+            "detail_attempted_count": self.attempted_count,
+            "detail_checked_count": self.checked_count,
+            "detail_failed_count": self.failed_count,
+            "detail_missing_url_count": self.missing_url_count,
+            "detail_unchecked_count": self.unchecked_count,
+            "detail_budget_exhausted": self.budget_exhausted,
+            "detail_elapsed_ms": self.elapsed_ms,
+            "subtitle_rejected_count": self.rejected_count,
+            "subtitle_verified_count": self.verified_count,
+        }
+
+
+def _empty_raw_cache() -> dict[str, Any]:
+    return {"version": RAW_CACHE_VERSION, "entries": {}, "recent_pages": {}}
+
+
+def _load_raw_cache(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return _empty_raw_cache()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _empty_raw_cache()
+    if data.get("version") != RAW_CACHE_VERSION or not isinstance(data.get("entries"), dict):
+        return _empty_raw_cache()
+    if not isinstance(data.get("recent_pages"), dict):
+        data["recent_pages"] = {}
+    return data
+
+
+def _save_raw_cache(path: Path, data: dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        temp.replace(path)
+    except OSError:
+        return
+
+
+def _raw_cache_key(args: argparse.Namespace) -> str:
+    payload = {
+        "query": args.query,
+        "aliases": args.alias,
+        "category": args.category,
+        "filter": args.filter,
+        "candidate_source": _raw_candidate_source(args),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _restore_release(value: Any) -> NyaaRelease | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return NyaaRelease(**value)
+    except TypeError:
+        return None
+
+
+def _cached_item_release(item: Any) -> NyaaRelease | None:
+    if not isinstance(item, dict):
+        return None
+    release = _restore_release(item.get("release"))
+    if release is not None:
+        return release
+    xml = item.get("xml")
+    if not isinstance(xml, str):
+        return None
+    try:
+        return nyaa.client_api.release_from_rss_xml(xml)
+    except nyaa.NyaaParseError:
+        return None
+
+
+def _read_cached_rss_items(path: Path, key: str) -> list[dict[str, Any]] | None:
+    cache = _load_raw_cache(path)
+    now = time.time()
+
+    def expired(entry: Any) -> bool:
+        if not isinstance(entry, dict):
+            return True
+        try:
+            return float(entry.get("expires_at", 0)) <= now
+        except (TypeError, ValueError):
+            return True
+
+    entries = cache["entries"]
+    expired_keys = [
+        item_key
+        for item_key, entry in entries.items()
+        if expired(entry)
+    ]
+    for item_key in expired_keys:
+        entries.pop(item_key, None)
+    if expired_keys:
+        _save_raw_cache(path, cache)
+    entry = entries.get(key)
+    if not isinstance(entry, dict) or not isinstance(entry.get("items"), list):
+        return None
+    items = [
+        item
+        for item in entry["items"]
+        if isinstance(item, dict)
+        and isinstance(item.get("query"), str)
+        and _cached_item_release(item) is not None
+    ]
+    return items
+
+
+def _write_cached_rss_items(path: Path, key: str, items: list[dict[str, Any]]) -> None:
+    cache = _load_raw_cache(path)
+    entries = cache["entries"]
+    now = time.time()
+    normalized = [
+        {"query": item["query"], "release": asdict(release)}
+        for item in items
+        if isinstance(item, dict)
+        and isinstance(item.get("query"), str)
+        and (release := _cached_item_release(item)) is not None
+    ]
+    entries[key] = {
+        "cached_at": now,
+        "expires_at": now + RAW_CACHE_SECONDS,
+        "items": normalized,
+    }
+    if len(entries) > MAX_RAW_CACHE_ENTRIES:
+        oldest = sorted(entries, key=lambda item_key: float(entries[item_key].get("cached_at", 0)))
+        for item_key in oldest[: len(entries) - MAX_RAW_CACHE_ENTRIES]:
+            entries.pop(item_key, None)
+    _save_raw_cache(path, cache)
+
+
+def _recent_page_cache_key(category: str, nyaa_filter: str, page: int) -> str:
+    return f"{category}:{nyaa_filter}:{page}"
+
+
+def _read_cached_recent_page(
+    path: Path, category: str, nyaa_filter: str, page: int
+) -> list[NyaaRelease] | None:
+    cache = _load_raw_cache(path)
+    pages = cache["recent_pages"]
+    now = time.time()
+    expired_keys = []
+    for key, entry in pages.items():
+        try:
+            if not isinstance(entry, dict) or float(entry.get("expires_at", 0)) <= now:
+                expired_keys.append(key)
+        except (TypeError, ValueError):
+            expired_keys.append(key)
+    for key in expired_keys:
+        pages.pop(key, None)
+    if expired_keys:
+        _save_raw_cache(path, cache)
+    entry = pages.get(_recent_page_cache_key(category, nyaa_filter, page))
+    if not isinstance(entry, dict) or not isinstance(entry.get("items"), list):
+        return None
+    restored: list[NyaaRelease] = []
+    for item in entry["items"]:
+        release = _restore_release(item)
+        if release is not None:
+            restored.append(release)
+    return restored
+
+
+def _write_cached_recent_page(
+    path: Path,
+    category: str,
+    nyaa_filter: str,
+    page: int,
+    items: list[NyaaRelease],
+) -> None:
+    cache = _load_raw_cache(path)
+    pages = cache["recent_pages"]
+    now = time.time()
+    pages[_recent_page_cache_key(category, nyaa_filter, page)] = {
+        "cached_at": now,
+        "expires_at": now + RAW_CACHE_SECONDS,
+        "items": [asdict(item) for item in items],
+    }
+    if len(pages) > MAX_RECENT_CACHE_PAGES:
+        oldest = sorted(pages, key=lambda key: float(pages[key].get("cached_at", 0)))
+        for key in oldest[: len(pages) - MAX_RECENT_CACHE_PAGES]:
+            pages.pop(key, None)
+    _save_raw_cache(path, cache)
+
+
+def _merge_candidates(*candidate_lists: list[nyaa.Candidate]) -> list[nyaa.Candidate]:
+    merged: dict[str, nyaa.Candidate] = {}
+    for candidates in candidate_lists:
+        for candidate in candidates:
+            hash_match = re.search(r'btih:([a-fA-F0-9]{40})', candidate.magnet or '')
+            key = candidate.info_hash or (hash_match.group(1).lower() if hash_match else (candidate.url or candidate.title))
+            merged[key] = nyaa.merge_candidate(merged[key], candidate) if key in merged else candidate
+    return list(merged.values())
+
+
+def _score_rss_items(items: list[dict[str, Any]], args: argparse.Namespace) -> list[nyaa.Candidate]:
+    by_key: dict[str, nyaa.Candidate] = {}
+    for raw_item in items:
+        release = _cached_item_release(raw_item)
+        if release is None:
+            continue
+        candidate = nyaa.score_release(
+            release,
+            query=raw_item["query"],
+            want_zh=args.want_zh,
+            airing_priority=args.airing_priority,
+            desired_resolution=args.resolution,
+            tier=args.tier,
+            duration_min=args.duration_min,
+            episodes=args.episodes,
+            prefer_groups=args.prefer_group,
+            avoid_groups=args.avoid_group,
+            include_magnets=args.include_magnets,
+        )
+        candidate_key = candidate.info_hash or candidate.url or candidate.title
+        by_key[candidate_key] = (
+            nyaa.merge_candidate(by_key[candidate_key], candidate)
+            if candidate_key in by_key
+            else candidate
+        )
+    return list(by_key.values())
+
+
+def _targeted_fallback_args(
+    args: argparse.Namespace, requested_season: int | None, requested_episode: int
+) -> argparse.Namespace:
+    episode_token = (
+        f"S{requested_season:02d}E{requested_episode:02d}"
+        if requested_season is not None
+        else f"E{requested_episode:02d}"
+    )
+    payload = vars(args).copy()
+    payload["query"] = f"{args.query} {episode_token}"
+    payload["alias"] = [f"{args.query} {requested_episode:02d}"]
+    return argparse.Namespace(**payload)
+
+
+def _uses_server_size_sort(args: argparse.Namespace) -> bool:
+    """Choose Nyaa's native size ordering for bounded, size-driven searches."""
+    if bool(getattr(args, "movie", False)):
+        return True
+    if bool(getattr(args, "server_sort_size_desc", False)):
+        return True
+    if bool(getattr(args, "trust_cjk_title_for_zh", False)):
+        return True
+    if bool(getattr(args, "whole_season", False)):
+        return True
+    if getattr(args, "episodes", None) is not None:
+        return True
+    if getattr(args, "episode", None) is not None:
+        return True
+
+    intent = getattr(args, "intent", None)
+    intent_value = getattr(intent, "value", intent)
+    if intent_value == SearchIntent.LATEST_REGULAR.value:
+        return False
+    return (
+        getattr(args, "size_policy_source", "tier") == "explicit"
+        or getattr(args, "tier", "browse") == "premium"
+    )
+
+
+def _raw_candidate_source(args: argparse.Namespace) -> str:
+    return "nyaa_html_size_desc" if _uses_server_size_sort(args) else "nyaa_rss_recent"
+
+
+def _entry_matches_size_sorted_target(
+    entry: NyaaRelease,
+    query: str,
+    args: argparse.Namespace,
+) -> bool:
+    if bool(getattr(args, "trust_cjk_title_for_zh", False)) and not _contains_title(
+        entry.title, query
+    ):
+        return False
+
+    identity = parse_release_identity(entry.title)
+    requested_episode = getattr(args, "episode", None)
+    requested_season = normalize_season_number(getattr(args, "season", None))
+    if requested_episode is not None and (
+        identity.kind is not EpisodeKind.REGULAR
+        or identity.episode != requested_episode
+    ):
+        return False
+    if (
+        requested_season is not None
+        and identity.season is not None
+        and identity.season != requested_season
+    ):
+        return False
+    if getattr(args, "episodes", None) is not None and requested_episode is None:
+        if identity.kind is not EpisodeKind.BATCH:
+            return False
+
+    size_bytes = nyaa.parse_size(entry.size or "")
+    if size_bytes is None:
+        return False
+    multiplier = (
+        int(args.episodes)
+        if getattr(args, "episodes", None) is not None and requested_episode is None
+        else 1
+    )
+    size_gib = nyaa.bytes_to_gib(size_bytes)
+    if bool(getattr(args, "movie", False)):
+        hard_min = getattr(args, "min_total_gib", DEFAULT_MOVIE_MIN_TOTAL_GIB)
+        hard_max = getattr(args, "max_total_gib", None)
+        multiplier = 1
+    else:
+        hard_min = getattr(args, "min_gib_per_episode", None)
+        hard_max = getattr(args, "max_gib_per_episode", None)
+    if hard_min is not None and size_gib < float(hard_min) * multiplier:
+        return False
+    if hard_max is not None and size_gib > float(hard_max) * multiplier:
+        return False
+    return True
+
+
+def _size_sorted_page_is_below_floor(
+    entries: list[NyaaRelease],
+    args: argparse.Namespace,
+) -> bool:
+    # Batch source exemptions are verified from the file list, so a package-total
+    # floor must not prematurely stop the server-sorted listing scan.
+    if getattr(args, "episodes", None) is not None:
+        return False
+    hard_min = (
+        getattr(args, "min_total_gib", DEFAULT_MOVIE_MIN_TOTAL_GIB)
+        if bool(getattr(args, "movie", False))
+        else getattr(args, "min_gib_per_episode", None)
+    )
+    if hard_min is None:
+        return False
+    sizes = [
+        size_bytes
+        for entry in entries
+        if (size_bytes := nyaa.parse_size(entry.size or "")) is not None
+    ]
+    return bool(sizes) and min(sizes) < float(hard_min) * (1024**3)
+
+
+def collect_raw_candidates(
+    args: argparse.Namespace,
+    cache_path: Path | None = None,
+    refresh_cache: bool = False,
+    client: NyaaClient | None = None,
+) -> tuple[list[nyaa.Candidate], list[str], str]:
+    client = client or DEFAULT_NYAA_CLIENT
+    key = _raw_cache_key(args)
+    if cache_path is not None and not refresh_cache:
+        cached = _read_cached_rss_items(cache_path, key)
+        if cached is not None:
+            run = ACTIVE_RUN.get()
+            if run is not None:
+                run.requests.append({'source':'cache','status':'ok','items':[
+                    {'query': i.get('query'), 'release': {k:v for k,v in i.get('release',{}).items() if k!='magnet'}} for i in cached]})
+            return _score_rss_items(cached, args), [], "hit"
+
+    raw_items: list[dict[str, Any]] = []
+    failures: list[str] = []
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+    use_size_sorted_listing = _uses_server_size_sort(args)
+
+    def fetch_query(query: str) -> list[dict[str, Any]]:
+        if use_size_sorted_listing:
+            collected: list[dict[str, Any]] = []
+            for page in range(1, MAX_SIZE_SORT_PAGES + 1):
+                entries = client.search(
+                    NyaaSearchRequest(
+                        query=query,
+                        category=args.category,
+                        nyaa_filter=args.filter,
+                        page=page,
+                        timeout=args.timeout,
+                        source="listing",
+                        sort="size",
+                        order="desc",
+                    )
+                )
+                if not entries:
+                    break
+                collected.extend(
+                    {
+                        "query": query,
+                        "release": asdict(entry),
+                    }
+                    for entry in entries
+                )
+                # Raw collection never stops because of quality or a matching row.
+                if len(entries) < NYAA_LISTING_PAGE_SIZE:
+                    break
+            return collected
+        releases = client.search(
+            NyaaSearchRequest(
+                query=query,
+                category=args.category,
+                nyaa_filter=args.filter,
+                timeout=args.timeout,
+                source="rss",
+            )
+        )
+        return [
+            {"query": query, "release": asdict(release)}
+            for release in releases
+        ]
+
+    # Discovery is the latency-sensitive path and queries at most a few Agent-picked
+    # names. Keep the legacy path sequential so existing callers retain deterministic
+    # request order.
+    if (
+        getattr(args, "discover", False) or use_size_sorted_listing
+    ) and len(queries) > 1:
+        query_results: dict[str, list[dict[str, Any]]] = {}
+        query_failures: dict[str, Exception] = {}
+        with ThreadPoolExecutor(max_workers=min(4, len(queries))) as executor:
+            future_queries = {executor.submit(fetch_query, query): query for query in queries}
+            for future in as_completed(future_queries):
+                query = future_queries[future]
+                try:
+                    query_results[query] = future.result()
+                except Exception as exc:  # noqa: BLE001 - preserve per-query network failures.
+                    query_failures[query] = exc
+        for query in queries:
+            if query in query_failures:
+                failures.append(f"{query}: {query_failures[query]}")
+            else:
+                raw_items.extend(query_results.get(query, []))
+    else:
+        for query in queries:
+            try:
+                raw_items.extend(fetch_query(query))
+            except Exception as exc:  # noqa: BLE001 - reports keep network failures separate from empty results.
+                failures.append(f"{query}: {exc}")
+    candidates = _score_rss_items(raw_items, args)
+    # A multi-query result is only reusable when every query completed. Caching a
+    # partial result can turn a transient alias failure into a false hard miss.
+    if cache_path is not None and raw_items and not failures:
+        _write_cached_rss_items(cache_path, key, raw_items)
+    cache_state = "refresh" if refresh_cache else "miss"
+    if failures:
+        cache_state += "-partial"
+    return candidates, failures, cache_state
+
+
+def _score_listing_entry(
+    entry: NyaaRelease,
+    matched_queries: list[str],
+    args: argparse.Namespace,
+) -> nyaa.Candidate:
+    candidate = nyaa.score_release(
+        entry,
+        query=matched_queries[0],
+        want_zh=args.want_zh,
+        airing_priority=args.airing_priority,
+        desired_resolution=args.resolution,
+        tier=args.tier,
+        duration_min=args.duration_min,
+        episodes=args.episodes,
+        prefer_groups=args.prefer_group,
+        avoid_groups=args.avoid_group,
+        include_magnets=False,
+    )
+    candidate.matched_queries = matched_queries
+    return candidate
+
+
+def collect_recent_candidates(
+    args: argparse.Namespace,
+    since: date,
+    until: date | None = None,
+    cache_path: Path | None = None,
+    refresh_cache: bool = False,
+    today: date | None = None,
+    client: NyaaClient | None = None,
+) -> tuple[list[nyaa.Candidate], dict[str, Any], list[str]]:
+    client = client or DEFAULT_NYAA_CLIENT
+    today = today or date.today()
+    until = min(until or today, today)
+    category = "1_3" if bool(getattr(args, "require_zh", False)) else args.category
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+    requested_season = normalize_season_number(getattr(args, "season", None))
+    requested_episode = getattr(args, "episode", None)
+    failures: list[str] = []
+    candidates: list[nyaa.Candidate] = []
+    seen_ids: set[str] = set()
+    pages_examined: list[int] = []
+    cache_hits = 0
+    cutoff_reached = False
+    oldest_seen: date | None = None
+
+    def fetch_page(page: int) -> tuple[int, list[NyaaRelease]]:
+        parsed = client.search(
+            NyaaSearchRequest(
+                category=category,
+                nyaa_filter=args.filter,
+                page=page,
+                timeout=args.timeout,
+                source="listing",
+                sort="id",
+                order="desc",
+            )
+        )
+        if not parsed:
+            raise ValueError("Nyaa listing page contained no parseable release rows")
+        return page, parsed
+
+    for batch_start in range(1, MAX_RECENT_SCAN_PAGES + 1, RECENT_SCAN_BATCH_SIZE):
+        batch_pages = list(
+            range(
+                batch_start,
+                min(batch_start + RECENT_SCAN_BATCH_SIZE, MAX_RECENT_SCAN_PAGES + 1),
+            )
+        )
+        page_results: dict[int, list[NyaaRelease]] = {}
+        missing_pages: list[int] = []
+        for page in batch_pages:
+            cached = (
+                _read_cached_recent_page(cache_path, category, args.filter, page)
+                if cache_path is not None and not refresh_cache
+                else None
+            )
+            if cached is None:
+                missing_pages.append(page)
+            else:
+                page_results[page] = cached
+                cache_hits += 1
+        if missing_pages:
+            with ThreadPoolExecutor(max_workers=min(RECENT_SCAN_BATCH_SIZE, len(missing_pages))) as executor:
+                future_pages = {executor.submit(fetch_page, page): page for page in missing_pages}
+                for future in as_completed(future_pages):
+                    page = future_pages[future]
+                    try:
+                        _, parsed = future.result()
+                        page_results[page] = parsed
+                        if cache_path is not None:
+                            _write_cached_recent_page(
+                                cache_path, category, args.filter, page, parsed
+                            )
+                    except Exception as exc:  # noqa: BLE001 - preserve page-level diagnostics.
+                        failures.append(f"listing page {page}: {exc}")
+
+        for page in batch_pages:
+            entries = page_results.get(page)
+            if entries is None:
+                continue
+            pages_examined.append(page)
+            for entry in entries:
+                if entry.published_at is None:
+                    continue
+                published_date = datetime.fromtimestamp(entry.published_at).date()
+                oldest_seen = (
+                    published_date
+                    if oldest_seen is None or published_date < oldest_seen
+                    else oldest_seen
+                )
+                if published_date < since:
+                    cutoff_reached = True
+                    continue
+                if published_date > until or entry.nyaa_id in seen_ids:
+                    continue
+                matched_queries = [
+                    query
+                    for query in queries
+                    if _contains_title(entry.title, query, flexible=True)
+                ]
+                if not matched_queries:
+                    continue
+                identity = parse_release_identity(entry.title)
+                if (
+                    requested_episode is not None
+                    and (
+                        identity.kind is not EpisodeKind.REGULAR
+                        or identity.episode != requested_episode
+                    )
+                ):
+                    continue
+                if (
+                    requested_season is not None
+                    and identity.season is not None
+                    and identity.season != requested_season
+                ):
+                    continue
+                seen_ids.add(entry.nyaa_id)
+                candidates.append(_score_listing_entry(entry, matched_queries, args))
+        if cutoff_reached:
+            break
+
+    complete = cutoff_reached and not failures
+    diagnostics = {
+        "status": "complete" if complete else "incomplete",
+        "since": since.isoformat(),
+        "until": until.isoformat(),
+        "window_days": (until - since).days,
+        "window_mode": (
+            "recent_to_today" if until == today else "post_airing_7_day"
+        ),
+        "current_new_anime": bool(getattr(args, "current_new_anime", False)),
+        "category": category,
+        "pages_fetched": len(pages_examined),
+        "cache_hits": cache_hits,
+        "cutoff_reached": cutoff_reached,
+        "matched_count": len(candidates),
+        "oldest_seen": oldest_seen.isoformat() if oldest_seen else None,
+        "errors": failures[:4],
+    }
+    return candidates, diagnostics, failures
+
+
+def _discovery_sort_key(item: ClassifiedCandidate) -> tuple[str, int, int, int, float]:
+    identity = item.identity
+    nyaa_id = nyaa.nyaa_id_from_url(item.candidate.url) or "0"
+    return (
+        item.candidate.published or "",
+        identity.season or 0,
+        int(identity.episode or identity.episode_end or 0),
+        int(nyaa_id) if nyaa_id.isdigit() else 0,
+        tuple(-v if isinstance(v, (int, float)) else v for v in inspection_key(item.candidate)),
+    )
+
+
+_FAST_PATH_LANGUAGE_VARIANT = re.compile(
+    r"(?i)(?:"
+    r"\bVOSTFR\b|"
+    r"\b(?:english|eng|french|german|spanish|latino|russian|rus)"
+    r"[\s._-]*(?:dub|dubbed)\b|"
+    r"\b(?:dub|dubbed)[\s._-]*(?:english|eng|french|german|spanish|latino|russian|rus)\b"
+    r")"
+)
+_CJK_CHARACTER = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_LATIN_ALIAS_TECHNICAL = re.compile(
+    r"(?i)\b(?:web(?:rip|-dl)?|bluray|bd(?:rip|mv)?|1080p?|720p?|2160p?|"
+    r"hevc|avc|h\.?26[45]|aac|flac|mkv|mp4|multisubs?|dual[- ]audio|"
+    r"subtitle|season|episode)\b"
+)
+_LATIN_ALIAS_CUT = re.compile(
+    r"(?i)(?:"
+    r"\s+[-\u2013\u2014]\s+(?=\d{1,3}(?:\.\d+)?(?:\D|$))|"
+    r"\s+S\d{1,2}E\d{1,3}\b|"
+    r"\s*\[(?:\d{1,3}(?:\.\d+)?|(?:web|bd|1080|720|2160|hevc|avc|h\.?26)[^\]]*)\]"
+    r").*$"
+)
+
+
+def _compact_cjk(value: str) -> str:
+    return "".join(_CJK_CHARACTER.findall(value))
+
+
+def _query_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _configured_latin_query_matched(
+    items: list[ClassifiedCandidate], queries: list[str]
+) -> bool:
+    latin_keys = {
+        _query_key(query) for query in queries if re.search(r"[A-Za-z]", query)
+    }
+    if not latin_keys:
+        return False
+    return any(
+        _query_key(matched_query) in latin_keys
+        for item in items
+        for matched_query in item.candidate.matched_queries
+    )
+
+
+def _clean_recovered_latin_alias(segment: str) -> str | None:
+    segment = re.sub(r"^\[[^\]]+\]\s*", "", segment).strip()
+    segment = _LATIN_ALIAS_CUT.sub("", segment).strip(" .,:;_-\u2013\u2014")
+    if not re.search(r"[A-Za-z]", segment) or _CJK_CHARACTER.search(segment):
+        return None
+    if len(segment) < 3 or len(segment) > 80:
+        return None
+    if _LATIN_ALIAS_TECHNICAL.search(segment):
+        return None
+    if not re.search(r"[A-Za-z]{2}", segment):
+        return None
+    return re.sub(r"\s+", " ", segment)
+
+
+def _recover_latin_aliases_from_cjk_matches(
+    items: list[ClassifiedCandidate],
+    queries: list[str],
+    limit: int = 2,
+) -> list[str]:
+    """Recover bounded Latin work aliases from exact CJK/Latin release titles."""
+    cjk_queries = [
+        query for query in queries if len(_compact_cjk(query)) >= 2
+    ]
+    existing_keys = {_query_key(query) for query in queries}
+    support: dict[str, tuple[str, int]] = {}
+    for item in items:
+        title = item.candidate.title
+        matched_keys = {_query_key(query) for query in item.candidate.matched_queries}
+        matching_cjk = [
+            query
+            for query in cjk_queries
+            if _query_key(query) in matched_keys
+            and _compact_cjk(query) in _compact_cjk(title)
+        ]
+        if not matching_cjk:
+            continue
+        segments = re.split(r"\s*(?:/|\uff0f|\|)\s*", title)
+        if len(segments) < 2:
+            continue
+        for segment in segments:
+            alias = _clean_recovered_latin_alias(segment)
+            if alias is None:
+                continue
+            key = _query_key(alias)
+            if not key or key in existing_keys:
+                continue
+            previous = support.get(key)
+            support[key] = (alias, (previous[1] if previous else 0) + 1)
+    ranked = sorted(
+        support.values(),
+        key=lambda value: (value[1], len(value[0])),
+        reverse=True,
+    )
+    return [alias for alias, _count in ranked[: max(1, limit)]]
+
+
+def _trusted_cjk_title_query(
+    item: ClassifiedCandidate,
+    args: argparse.Namespace,
+) -> str | None:
+    if not getattr(args, "trust_cjk_title_for_zh", False):
+        return None
+    title_cjk = _compact_cjk(item.candidate.title)
+    if not title_cjk:
+        return None
+    queries = item.candidate.matched_queries or [args.query, *args.alias]
+    for query in queries:
+        query_cjk = _compact_cjk(query)
+        if len(query_cjk) >= 2 and query_cjk in title_cjk:
+            return query
+    return None
+
+
+def _mark_cjk_title_trusted(item: ClassifiedCandidate, query: str) -> None:
+    signal = f"trusted Chinese release title matched query: {query}"
+    item.candidate.subtitle_signal = signal
+    if signal not in item.candidate.reasons:
+        item.candidate.reasons.append(signal)
+
+
+def _apply_trusted_cjk_first_season(
+    items: list[ClassifiedCandidate],
+    args: argparse.Namespace,
+    requested_season: int | None,
+    requested_episode: int | None,
+) -> None:
+    """Accept seasonless exact-episode titles in the explicit S01 CJK trust lane.
+
+    Chinese platform releases commonly format first-season episodes as ``- 09``
+    instead of ``S01E09``.  The supplemental trust lane already requires an exact
+    CJK work-title match and exact regular episode, so retaining an unknown season
+    here only turns a verified first-season result into a false miss.  Later
+    seasons remain ambiguous and are deliberately not inferred.
+    """
+    if (
+        not getattr(args, "trust_cjk_title_for_zh", False)
+        or requested_season != 1
+        or requested_episode is None
+    ):
+        return
+    for item in items:
+        if (
+            item.season_match != "unknown"
+            or item.identity.kind is not EpisodeKind.REGULAR
+            or item.identity.episode != requested_episode
+            or item.work_match == "related_work"
+            or _trusted_cjk_title_query(item, args) is None
+        ):
+            continue
+        item.effective_season = 1
+        item.season_source = "trusted_cjk_first_season"
+        item.season_match = "match"
+
+
+def _fast_path_hint(
+    items: list[ClassifiedCandidate],
+    args: argparse.Namespace,
+    requested_season: int | None,
+    requested_episode: int | None,
+) -> dict[str, Any] | None:
+    """Recommend one low-risk candidate without hiding the discovery set."""
+    if (
+        (
+            getattr(args, "require_zh", False)
+            and not getattr(args, "trust_cjk_title_for_zh", False)
+        )
+        or getattr(args, "whole_season", False)
+        or getattr(args, "include_specials", False)
+        or getattr(args, "movie", False)
+    ):
+        return None
+
+    target_episode = requested_episode
+    if target_episode is None:
+        intent = getattr(args, "intent", None)
+        intent_value = intent.value if isinstance(intent, SearchIntent) else intent
+        if intent_value != SearchIntent.LATEST_REGULAR.value:
+            return None
+        observed = [
+            int(item.identity.episode)
+            for item in items
+            if item.identity.kind is EpisodeKind.REGULAR
+            and item.identity.episode is not None
+            and item.identity.episode == item.identity.episode.to_integral_value()
+            and item.season_match not in {"other", "other_work"}
+            and item.work_match != "related_work"
+        ]
+        if not observed:
+            return None
+        target_episode = max(observed)
+
+    eligible = [
+        item
+        for item in items
+        if item.identity.kind is EpisodeKind.REGULAR
+        and item.identity.episode == target_episode
+        and item.season_match not in {"other", "other_work"}
+        and item.work_match != "related_work"
+    ]
+    if not eligible:
+        return None
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        eligible = [
+            item
+            for item in eligible
+            if _trusted_cjk_title_query(item, args) is not None
+        ]
+        if not eligible:
+            return None
+
+    policy = size_policy_from_args(args)
+    size_qualified: list[ClassifiedCandidate] = []
+    for item in eligible:
+        comparable = nyaa.comparable_gib_per_episode(
+            item.candidate,
+            getattr(args, "episodes", None),
+        )
+        if comparable is None:
+            continue
+        if policy.hard_min_gib is not None and comparable < policy.hard_min_gib:
+            continue
+        if policy.hard_max_gib is not None and comparable > policy.hard_max_gib:
+            continue
+        size_qualified.append(item)
+    if not size_qualified:
+        return None
+
+    if requested_season is not None:
+        explicit_season = [
+            item for item in size_qualified if item.season_match == "match"
+        ]
+        if explicit_season:
+            size_qualified = explicit_season
+
+    desired_resolution = getattr(args, "resolution", None)
+    if desired_resolution:
+        matching_resolution = [
+            item
+            for item in size_qualified
+            if item.candidate.resolution
+            and item.candidate.resolution.casefold() == desired_resolution.casefold()
+        ]
+        if matching_resolution:
+            size_qualified = matching_resolution
+
+    ordinary_language = [
+        item
+        for item in size_qualified
+        if not _FAST_PATH_LANGUAGE_VARIANT.search(item.candidate.title)
+    ]
+    if ordinary_language:
+        size_qualified = ordinary_language
+
+    selected = _rank(size_qualified, prefer_in_tier=True)[0]
+    selection_basis = "eligible_practical_inspection_order_not_picture_quality"
+    selected_id = nyaa.nyaa_id_from_url(selected.candidate.url)
+    if selected_id is None:
+        return None
+    return {
+        "status": "ready",
+        "candidate_id": selected_id,
+        "target_episode": target_episode,
+        "selection_basis": selection_basis,
+        "considered_count": len(size_qualified),
+    }
+
+
+def discover_release_candidates(
+    args: argparse.Namespace,
+    cache_path: Path | None = None,
+    refresh_cache: bool = False,
+    limit: int = 20,
+    client: NyaaClient | None = None,
+) -> dict[str, Any]:
+    context = SearchContext(canonical_title=args.query, search_titles=tuple([args.query,*args.alias]),
+        resolved_season=normalize_season_number(args.season),mainline_scope='unknown')
+    run = SearchRun('discovery',plan_queries([args.query,*args.alias],'discovery',getattr(args,'episode',None),context.resolved_season))
+    rt = ACTIVE_RUN.set(run)
+    tt = TITLE_CONTEXT.set(context.search_titles)
+    try:
+        result = _discover_impl(args,cache_path,refresh_cache,limit,RecordingClient(client or DEFAULT_NYAA_CLIENT,run))
+        run.errors = result.get('failures',[])
+        run.ingest_requests()
+        if run.errors:
+            run.completeness = 'partial'
+        result.update(report_version=REPORT_VERSION,search_run=run.as_dict())
+        result['returned_count'] = len(result.get('candidates',[]))
+        result['raw_count'] = len(run.raw_candidates)
+        result['candidates_truncated'] = result['returned_count'] < result['raw_count']
+        return result
+    finally:
+        TITLE_CONTEXT.reset(tt)
+        ACTIVE_RUN.reset(rt)
+
+
+def _discover_impl(args,cache_path=None,refresh_cache=False,limit=20,client=None):
+    """Collect a compact, unqualified candidate set for Agent-side decisions."""
+    client = client or DEFAULT_NYAA_CLIENT
+    raw, failures, cache_state = collect_raw_candidates(
+        args, cache_path, refresh_cache, client
+    )
+    if ACTIVE_RUN.get():
+        ACTIVE_RUN.get().add_raw(raw)
+    candidate_source = _raw_candidate_source(args)
+    recent_scan: dict[str, Any] | None = None
+    recent_since = getattr(args, "recent_since", None)
+    if recent_since is not None:
+        if isinstance(recent_since, str):
+            recent_since = date.fromisoformat(recent_since)
+        recent_until = getattr(args, "recent_until", None)
+        if isinstance(recent_until, str):
+            recent_until = date.fromisoformat(recent_until)
+        recent, recent_scan, recent_failures = collect_recent_candidates(
+            args,
+            recent_since,
+            until=recent_until,
+            cache_path=cache_path,
+            refresh_cache=refresh_cache,
+            client=client,
+        )
+        raw = _merge_candidates(raw, recent)
+        failures = [*failures, *recent_failures]
+        cache_state = f"{cache_state}+recent:{recent_scan['status']}"
+    requested_season = normalize_season_number(getattr(args, "season", None))
+    requested_episode = getattr(args, "episode", None)
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+
+    def classify_discovery_source() -> list[ClassifiedCandidate]:
+        items = _classify(raw, requested_season)
+        if bool(getattr(args, "movie", False)):
+            return [
+                item
+                for item in items
+                if _is_movie_identity(item.identity)
+                and item.season_match not in {"other", "other_work"}
+            ]
+        if requested_episode is None:
+            return items
+        return [
+            item
+            for item in items
+            if item.identity.kind is EpisodeKind.REGULAR
+            and item.identity.episode == requested_episode
+            and item.season_match not in {"other", "other_work"}
+        ]
+
+    classified_source = classify_discovery_source()
+    alias_recovery: dict[str, Any] | None = None
+    if (
+        requested_episode is not None
+        and any(len(_compact_cjk(query)) >= 2 for query in queries)
+        and not _configured_latin_query_matched(classified_source, queries)
+    ):
+        recovered_aliases = _recover_latin_aliases_from_cjk_matches(
+            classified_source, queries
+        )
+        if recovered_aliases:
+            recovery_payload = vars(args).copy()
+            recovery_payload["query"] = recovered_aliases[0]
+            recovery_payload["alias"] = recovered_aliases[1:]
+            recovery_args = argparse.Namespace(**recovery_payload)
+            recovered_raw, recovery_failures, recovery_cache = collect_raw_candidates(
+                recovery_args, cache_path, refresh_cache, client
+            )
+            raw = _merge_candidates(raw, recovered_raw)
+            failures = [*failures, *recovery_failures]
+            cache_state = f"{cache_state}+alias-recovery:{recovery_cache}"
+            queries.extend(
+                alias for alias in recovered_aliases if alias not in queries
+            )
+            classified_source = classify_discovery_source()
+            alias_recovery = {
+                "status": "used",
+                "reason": "no_initial_latin_query_match",
+                "aliases": recovered_aliases,
+                "latin_query_match_after_retry": _configured_latin_query_matched(
+                    classified_source, queries
+                ),
+                "failures": recovery_failures,
+            }
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        classified_source = [
+            item
+            for item in classified_source
+            if _trusted_cjk_title_query(item, args) is not None
+        ]
+        discovery_key = lambda item: (
+            item.candidate.size_bytes or -1,
+            item.candidate.published or "",
+        )
+        ordering = (
+            "nyaa_server_size_desc_then_local_size_desc_and_hard_filters"
+            if candidate_source == "nyaa_html_size_desc"
+            else "size_desc_then_published_desc_not_quality_rank"
+        )
+    else:
+        if candidate_source == "nyaa_html_size_desc":
+            discovery_key = lambda item: (
+                item.candidate.size_bytes or -1,
+                item.candidate.published or "",
+            )
+            ordering = "nyaa_server_size_desc_then_local_size_desc_not_quality_rank"
+        else:
+            discovery_key = _discovery_sort_key
+            ordering = "published_desc_only_not_quality_rank"
+    classified = sorted(
+        classified_source,
+        key=discovery_key,
+        reverse=True,
+    )[: max(1, limit)]
+    latin_queries = [query for query in queries if re.search(r"[A-Za-z]", query)]
+    if classified:
+        status = "found"
+    elif recent_scan is not None and recent_scan["status"] == "incomplete":
+        status = "incomplete"
+    elif failures and len(failures) >= len(queries):
+        status = "network_error"
+    else:
+        status = "no_rss_candidates"
+    candidates = []
+    for item in classified:
+        candidate = item.candidate
+        total_size_gib = (
+            round(nyaa.bytes_to_gib(candidate.size_bytes), 3)
+            if candidate.size_bytes is not None
+            else None
+        )
+        is_regular_episode = item.identity.kind is EpisodeKind.REGULAR
+        is_batch = item.identity.kind is EpisodeKind.BATCH
+        candidates.append(
+            {
+                "nyaa_id": nyaa.nyaa_id_from_url(candidate.url),
+                "title": candidate.title,
+                "identity": item.identity.as_dict(),
+                "size_gib": total_size_gib,
+                "size_scope": (
+                    "single_regular_episode"
+                    if is_regular_episode
+                    else "batch_total"
+                    if is_batch
+                    else "movie_total"
+                    if bool(getattr(args, "movie", False))
+                    else "release_total_not_per_episode"
+                ),
+                "per_episode_size_gib": total_size_gib if is_regular_episode else None,
+                "requires_whole_season_verification": is_batch,
+                "seeders": candidate.seeders,
+                "published": candidate.published,
+                "matched_queries": candidate.matched_queries,
+                "url": candidate.url,
+            }
+        )
+    payload = {
+        "status": status,
+        "queries": queries,
+        "query_coverage": (
+            "includes_latin_alias" if latin_queries else "cjk_only_provisional"
+        ),
+        "latin_query_match": _configured_latin_query_matched(
+            classified_source, queries
+        ),
+        "candidate_source": candidate_source,
+        "ordering": ordering,
+        "candidates": candidates,
+        "failures": failures,
+        "cache": cache_state,
+    }
+    fast_path = _fast_path_hint(
+        classified_source,
+        args,
+        requested_season,
+        requested_episode,
+    )
+    if fast_path is not None:
+        payload["fast_path"] = fast_path
+    if alias_recovery is not None:
+        payload["alias_recovery"] = alias_recovery
+    if recent_scan is not None:
+        payload["recent_scan"] = recent_scan
+    return payload
+
+
+def _compact_title(value: str, flexible: bool = False) -> str:
+    folded = value.casefold()
+    if flexible:
+        folded = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", folded)
+            if not unicodedata.combining(character)
+        )
+        # Treat macron and doubled-vowel romanization as equivalent (Jādūgar / Jaadugar).
+        folded = re.sub(r"([aeiou])\1+", r"\1", folded)
+    return re.sub(r"[\W_]+", "", folded)
+
+
+def _contains_title(release_title: str, work_title: str, flexible: bool = False) -> bool:
+    compact_work = _compact_title(work_title, flexible)
+    minimum = 2 if re.search(r'[\u3400-\u9fff]',compact_work) else 4
+    return len(compact_work) >= minimum and compact_work in _compact_title(release_title, flexible)
+
+
+def _work_match_evidence(
+    candidate: nyaa.Candidate,
+    context: SearchContext | None,
+) -> WorkMatchEvidence:
+    if context is None:
+        return WorkMatchEvidence(outcome="unknown", decision="no_context")
+    flexible = context.flexible_title_match
+
+    positive_matches: list[tuple[str, str, int]] = []
+    if context.canonical_title and _contains_title(
+        candidate.title, context.canonical_title, flexible
+    ):
+        positive_matches.append(
+            (
+                "canonical",
+                context.canonical_title,
+                len(_compact_title(context.canonical_title, flexible)),
+            )
+        )
+    for source, titles in (
+        ("alias", context.aliases),
+        ("search_title", context.search_titles),
+    ):
+        for title in titles:
+            if _contains_title(candidate.title, title, flexible):
+                positive_matches.append(
+                    (source, title, len(_compact_title(title, flexible)))
+                )
+
+    related_matches = [
+        (title, len(_compact_title(title, flexible)))
+        for title in context.related_titles
+        if _contains_title(candidate.title, title, flexible)
+    ]
+    source_priority = {"canonical": 3, "alias": 2, "search_title": 1}
+    best_positive = max(
+        positive_matches,
+        key=lambda item: (item[2], source_priority[item[0]]),
+        default=None,
+    )
+    best_related = max(related_matches, key=lambda item: item[1], default=None)
+
+    positive_outcome = next(
+        (
+            source
+            for source in ("canonical", "alias", "search_title")
+            if any(match_source == source for match_source, _, _ in positive_matches)
+        ),
+        "unknown",
+    )
+    if best_positive is None and best_related is None:
+        return WorkMatchEvidence(outcome="unknown", decision="no_title_evidence")
+    if best_positive is None:
+        return WorkMatchEvidence(
+            outcome="related_work",
+            related_title=best_related[0],
+            related_length=best_related[1],
+            decision="related_only",
+        )
+    if best_related is None:
+        return WorkMatchEvidence(
+            outcome=positive_outcome,
+            positive_source=best_positive[0],
+            positive_title=best_positive[1],
+            positive_length=best_positive[2],
+            decision="positive_only",
+        )
+
+    positive_wins = best_positive[2] >= best_related[1]
+    return WorkMatchEvidence(
+        outcome=positive_outcome if positive_wins else "related_work",
+        positive_source=best_positive[0],
+        positive_title=best_positive[1],
+        positive_length=best_positive[2],
+        related_title=best_related[0],
+        related_length=best_related[1],
+        decision=(
+            "positive_tie"
+            if best_positive[2] == best_related[1]
+            else "positive_more_specific"
+            if positive_wins
+            else "related_more_specific"
+        ),
+    )
+
+
+def _work_match(candidate: nyaa.Candidate, context: SearchContext | None) -> str:
+    return _work_match_evidence(candidate, context).outcome
+
+
+def _classify(
+    candidates: list[nyaa.Candidate],
+    requested_season: int | None,
+    context: SearchContext | None = None,
+) -> list[ClassifiedCandidate]:
+    classified: list[ClassifiedCandidate] = []
+    for candidate in candidates:
+        aliases = tuple(filter(None, (context.canonical_title, *context.aliases, *context.search_titles))) if context else TITLE_CONTEXT.get()
+        identity = parse_release_identity(candidate.title, aliases)
+        work_match_evidence = _work_match_evidence(candidate, context)
+        work_match = work_match_evidence.outcome
+        if (context and context.source_numbering and context.target_numbering and identity.episode is not None
+            and identity.kind is EpisodeKind.REGULAR and work_match in {'canonical','alias','search_title'}):
+            from offline_identity import map_episode
+            mapped = map_episode(identity.episode,context.episode_mappings,context.source_numbering,context.target_numbering)
+            if mapped:
+                identity.decision['evidence'].append({'field':'episode','basis':'source_stamped_mapping',
+                    'from':[identity.season,str(identity.episode)],'to':[mapped[0],str(mapped[1])]})
+                identity = replace(identity,season=mapped[0],episode=Decimal(mapped[1]),covered_seasons=(mapped[0],))
+                identity.decision.update(season=mapped[0],episode=str(mapped[1]))
+            else:
+                identity.decision['status']='conflict'
+                identity.decision['conflicts'].append('numbering_mapping_unresolved')
+                identity=replace(identity,episode_confidence=Confidence.WEAK)
+        if identity.decision is not None:
+            identity.decision['work'] = work_match
+        run = ACTIVE_RUN.get()
+        if run is not None:
+            run.identities[candidate.url] = identity.decision or {}
+        effective_season = identity.season
+        season_source = "title" if identity.season is not None else "unknown"
+        season_match = season_relation(identity, requested_season)
+        if work_match == "related_work":
+            season_match = "other_work"
+        elif requested_season is not None and requested_season in identity.covered_seasons:
+            effective_season = requested_season
+            season_source = "title_coverage"
+            season_match = "match"
+        elif (
+            identity.season is None
+            and identity.kind is EpisodeKind.BATCH
+            and context is not None
+            and context.resolved_season is not None
+            and work_match == "canonical"
+        ):
+            effective_season = context.resolved_season
+            season_source = "canonical_season_title"
+            season_match = (
+                "not_requested"
+                if requested_season is None
+                else ("match" if effective_season == requested_season else "other")
+            )
+        elif (
+            identity.season is None
+            and context is not None
+            and context.mainline_scope == "single"
+            and work_match in {"canonical", "alias", "search_title"}
+        ):
+            effective_season = context.resolved_season or requested_season or 1
+            season_source = "single_mainline"
+            season_match = (
+                "not_requested"
+                if requested_season is None
+                else ("match" if effective_season == requested_season else "other")
+            )
+        if identity.decision is not None:
+            identity.decision.update(effective_season=effective_season, season_match=season_match,
+                                     season_source=season_source, work_evidence=work_match_evidence.as_dict(),
+                                     work_ids=dict(context.identifiers) if context else {})
+            if context and work_match in {'unknown','related_work'} and identity.decision['status'] == 'confirmed':
+                identity.decision['status'] = 'unresolved' if work_match == 'unknown' else 'rejected'
+        classified.append(
+            ClassifiedCandidate(
+                candidate=candidate,
+                identity=identity,
+                season_match=season_match,
+                effective_season=effective_season,
+                season_source=season_source,
+                work_match=work_match,
+                work_match_evidence=work_match_evidence,
+            )
+        )
+    return classified
+
+
+def _in_requested_season(item: ClassifiedCandidate) -> bool:
+    return item.work_match != "related_work" and item.season_match in {"match", "not_requested"}
+
+
+def _is_movie_identity(identity: ReleaseIdentity) -> bool:
+    if identity.kind is EpisodeKind.UNKNOWN:
+        return True  # Legacy movie mode requires an independently verified film title.
+    return (identity.kind is EpisodeKind.SPECIAL
+            and identity.special_markers == ('non_regular_media',)
+            and bool(re.search(r'(?<!\w)(?:movie|film)(?!\w)|劇場版|剧场版', identity.raw_title, re.I))
+            and not re.search(r'(?<!\w)(?:PV|OP|ED|trailer|preview)(?!\w)|予告', identity.raw_title, re.I))
+
+
+def _is_exact_regular_episode(
+    item: ClassifiedCandidate, requested_episode: int | None
+) -> bool:
+    if (item.identity.kind is not EpisodeKind.REGULAR or item.identity.episode is None
+        or (item.identity.decision or {}).get('status') == 'conflict'):
+        return False
+    if not _in_requested_season(item):
+        return False
+    return requested_episode is None or item.identity.episode == requested_episode
+
+
+def size_policy_from_args(args: argparse.Namespace) -> SizePolicy:
+    preferred_min, preferred_max = TIER_SIZE_BOUNDS[args.tier]
+    source = getattr(args, "size_policy_source", "tier")
+    if bool(getattr(args, "movie", False)):
+        return SizePolicy(
+            source=source,
+            hard_min_gib=getattr(
+                args, "min_total_gib", DEFAULT_MOVIE_MIN_TOTAL_GIB
+            ),
+            hard_max_gib=getattr(args, "max_total_gib", None),
+            preferred_min_gib=DEFAULT_MOVIE_MIN_TOTAL_GIB,
+            preferred_max_gib=None,
+            scope="movie_total",
+        )
+    if source == "explicit":
+        return SizePolicy(
+            source="explicit",
+            hard_min_gib=args.min_gib_per_episode,
+            hard_max_gib=getattr(args, "max_gib_per_episode", None),
+            preferred_min_gib=preferred_min,
+            preferred_max_gib=preferred_max,
+        )
+    # Named tiers describe a preferred size band. Their lower bound remains
+    # hard, while the upper bound can be made soft for callers that explicitly
+    # opt into upward compatibility. Explicit min/max policies (including a
+    # user-supplied max) are handled above and remain hard constraints.
+    upward_compatible = bool(getattr(args, "allow_upward_compatibility", False))
+    return SizePolicy(
+        source="tier",
+        hard_min_gib=preferred_min,
+        hard_max_gib=None if upward_compatible else preferred_max,
+        preferred_min_gib=preferred_min,
+        preferred_max_gib=preferred_max,
+    )
+
+
+def _quality_filter(
+    candidates: list[ClassifiedCandidate], args: argparse.Namespace, policy: SizePolicy
+) -> tuple[list[ClassifiedCandidate], dict[str, int]]:
+    kept: list[ClassifiedCandidate] = []
+    counts = {"below_min_count": 0, "above_max_count": 0, "size_unknown_count": 0}
+    movie_mode = bool(getattr(args, "movie", False))
+    unit_label = "GiB total" if movie_mode else "GiB/episode"
+    for item in candidates:
+        reason_start = len(item.candidate.reasons)
+        comparable = (
+            nyaa.bytes_to_gib(item.candidate.size_bytes)
+            if movie_mode and item.candidate.size_bytes is not None
+            else nyaa.comparable_gib_per_episode(item.candidate, args.episodes)
+        )
+        if comparable is None:
+            counts["size_unknown_count"] += 1
+            item.candidate.reasons.append(
+                "actual movie total size is unavailable"
+                if movie_mode
+                else "actual single-episode size is unavailable"
+            )
+            if ACTIVE_RUN.get():
+                ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'rejected', item.candidate.reasons[reason_start:])
+            continue
+        if policy.hard_min_gib is not None and comparable < policy.hard_min_gib:
+            counts["below_min_count"] += 1
+            item.candidate.reasons.append(
+                f"below hard size minimum: {comparable:.2f} < {policy.hard_min_gib:.2f} {unit_label}"
+            )
+            if ACTIVE_RUN.get():
+                ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'rejected', item.candidate.reasons[reason_start:])
+            continue
+        if policy.hard_max_gib is not None and comparable > policy.hard_max_gib:
+            counts["above_max_count"] += 1
+            item.candidate.reasons.append(
+                f"above hard size maximum: {comparable:.2f} > {policy.hard_max_gib:.2f} {unit_label}"
+            )
+            if ACTIVE_RUN.get():
+                ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'rejected', item.candidate.reasons[reason_start:])
+            continue
+        item.candidate.reasons.append(
+            f"meets {policy.source} size policy at {comparable:.2f} {unit_label}"
+        )
+        kept.append(item)
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().record_eligibility(item.candidate.url, 'quality_passed_detail_pending')
+    return kept, counts
+
+
+_VIDEO_EXTENSIONS = {".avi", ".m2ts", ".m4v", ".mkv", ".mp4", ".ts"}
+_EXTRA_DIRECTORY_PATTERN = re.compile(
+    r"(?:^|[/\\])(?:bonus|extras?|ncop|nced|oad|ova|specials?|sp)(?:[/\\]|$)",
+    re.I,
+)
+_EXTRA_BASENAME_PATTERN = re.compile(
+    r"(?:^|[\s._\-\[\]()])(?:"
+    r"cm\d*|creditless|menu|nc(?:op|ed)\d*|oad\d*|ova\d*|preview|pv\d*|"
+    r"recap|sample|sp\d*|trailer"
+    r")(?:$|[\s._\-\[\]()])",
+    re.I,
+)
+_SOURCE_EXEMPT_PATTERN = re.compile(r"(?<![a-z0-9])(?:bdmv|remux)(?![a-z0-9])", re.I)
+
+
+def _season_batch_scope(item: ClassifiedCandidate, requested_season: int | None) -> str:
+    covered = item.identity.covered_seasons
+    if requested_season is not None and covered:
+        if requested_season not in covered:
+            return "other"
+        return "multi" if len(covered) > 1 else "exact"
+    if requested_season is None and len(covered) > 1:
+        return "multi"
+    if item.effective_season is not None and (
+        requested_season is None or item.effective_season == requested_season
+    ):
+        return "exact"
+    return "unknown"
+
+
+def _is_source_exempt(item: ClassifiedCandidate, args: argparse.Namespace) -> bool:
+    return (
+        args.tier == "premium"
+        and getattr(args, "size_policy_source", "tier") != "explicit"
+        and bool(_SOURCE_EXEMPT_PATTERN.search(item.candidate.title))
+    )
+
+
+def _is_main_video(entry: nyaa.NyaaFileEntry) -> bool:
+    normalized = entry.name.replace("\\", "/")
+    suffix = Path(normalized.rsplit("/", 1)[-1]).suffix.casefold()
+    basename = normalized.rsplit("/", 1)[-1]
+    return (
+        suffix in _VIDEO_EXTENSIONS
+        and not _EXTRA_DIRECTORY_PATTERN.search(normalized)
+        and not _EXTRA_BASENAME_PATTERN.search(basename)
+    )
+
+
+def _integer_episode(identity: ReleaseIdentity) -> int | None:
+    episode = identity.episode
+    if (
+        identity.kind is not EpisodeKind.REGULAR
+        or episode is None
+        or episode != episode.to_integral_value()
+    ):
+        return None
+    value = int(episode)
+    return value if value > 0 else None
+
+
+def _entry_identity(
+    entry: nyaa.NyaaFileEntry,
+    requested_season: int | None,
+    scope: str,
+) -> tuple[int | None, int | None]:
+    normalized = entry.name.replace("\\", "/")
+    basename = normalized.rsplit("/", 1)[-1]
+    base_identity = parse_release_identity(basename)
+    path_identity = parse_release_identity(normalized)
+    if base_identity.kind is EpisodeKind.SPECIAL:
+        return None, None
+    episode = _integer_episode(base_identity) or _integer_episode(path_identity)
+    if episode is None:
+        return None, None
+    season = base_identity.season or path_identity.season
+    if season is None and len(path_identity.covered_seasons) == 1:
+        season = path_identity.covered_seasons[0]
+    if season is None and scope == "exact":
+        season = requested_season
+    return season, episode
+
+
+def _title_declares_complete(identity: ReleaseIdentity, expected_episodes: int) -> bool:
+    if identity.episode_start is not None and identity.episode_end is not None:
+        return identity.episode_start <= Decimal(1) and identity.episode_end >= Decimal(expected_episodes)
+    return identity.kind is EpisodeKind.BATCH and identity.coverage_confidence.value == "weak"
+
+
+def _coverage_from_file_entries(
+    item: ClassifiedCandidate,
+    entries: list[nyaa.NyaaFileEntry],
+    args: argparse.Namespace,
+    policy: SizePolicy,
+    requested_season: int | None,
+    expected_episodes: int | None,
+    description: str = "",
+) -> SeasonCoverage:
+    scope = _season_batch_scope(item, requested_season)
+    from package_release import source_exception
+    source_exempt = _is_source_exempt(item, args) and bool(source_exception({
+        'description': description, 'files': [{'name': e.name} for e in entries]}))
+    covered_seasons = item.identity.covered_seasons
+    if expected_episodes is None or expected_episodes <= 0:
+        return SeasonCoverage(
+            scope=scope,
+            target_season=requested_season,
+            expected_episodes=expected_episodes,
+            covered_seasons=covered_seasons,
+            source_exempt=source_exempt,
+            reason="expected_episode_count_unavailable",
+        )
+
+    videos = [entry for entry in entries if _is_main_video(entry)]
+    if not videos:
+        return SeasonCoverage(
+            scope=scope,
+            target_season=requested_season,
+            expected_episodes=expected_episodes,
+            covered_seasons=covered_seasons,
+            source_exempt=source_exempt,
+            reason="detail_file_list_unavailable",
+        )
+
+    mapped: dict[tuple[int | None, int], nyaa.NyaaFileEntry] = {}
+    unknown_large = 0
+    ambiguity_floor = max(0.5, policy.hard_min_gib or 0.0)
+    for entry in videos:
+        season, episode = _entry_identity(entry, requested_season, scope)
+        if episode is None or (scope == "multi" and season is None):
+            if entry.size_bytes is None or nyaa.bytes_to_gib(entry.size_bytes) >= ambiguity_floor:
+                unknown_large += 1
+            continue
+        key = (season, episode)
+        existing = mapped.get(key)
+        if existing is None or (entry.size_bytes or 0) > (existing.size_bytes or 0):
+            mapped[key] = entry
+
+    mapped_seasons = tuple(sorted({season for season, _ in mapped if season is not None}))
+    if scope == "unknown" and requested_season is not None:
+        if requested_season in mapped_seasons:
+            scope = "multi" if len(mapped_seasons) > 1 else "exact"
+        elif len(mapped_seasons) == 1:
+            scope = "other"
+    if scope == "other":
+        return SeasonCoverage(
+            scope=scope,
+            target_season=requested_season,
+            expected_episodes=expected_episodes,
+            covered_seasons=mapped_seasons or covered_seasons,
+            main_file_count=len(mapped),
+            source_exempt=source_exempt,
+            reason="target_season_not_covered",
+        )
+
+    target_entries = {
+        episode: entry
+        for (season, episode), entry in mapped.items()
+        if requested_season is None or season == requested_season
+    }
+    expected_set = set(range(1, expected_episodes + 1))
+    covered_set = set(target_entries) & expected_set
+
+    is_bdmv = bool(re.search(r"(?<![a-z0-9])bdmv(?![a-z0-9])", item.candidate.title, re.I))
+    if (
+        is_bdmv
+        and scope == "exact"
+        and _title_declares_complete(item.identity, expected_episodes)
+        and len(videos) >= expected_episodes
+    ):
+        covered_set = expected_set
+
+    sizes = [entry.size_bytes for entry in mapped.values() if entry.size_bytes is not None]
+    if is_bdmv and not sizes:
+        sizes = [entry.size_bytes for entry in videos if entry.size_bytes is not None]
+    size_gib = [nyaa.bytes_to_gib(value) for value in sizes]
+    complete = covered_set == expected_set
+    if not complete:
+        missing = sorted(expected_set - covered_set)
+        return SeasonCoverage(
+            scope=scope,
+            target_season=requested_season,
+            expected_episodes=expected_episodes,
+            covered_episodes=tuple(sorted(covered_set)),
+            covered_seasons=mapped_seasons or covered_seasons,
+            confidence="verified",
+            main_file_count=len(mapped) or len(videos),
+            min_gib_per_episode=round(min(size_gib), 3) if size_gib else None,
+            max_gib_per_episode=round(max(size_gib), 3) if size_gib else None,
+            source_exempt=source_exempt,
+            reason=f"missing_target_episodes:{','.join(map(str, missing[:8]))}",
+        )
+    if scope == "multi" and unknown_large:
+        return SeasonCoverage(
+            scope=scope,
+            target_season=requested_season,
+            expected_episodes=expected_episodes,
+            covered_episodes=tuple(sorted(covered_set)),
+            covered_seasons=mapped_seasons or covered_seasons,
+            confidence="unknown",
+            main_file_count=len(mapped),
+            min_gib_per_episode=round(min(size_gib), 3) if size_gib else None,
+            max_gib_per_episode=round(max(size_gib), 3) if size_gib else None,
+            source_exempt=source_exempt,
+            reason="unclassified_large_video_files",
+        )
+
+    all_sizes_known = bool(mapped) and all(entry.size_bytes is not None for entry in mapped.values())
+    average_gib = sum(size_gib) / len(size_gib) if size_gib else None
+    quality_basis = (
+        "source_exempt"
+        if source_exempt
+        else "explicit_per_file"
+        if policy.source == "explicit"
+        else "tier_per_file"
+    )
+    quality_fit = source_exempt
+    reason = "verified_complete_and_qualified" if source_exempt else "per_episode_size_unavailable"
+    if not source_exempt and all_sizes_known:
+        explicit_lower_override = (
+            policy.source == "explicit"
+            and policy.hard_min_gib is not None
+            and policy.hard_min_gib < 1.0
+        )
+        absolute_floor = policy.hard_min_gib if explicit_lower_override else 1.0
+        if any(value < absolute_floor for value in size_gib):
+            quality_fit = False
+            reason = "per_episode_below_absolute_floor"
+        elif policy.source == "explicit":
+            quality_fit = all(
+                (policy.hard_min_gib is None or value >= policy.hard_min_gib)
+                and (policy.hard_max_gib is None or value <= policy.hard_max_gib)
+                for value in size_gib
+            )
+            reason = (
+                "verified_complete_and_qualified"
+                if quality_fit
+                else "explicit_per_file_size_out_of_range"
+            )
+        else:
+            quality_fit = all(
+                (policy.hard_min_gib is None or value >= policy.hard_min_gib)
+                and (policy.hard_max_gib is None or value <= policy.hard_max_gib)
+                for value in size_gib
+            )
+            reason = (
+                "verified_complete_and_qualified"
+                if quality_fit
+                else "tier_per_file_size_out_of_range"
+            )
+    return SeasonCoverage(
+        scope=scope,
+        target_season=requested_season,
+        expected_episodes=expected_episodes,
+        covered_episodes=tuple(sorted(covered_set)),
+        covered_seasons=mapped_seasons or covered_seasons,
+        confidence="verified",
+        main_file_count=len(mapped) or len(videos),
+        average_gib_per_episode=round(average_gib, 3) if average_gib is not None else None,
+        min_gib_per_episode=round(min(size_gib), 3) if size_gib else None,
+        max_gib_per_episode=round(max(size_gib), 3) if size_gib else None,
+        quality_basis=quality_basis,
+        source_exempt=source_exempt,
+        complete=True,
+        quality_fit=quality_fit,
+        reason=reason,
+    )
+
+
+def _season_batch_report(
+    classified: list[ClassifiedCandidate],
+    args: argparse.Namespace,
+    policy: SizePolicy,
+    requested_season: int | None,
+    context: SearchContext | None,
+    diagnostics: dict[str, Any],
+    failures: list[str],
+    cache_state: str,
+    client: NyaaClient,
+) -> ReleaseSearchReport:
+    expected_episodes = (context.expected_episodes if context else None) or args.episodes
+    unconfirmed_work_batches = [
+        item
+        for item in classified
+        if item.identity.kind is EpisodeKind.BATCH
+        and item.work_match == "unknown"
+        and _season_batch_scope(item, requested_season) != "other"
+    ]
+    batches = [
+        item
+        for item in classified
+        if item.identity.kind is EpisodeKind.BATCH
+        and item.work_match != "related_work"
+        and (context is None or item.work_match != "unknown")
+        and _season_batch_scope(item, requested_season) != "other"
+    ]
+    diagnostics.update(
+        {
+            "batch_candidate_count": len(batches),
+            "unconfirmed_work_batch_count": len(unconfirmed_work_batches),
+            "expected_episode_count": expected_episodes,
+            "aggregate_floor_rejected_count": 0,
+            "coverage_rejected_count": 0,
+            "season_detail_checked_count": 0,
+            "season_detail_failed_count": 0,
+            "season_detail_unchecked_count": 0,
+            "season_quality_rejected_count": 0,
+            "absolute_floor_rejected_count": 0,
+            "average_range_rejected_count": 0,
+            "explicit_per_file_rejected_count": 0,
+            "tier_per_file_rejected_count": 0,
+            "quality_rejection_samples": [],
+        }
+    )
+    if not batches:
+        return ReleaseSearchReport(
+            intent=SearchIntent.SEASON_BATCH,
+            requested_season=requested_season,
+            requested_episode=None,
+            status=(
+                "season_check_incomplete"
+                if context is not None and unconfirmed_work_batches
+                else "no_complete_season_release"
+            ),
+            selected=[],
+            choices=[],
+            diagnostics=diagnostics,
+            failures=failures,
+            cache=cache_state,
+        )
+
+    inspectable: list[ClassifiedCandidate] = []
+    for item in batches:
+        source_exempt = _is_source_exempt(item, args)
+        if (
+            not source_exempt
+            and expected_episodes
+            and policy.hard_min_gib is not None
+            and item.candidate.size_bytes is not None
+            and nyaa.bytes_to_gib(item.candidate.size_bytes)
+            < expected_episodes * policy.hard_min_gib
+        ):
+            diagnostics["aggregate_floor_rejected_count"] += 1
+            item.coverage = SeasonCoverage(
+                scope=_season_batch_scope(item, requested_season),
+                target_season=requested_season,
+                expected_episodes=expected_episodes,
+                covered_seasons=item.identity.covered_seasons,
+                source_exempt=False,
+                reason="aggregate_size_below_unavoidable_floor",
+            )
+            continue
+        inspectable.append(item)
+
+    detail_limit = max(1, int(getattr(args, "season_detail_limit", 8)))
+    remaining_budget = detail_limit
+    incomplete = False
+    subtitle_qualified_count = 0
+    quality_complete_count = 0
+    qualified_by_scope: dict[str, list[ClassifiedCandidate]] = {"exact": [], "multi": []}
+
+    for scope in ("exact", "multi", "unknown"):
+        group = [item for item in inspectable if _season_batch_scope(item, requested_season) == scope]
+        group = sorted(group, key=lambda value: inspection_key(value.candidate))
+        selected_group = group[:remaining_budget]
+        if len(group) > len(selected_group):
+            diagnostics["season_detail_unchecked_count"] += len(group) - len(selected_group)
+            incomplete = True
+        remaining_budget -= len(selected_group)
+        if not selected_group:
+            continue
+
+        details: dict[int, nyaa.NyaaReleaseDetail] = {}
+        with ThreadPoolExecutor(max_workers=min(4, len(selected_group))) as executor:
+            future_map = {
+                executor.submit(client.get, item.candidate.url, timeout=args.timeout): index
+                for index, item in enumerate(selected_group)
+                if item.candidate.url
+            }
+            missing_urls = len(selected_group) - len(future_map)
+            if missing_urls:
+                diagnostics["season_detail_failed_count"] += missing_urls
+                incomplete = True
+            for future in as_completed(future_map):
+                index = future_map[future]
+                try:
+                    details[index] = future.result()
+                except Exception as exc:  # noqa: BLE001 - incomplete inspection is not no release.
+                    diagnostics["season_detail_failed_count"] += 1
+                    incomplete = True
+                    failures.append(f"Nyaa season detail inspection failed: {exc}")
+
+        for index, item in enumerate(selected_group):
+            detail = details.get(index)
+            if detail is None:
+                continue
+            diagnostics["season_detail_checked_count"] += 1
+            coverage = _coverage_from_file_entries(
+                item, list(detail.files), args, policy, requested_season, expected_episodes, detail.description
+            )
+            item.coverage = coverage
+            if coverage.reason in {
+                "detail_file_list_unavailable",
+                "expected_episode_count_unavailable",
+                "per_episode_size_unavailable",
+                "unclassified_large_video_files",
+            }:
+                incomplete = True
+                continue
+            if not coverage.complete:
+                diagnostics["coverage_rejected_count"] += 1
+                continue
+            if not coverage.quality_fit:
+                diagnostics["season_quality_rejected_count"] += 1
+                reason_counter = {
+                    "per_episode_below_absolute_floor": "absolute_floor_rejected_count",
+                    "average_size_out_of_range": "average_range_rejected_count",
+                    "explicit_per_file_size_out_of_range": "explicit_per_file_rejected_count",
+                    "tier_per_file_size_out_of_range": "tier_per_file_rejected_count",
+                }.get(coverage.reason)
+                if reason_counter:
+                    diagnostics[reason_counter] += 1
+                if len(diagnostics["quality_rejection_samples"]) < 3:
+                    diagnostics["quality_rejection_samples"].append(
+                        {
+                            "average_gib_per_episode": coverage.average_gib_per_episode,
+                            "min_gib_per_episode": coverage.min_gib_per_episode,
+                            "max_gib_per_episode": coverage.max_gib_per_episode,
+                            "quality_basis": coverage.quality_basis,
+                            "reason": coverage.reason,
+                        }
+                    )
+                continue
+            quality_complete_count += 1
+            trusted_query = _trusted_cjk_title_query(item, args)
+            if trusted_query is not None:
+                _mark_cjk_title_trusted(item, trusted_query)
+                subtitle_qualified_count += 1
+            elif getattr(args, "trust_cjk_title_for_zh", False):
+                continue
+            else:
+                nyaa.apply_detail_subtitle_signal(
+                    item.candidate, detail.description, args.want_zh, args.airing_priority
+                )
+            if (
+                getattr(args, "require_zh", False)
+                and trusted_query is None
+                and not item.candidate.detail_chinese_confirmed
+            ):
+                continue
+            if trusted_query is None and item.candidate.detail_chinese_confirmed:
+                subtitle_qualified_count += 1
+            effective_scope = coverage.scope if coverage.scope in {"exact", "multi"} else scope
+            if effective_scope in qualified_by_scope:
+                qualified_by_scope[effective_scope].append(item)
+
+        exact = _rank(
+            qualified_by_scope["exact"],
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+        )
+        if exact:
+            return ReleaseSearchReport(
+                intent=SearchIntent.SEASON_BATCH,
+                requested_season=requested_season,
+                requested_episode=None,
+                status="found",
+                selected=exact[: max(1, args.limit)],
+                choices=[],
+                diagnostics=diagnostics,
+                failures=failures,
+                cache=cache_state,
+            )
+        if scope in {"multi", "unknown"}:
+            multi = _rank(
+                qualified_by_scope["multi"],
+                prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+            )
+            if multi:
+                return ReleaseSearchReport(
+                    intent=SearchIntent.SEASON_BATCH,
+                    requested_season=requested_season,
+                    requested_episode=None,
+                    status="found",
+                    selected=multi[: max(1, args.limit)],
+                    choices=[],
+                    diagnostics=diagnostics,
+                    failures=failures,
+                    cache=cache_state,
+                )
+        if remaining_budget <= 0:
+            break
+
+    if incomplete:
+        status = "season_check_incomplete"
+    elif getattr(args, "require_zh", False) and quality_complete_count and not subtitle_qualified_count:
+        status = "subtitle_unqualified"
+    elif diagnostics["aggregate_floor_rejected_count"] or diagnostics["season_quality_rejected_count"]:
+        status = "release_unqualified"
+    else:
+        status = "no_complete_season_release"
+    return ReleaseSearchReport(
+        intent=SearchIntent.SEASON_BATCH,
+        requested_season=requested_season,
+        requested_episode=None,
+        status=status,
+        selected=[],
+        choices=[],
+        diagnostics=diagnostics,
+        failures=failures,
+        cache=cache_state,
+    )
+
+
+def _rank(
+    items: list[ClassifiedCandidate], *, prefer_in_tier: bool = False
+) -> list[ClassifiedCandidate]:
+    ranked = sorted(items, key=lambda item: (
+        bool(prefer_in_tier and item.candidate.tier_fit != "in-tier"),
+        *inspection_key(item.candidate)))
+    for index, item in enumerate(ranked, start=1):
+        item.candidate.rank = index
+    return ranked
+
+
+def _latest_regular(items: list[ClassifiedCandidate]) -> list[ClassifiedCandidate]:
+    ordered = sorted(
+        items,
+        key=lambda item: (
+            item.identity.episode if item.identity.episode is not None else -1,
+            item.candidate.published or "",
+            tuple(-v if isinstance(v, (int, float)) else v for v in inspection_key(item.candidate)),
+        ),
+        reverse=True,
+    )
+    if not ordered:
+        return []
+    latest_episode = ordered[0].identity.episode
+    # Never fall back to an older episode when a newer observation is ambiguous.
+    if any(item.identity.kind is EpisodeKind.REGULAR for item in ordered) and not any(
+        item.identity.episode == latest_episode
+        and item.identity.episode_confidence is Confidence.EXPLICIT
+        for item in ordered
+    ):
+        return []
+    return [item for item in ordered if item.identity.episode == latest_episode
+            and (item.identity.kind is not EpisodeKind.REGULAR or item.identity.episode_confidence is Confidence.EXPLICIT)]
+
+
+def _observed_target_max_gib(
+    items: list[ClassifiedCandidate], requested_episode: int | None, episodes: int | None
+) -> float | None:
+    sizes = [
+        comparable
+        for item in items
+        if item.work_match != "related_work"
+        and item.identity.kind is EpisodeKind.REGULAR
+        and item.identity.episode is not None
+        and (requested_episode is None or item.identity.episode == requested_episode)
+        and item.season_match not in {"other", "other_work"}
+        and (comparable := nyaa.comparable_gib_per_episode(item.candidate, episodes)) is not None
+    ]
+    return round(max(sizes), 3) if sizes else None
+
+
+def _inspect_details(
+    selected: list[ClassifiedCandidate], args: argparse.Namespace, client: NyaaClient
+) -> DetailInspectionResult:
+    result = DetailInspectionResult()
+    if getattr(args, "trust_cjk_title_for_zh", False):
+        result.unchecked_count = len(selected)
+        return result
+    strict = bool(getattr(args, "require_zh", False))
+    if not args.inspect_details or (not strict and args.detail_limit <= 0):
+        result.unchecked_count = len(selected)
+        return result
+    inspection_order = selected
+    if strict:
+        inspection_order = sorted(
+            selected,
+            key=lambda item: (
+                item.candidate.subtitle_signal != "not confirmed",
+                tuple(-v if isinstance(v, (int, float)) else v for v in inspection_key(item.candidate)),
+            ),
+            reverse=True,
+        )
+    else:
+        inspection_order = inspection_order[: args.detail_limit]
+
+    batch_size = max(1, int(getattr(args, "detail_batch_size", 5)))
+    budget_seconds = max(0.0, float(getattr(args, "detail_budget_seconds", 30.0)))
+    started = time.monotonic()
+    cache: dict[str, str] = {}
+    processed_count = 0
+    stop = False
+    for batch_start in range(0, len(inspection_order), batch_size):
+        batch = inspection_order[batch_start : batch_start + batch_size]
+        for item in batch:
+            elapsed = time.monotonic() - started
+            if strict and elapsed >= budget_seconds:
+                result.budget_exhausted = True
+                stop = True
+                break
+            processed_count += 1
+            if item.candidate.detail_checked:
+                result.checked_count += 1
+                if item.candidate.detail_chinese_confirmed:
+                    result.verified_count += 1
+                    if strict:
+                        stop = True
+                        break
+                else:
+                    result.rejected_count += 1
+                continue
+            if not item.candidate.url:
+                result.missing_url_count += 1
+                item.candidate.reasons.append("Nyaa detail URL is unavailable")
+                continue
+            result.attempted_count += 1
+            try:
+                if item.candidate.url in cache:
+                    detail_text = cache[item.candidate.url]
+                else:
+                    request_timeout = args.timeout
+                    if strict:
+                        remaining = max(0.1, budget_seconds - elapsed)
+                        request_timeout = max(0.1, min(float(args.timeout), remaining))
+                    detail_text = client.get_description(
+                        item.candidate.url, timeout=request_timeout
+                    )
+                    cache[item.candidate.url] = detail_text
+                nyaa.apply_detail_subtitle_signal(
+                    item.candidate, detail_text, args.want_zh, args.airing_priority
+                )
+                result.checked_count += 1
+                if item.candidate.detail_chinese_confirmed:
+                    result.verified_count += 1
+                    if strict:
+                        stop = True
+                        break
+                else:
+                    result.rejected_count += 1
+            except Exception as exc:  # noqa: BLE001 - failures must remain distinct from no subtitles.
+                result.failed_count += 1
+                message = f"Nyaa detail inspection failed for {item.candidate.url}: {exc}"
+                result.failures.append(message)
+                item.candidate.reasons.append(message)
+        if stop:
+            break
+
+    result.unchecked_count = max(0, len(inspection_order) - processed_count)
+    result.elapsed_ms = int((time.monotonic() - started) * 1000)
+    return result
+
+
+def _direct_candidate_from_page(
+    args: argparse.Namespace,
+    nyaa_id: str,
+    queries: list[str],
+    client: NyaaClient,
+) -> tuple[nyaa.Candidate | None, str | None]:
+    detail = client.get(nyaa_id, timeout=args.timeout)
+    title = detail.release.title
+    matched_queries = [
+        query for query in queries if _contains_title(title, query, flexible=True)
+    ]
+    if not matched_queries:
+        return None, title
+    candidate = nyaa.score_release(
+        detail.release,
+        query=matched_queries[0],
+        want_zh=args.want_zh,
+        airing_priority=args.airing_priority,
+        desired_resolution=args.resolution,
+        tier=args.tier,
+        duration_min=args.duration_min,
+        episodes=args.episodes,
+        prefer_groups=args.prefer_group,
+        avoid_groups=args.avoid_group,
+        include_magnets=args.include_magnets,
+    )
+    candidate.matched_queries = matched_queries
+    if args.inspect_details or (
+        bool(getattr(args, "require_zh", False))
+        and not getattr(args, "trust_cjk_title_for_zh", False)
+    ):
+        nyaa.apply_detail_subtitle_signal(
+            candidate,
+            detail.description,
+            args.want_zh,
+            args.airing_priority,
+        )
+    return candidate, None
+
+
+def _supplement_strict_episode(report, args, intent, include_specials, cache_path,
+                               context, client, run):
+    """One exact-episode scan after a complete but unqualified strict search.
+
+    Latest must already be established by the ordinary lane. Neither the
+    target, the identity context nor the hard constraints may change here.
+    Pinned review/finalization and incomplete discovery never enter this lane.
+    """
+    if (not getattr(args, 'require_zh', False)
+            or getattr(args, 'candidate_id', None)
+            or getattr(args, 'trust_cjk_title_for_zh', False)
+            or getattr(args, '_zh_supplement_done', False)
+            or report.diagnostics.get('strict_zh_supplement')
+            or intent not in {SearchIntent.LATEST_REGULAR, SearchIntent.SPECIFIC_EPISODE,
+                              SearchIntent.NEXT_TRACKED}
+            or not isinstance(report.requested_episode, int)
+            or report.failures
+            or report.status not in {'subtitle_unqualified', 'release_unqualified',
+                                     'no_nyaa_release_for_target', 'no_rss_candidates'}):
+        return report
+    names = [args.query, *args.alias]
+    search_titles = [args.query]
+    if context:
+        names = [context.canonical_title, *context.aliases, *names]
+        search_titles = list(context.search_titles) or search_titles
+    queries = exact_chinese_queries(names, search_titles, report.requested_episode)
+    if not queries:
+        return report
+    supplement_args = argparse.Namespace(**vars(args))
+    supplement_args.query, supplement_args.alias = queries[0], queries[1:]
+    supplement_args.episode = report.requested_episode
+    supplement_args.intent = SearchIntent.SPECIFIC_EPISODE.value
+    supplement_args._zh_supplement_done = True
+    run.query_plan.extend({'query': q, 'lane': 'strict_zh_exact_supplement',
+                           'basis': 'chinese_script_variant_or_verified_latin_anchor'}
+                          for q in queries)
+    # Call the implementation directly to retain one evidence run and avoid
+    # resetting a latest target or recursively scheduling more supplements.
+    recovered = _search_release_impl(
+        supplement_args, SearchIntent.SPECIFIC_EPISODE, report.requested_episode,
+        include_specials, cache_path, True, context, client)
+    recovered.intent = intent
+    recovered.diagnostics['strict_zh_supplement'] = {
+        'attempted': True, 'target_episode': report.requested_episode,
+        'primary_status': report.status, 'primary_raw_count': report.diagnostics.get('raw_count'),
+        'primary_diagnostics': dict(report.diagnostics), 'queries': queries,
+        'status': recovered.status,
+    }
+    # A missing supplemental row cannot erase releases already observed.
+    if recovered.status in {'no_rss_candidates', 'no_nyaa_release_for_target'}:
+        report.diagnostics['strict_zh_supplement'] = recovered.diagnostics['strict_zh_supplement']
+        return report
+    return recovered
+
+
+def search_release_report(args, intent=SearchIntent.SEASON_BROWSE, requested_episode=None,
+                          include_specials=False, cache_path=None, refresh_cache=False,
+                          context=None, client=None):
+    intent = SearchIntent(intent)
+    if intent is SearchIntent.LATEST_REGULAR:
+        args = argparse.Namespace(**vars(args))
+        args.episode = None
+        requested_episode = None
+        args.intent = intent.value
+    titles = tuple(filter(None, (context.canonical_title,*context.aliases,*context.search_titles))) if context else tuple([args.query,*args.alias])
+    run = SearchRun(intent.value,plan_queries([args.query,*args.alias],intent.value,
+                   requested_episode if requested_episode is not None else args.episode,normalize_season_number(args.season)))
+    rt,tt = ACTIVE_RUN.set(run),TITLE_CONTEXT.set(titles)
+    try:
+        recording_client = RecordingClient(client or DEFAULT_NYAA_CLIENT,run)
+        report = _search_release_impl(args,intent,requested_episode,include_specials,cache_path,refresh_cache,
+                                      context,recording_client)
+        if report.search_run is not None:
+            # A cache-refresh subrun has its own context; retain both histories.
+            child = report.search_run
+            run.requests.extend(r for r in child.requests if r not in run.requests)
+            run.identities.update(child.identities)
+            run.eligibility.extend(child.eligibility)
+        report = _supplement_strict_episode(report,args,intent,include_specials,cache_path,
+                                             context,recording_client,run)
+        run.ingest_requests()
+        run.errors = list(report.failures)
+        if report.failures:
+            run.completeness = 'partial'
+        observations = [int(Decimal(d['episode'])) for d in run.identities.values()
+                        if d.get('episode') is not None and Decimal(d['episode']) == Decimal(d['episode']).to_integral_value()
+                        and d.get('kind') == 'regular' and d.get('work') != 'related_work'
+                        and d.get('season_match') in {'match','not_requested'}]
+        confirmed = report.requested_episode
+        if intent is SearchIntent.LATEST_REGULAR and report.status == 'latest_unresolved':
+            confirmed = None
+        run.target = TargetDecision(max(observations,default=None),confirmed,
+             'confirmed' if confirmed is not None else 'unresolved',
+             'verified_release_identity' if intent is SearchIntent.LATEST_REGULAR else 'requested_episode',
+             [rid for rid,d in run.identities.items() if d.get('status') in {'unresolved','conflict'}])
+        accepted = {x.candidate.url for x in report.selected}
+        choices = {x.candidate.url:x for x in report.choices}
+        prior = {d.release_id:d for d in run.eligibility}
+        run.eligibility = []
+        for raw in run.raw_candidates:
+            rid = raw['release_id']
+            ident = run.identities.get(rid,{})
+            if rid in accepted:
+                decision = EligibilityDecision(rid,'qualified')
+            elif rid in prior:
+                decision = prior[rid]
+            elif rid in choices:
+                decision = EligibilityDecision(rid,'review_required',list(choices[rid].candidate.reasons))
+            elif ident.get('status') != 'confirmed':
+                decision = EligibilityDecision(rid,'identity_unresolved',ident.get('conflicts',[]))
+            else:
+                decision = EligibilityDecision(rid,'not_selected',['outside_target_or_reviewed_candidate'])
+            run.eligibility.append(decision)
+        report.search_run = run
+        from failure_recovery import transport_diagnostic
+        transport = transport_diagnostic({"failures": report.failures, "search_run": run.as_dict()})
+        if transport:
+            report.diagnostics["network"] = transport
+        return report
+    finally:
+        TITLE_CONTEXT.reset(tt)
+        ACTIVE_RUN.reset(rt)
+
+
+def _search_release_impl(
+    args: argparse.Namespace,
+    intent: SearchIntent | str = SearchIntent.SEASON_BROWSE,
+    requested_episode: int | None = None,
+    include_specials: bool = False,
+    cache_path: Path | None = None,
+    refresh_cache: bool = False,
+    context: SearchContext | None = None,
+    client: NyaaClient | None = None,
+) -> ReleaseSearchReport:
+    client = client or DEFAULT_NYAA_CLIENT
+    intent = SearchIntent(intent)
+    requested_season = normalize_season_number(args.season)
+    requested_episode = requested_episode if requested_episode is not None else args.episode
+    size_policy = size_policy_from_args(args)
+    raw, failures, cache_state = collect_raw_candidates(
+        args, cache_path, refresh_cache, client
+    )
+    if ACTIVE_RUN.get():
+        ACTIVE_RUN.get().add_raw(raw)
+    candidate_source = _raw_candidate_source(args)
+    rss_failure_count = len(failures)
+    queries = list(dict.fromkeys([args.query, *args.alias]))
+    candidate_id_values = list(getattr(args, "candidate_id", []) or [])
+    requested_candidate_ids = {
+        candidate_id
+        for candidate_id in (
+            nyaa.nyaa_id_from_url(str(value)) for value in candidate_id_values
+        )
+        if candidate_id is not None
+    }
+    if not raw and not candidate_id_values:
+        return ReleaseSearchReport(
+            intent=intent,
+            requested_season=requested_season,
+            requested_episode=requested_episode,
+            status="network_error" if failures else "no_rss_candidates",
+            selected=[],
+            choices=[],
+            diagnostics={
+                "raw_count": 0,
+                "network_failures": len(failures),
+                "queries": queries,
+                "candidate_source": candidate_source,
+            },
+            failures=failures,
+            cache=cache_state,
+        )
+
+    if intent is SearchIntent.LATEST_REGULAR and requested_episode is None:
+        # Establish latest from the complete ordinary query set before pinning;
+        # the reviewed ID and its quality cannot redefine the target episode.
+        latest_items = _classify(raw, requested_season, context)
+        latest = _latest_regular([
+            item for item in latest_items
+            if item.identity.kind is EpisodeKind.REGULAR
+            and _in_requested_season(item)
+            and (context is None or item.work_match != "unknown")
+            and (item.identity.decision or {}).get('status') != 'conflict'
+        ])
+        latest_number = latest[0].identity.episode if latest else None
+        conflicts = [item for item in latest_items if _in_requested_season(item)
+                     and (context is None or item.work_match != 'unknown')
+                     and (item.identity.decision or {}).get('status')=='conflict'
+                     and item.identity.kind not in {EpisodeKind.SPECIAL,EpisodeKind.BATCH}
+                     and (latest_number is None or any(Decimal(e['value']) > latest_number
+                          for e in item.identity.decision['evidence'] if e.get('field')=='episode' and e.get('value')))]
+        if failures or not latest or conflicts:
+            return ReleaseSearchReport(
+                intent=intent, requested_season=requested_season, requested_episode=None,
+                status="latest_unresolved", selected=[], choices=[],
+                diagnostics={"raw_count": len(raw), "queries": queries,
+                             "rss_failure_count": rss_failure_count,
+                             "candidate_id_filter": sorted(requested_candidate_ids)},
+                failures=failures, cache=cache_state,
+            )
+        requested_episode = int(latest[0].identity.episode)
+
+    direct_fetched_ids: list[str] = []
+    direct_mismatches: dict[str, str] = {}
+    direct_not_found: list[str] = []
+    direct_failures: list[str] = []
+    if candidate_id_values:
+        unfiltered_count = len(raw)
+        rss_matches = [
+            candidate
+            for candidate in raw
+            if nyaa.nyaa_id_from_url(candidate.url) in requested_candidate_ids
+        ]
+        rss_ids = {
+            candidate_id
+            for candidate in rss_matches
+            if (candidate_id := nyaa.nyaa_id_from_url(candidate.url)) is not None
+        }
+        # A reviewed ID is a selection, not permission to trust cached metadata.
+        # Always refetch its detail identity before delivery; never fall back to RSS.
+        missing_ids = sorted(requested_candidate_ids)
+        direct_candidates: list[nyaa.Candidate] = []
+        if missing_ids:
+            with ThreadPoolExecutor(max_workers=min(5, len(missing_ids))) as executor:
+                future_ids = {
+                    executor.submit(
+                        _direct_candidate_from_page, args, candidate_id, queries, client
+                    ): candidate_id
+                    for candidate_id in missing_ids
+                }
+                for future in as_completed(future_ids):
+                    candidate_id = future_ids[future]
+                    try:
+                        candidate, mismatched_title = future.result()
+                        if candidate is not None:
+                            direct_candidates.append(candidate)
+                            direct_fetched_ids.append(candidate_id)
+                        elif mismatched_title is not None:
+                            direct_mismatches[candidate_id] = mismatched_title
+                    except Exception as exc:  # noqa: BLE001 - preserve direct-ID failure details.
+                        if isinstance(exc, nyaa.NyaaNotFoundError) or getattr(exc, "code", None) == 404:
+                            direct_not_found.append(candidate_id)
+                        else:
+                            direct_failures.append(f"{candidate_id}: {exc}")
+        raw = direct_candidates
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().add_raw(raw)
+        if not raw:
+            if direct_mismatches and not direct_failures:
+                status = "candidate_id_title_mismatch"
+            elif direct_failures:
+                status = "network_error"
+            else:
+                status = "candidate_not_found"
+            return ReleaseSearchReport(
+                intent=intent,
+                requested_season=requested_season,
+                requested_episode=requested_episode,
+                status=status,
+                selected=[],
+                choices=[],
+                diagnostics={
+                    "raw_count": unfiltered_count,
+                    "candidate_id_filter": sorted(requested_candidate_ids),
+                    "candidate_id_matched_count": 0,
+                    "candidate_id_direct_fetched": direct_fetched_ids,
+                    "candidate_id_title_mismatches": direct_mismatches,
+                    "candidate_id_not_found": direct_not_found,
+                    "candidate_id_direct_failures": direct_failures,
+                    "queries": queries,
+                    "candidate_source": candidate_source,
+                },
+                failures=[*failures, *direct_failures],
+                cache=cache_state,
+            )
+        failures = [*failures, *direct_failures]
+
+    classified = _classify(raw, requested_season, context)
+    if intent is SearchIntent.LATEST_REGULAR and requested_episode is not None and candidate_id_values:
+        if any(_in_requested_season(item) and item.identity.kind is EpisodeKind.REGULAR
+               and item.identity.episode is not None and item.identity.episode > requested_episode for item in classified):
+            return ReleaseSearchReport(intent,requested_season,None,'latest_unresolved',[],[],
+                {'raw_count':len(raw),'detail_latest_conflict':True},failures,cache_state)
+    _apply_trusted_cjk_first_season(
+        classified, args, requested_season, requested_episode
+    )
+    in_season = [item for item in classified if _in_requested_season(item)]
+    unknown_season = [item for item in classified if item.season_match == "unknown"]
+    related_work = [item for item in classified if item.work_match == "related_work"]
+    regular = [item for item in in_season if item.identity.kind is EpisodeKind.REGULAR]
+    specials = [item for item in in_season if item.identity.kind is EpisodeKind.SPECIAL]
+    unknown_identity = [
+        item for item in in_season if item.identity.kind in {EpisodeKind.UNKNOWN, EpisodeKind.BATCH}
+    ]
+    movie_candidates = [
+        item for item in in_season if _is_movie_identity(item.identity)
+    ]
+    diagnostics: dict[str, Any] = {
+        "raw_count": len(classified),
+        "queries": queries,
+        "candidate_source": candidate_source,
+        "candidate_id_filter": sorted(requested_candidate_ids),
+        "candidate_id_matched_count": len(raw) if candidate_id_values else None,
+        "candidate_id_direct_fetched": direct_fetched_ids,
+        "candidate_id_title_mismatches": direct_mismatches,
+        "candidate_id_not_found": direct_not_found,
+        "candidate_id_direct_failures": direct_failures,
+        "season_matched_count": len(in_season),
+        "season_unknown_count": len(unknown_season),
+        "context_season_count": sum(item.season_source == "single_mainline" for item in classified),
+        "related_work_count": len(related_work),
+        "regular_count": len(regular),
+        "special_count": len(specials),
+        "unknown_count": len(unknown_identity),
+        "movie_count": len(movie_candidates),
+        "wrong_season_count": sum(
+            item.season_match == "other" for item in classified
+        ),
+        "quality_rejected_count": 0,
+        "rss_failure_count": rss_failure_count,
+        "fallback_query_used": False,
+        "observed_target_max_gib": _observed_target_max_gib(
+            classified, requested_episode, args.episodes
+        ),
+        "size_policy": size_policy.as_dict(),
+    }
+
+    if intent is SearchIntent.SEASON_BATCH:
+        return _season_batch_report(
+            classified,
+            args,
+            size_policy,
+            requested_season,
+            context,
+            diagnostics,
+            failures,
+            cache_state,
+            client,
+        )
+
+    exact_regular = [
+        item
+        for item in regular
+        if _is_exact_regular_episode(item, requested_episode)
+    ]
+    parse_is_uncertain = bool(unknown_identity or unknown_season)
+    if (
+        requested_episode is not None
+        and not exact_regular
+        and intent is not SearchIntent.SEASON_BROWSE
+        and not candidate_id_values
+    ):
+        fallback_args = _targeted_fallback_args(args, requested_season, requested_episode)
+        if context:
+            chinese = [t for t in (context.canonical_title,*context.aliases) if t and re.search(r'[\u3400-\u9fff]',t)
+                       and not re.search(r'[\u3040-\u30ff]',t)]
+            fallback_args.alias.extend(f'{t} {requested_episode:02d}' for t in list(dict.fromkeys(chinese))[:2])
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().query_plan.extend({'query':q,'lane':'exact_fallback','basis':'verified_alias_and_requested_episode'}
+                for q in [fallback_args.query,*fallback_args.alias])
+        fallback_raw, fallback_failures, fallback_cache = collect_raw_candidates(
+            fallback_args, cache_path, refresh_cache, client
+        )
+        failures.extend(fallback_failures)
+        rss_failure_count += len(fallback_failures)
+        raw = _merge_candidates(raw, fallback_raw)
+        if ACTIVE_RUN.get():
+            ACTIVE_RUN.get().add_raw(raw)
+        classified = _classify(raw, requested_season, context)
+        _apply_trusted_cjk_first_season(
+            classified, args, requested_season, requested_episode
+        )
+        in_season = [item for item in classified if _in_requested_season(item)]
+        unknown_season = [item for item in classified if item.season_match == "unknown"]
+        related_work = [item for item in classified if item.work_match == "related_work"]
+        regular = [item for item in in_season if item.identity.kind is EpisodeKind.REGULAR]
+        specials = [item for item in in_season if item.identity.kind is EpisodeKind.SPECIAL]
+        unknown_identity = [
+            item for item in in_season if item.identity.kind in {EpisodeKind.UNKNOWN, EpisodeKind.BATCH}
+        ]
+        movie_candidates = [
+            item for item in in_season if _is_movie_identity(item.identity)
+        ]
+        diagnostics.update(
+            {
+                "raw_count": len(classified),
+                "season_matched_count": len(in_season),
+                "season_unknown_count": len(unknown_season),
+                "context_season_count": sum(
+                    item.season_source == "single_mainline" for item in classified
+                ),
+                "related_work_count": len(related_work),
+                "regular_count": len(regular),
+                "special_count": len(specials),
+                "unknown_count": len(unknown_identity),
+                "movie_count": len(movie_candidates),
+                "wrong_season_count": sum(
+                    item.season_match == "other" for item in classified
+                ),
+                "fallback_query_used": True,
+                "fallback_cache": fallback_cache,
+                "rss_failure_count": rss_failure_count,
+                "observed_target_max_gib": _observed_target_max_gib(
+                    classified, requested_episode, args.episodes
+                ),
+            }
+        )
+        cache_state = f"{cache_state}+fallback:{fallback_cache}"
+
+    choices: list[ClassifiedCandidate] = []
+    target_candidates: list[ClassifiedCandidate]
+    if intent is SearchIntent.MOVIE:
+        target_candidates = movie_candidates
+    elif intent in {SearchIntent.SPECIFIC_EPISODE, SearchIntent.NEXT_TRACKED} or requested_episode is not None:
+        target_candidates = [
+            item
+            for item in regular
+            if _is_exact_regular_episode(item, requested_episode)
+            and item.identity.episode_confidence is Confidence.EXPLICIT
+        ]
+    elif intent is SearchIntent.LATEST_REGULAR:
+        target_candidates = _latest_regular(regular)
+        diagnostics["identity_unconfirmed_count"] = sum(
+            item.identity.episode_confidence is not Confidence.EXPLICIT for item in regular
+        )
+        diagnostics["latest_identity_unresolved"] = bool(regular and not target_candidates)
+    else:
+        target_candidates = regular
+
+    if include_specials and specials:
+        target_candidates = _latest_regular(specials)
+
+    unconfirmed_work_candidates: list[ClassifiedCandidate] = []
+    if context is not None:
+        unconfirmed_work_candidates = [
+            item for item in target_candidates if item.work_match == "unknown"
+        ]
+        target_candidates = [
+            item for item in target_candidates if item.work_match != "unknown"
+        ]
+        diagnostics["strict_work_match_required"] = True
+        diagnostics["work_unconfirmed_count"] = len(unconfirmed_work_candidates)
+
+    if not target_candidates:
+        choices = _rank(
+            unconfirmed_work_candidates + specials + unknown_identity + unknown_season,
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+        )
+        if choices:
+            status = "needs_confirmation"
+        elif requested_episode is not None:
+            status = "no_nyaa_release_for_target"
+        else:
+            status = "latest_unresolved" if intent is SearchIntent.LATEST_REGULAR else "no_nyaa_release_for_target"
+        if rss_failure_count and status != "needs_confirmation":
+            status = "network_error"
+        return ReleaseSearchReport(
+            intent=intent,
+            requested_season=requested_season,
+            requested_episode=requested_episode,
+            status=status,
+            selected=[],
+            choices=choices,
+            diagnostics=diagnostics,
+            failures=failures,
+            cache=cache_state,
+        )
+
+    diagnostics["target_candidate_count"] = len(target_candidates)
+    if rss_failure_count and intent is SearchIntent.LATEST_REGULAR and requested_episode is None:
+        return ReleaseSearchReport(
+            intent=intent, requested_season=requested_season, requested_episode=requested_episode,
+            status="latest_unresolved", selected=[], choices=[], diagnostics=diagnostics,
+            failures=failures, cache=cache_state,
+        )
+    qualified, size_counts = _quality_filter(target_candidates, args, size_policy)
+    diagnostics.update(size_counts)
+    diagnostics["quality_rejected_count"] = sum(size_counts.values())
+    if not qualified:
+        return ReleaseSearchReport(
+            intent=intent,
+            requested_season=requested_season,
+            requested_episode=requested_episode,
+            status="network_error" if rss_failure_count else "release_unqualified",
+            selected=[],
+            choices=_rank(
+                target_candidates,
+                prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+            ),
+            diagnostics=diagnostics,
+            failures=failures,
+            cache=cache_state,
+        )
+
+    selected = _rank(
+        qualified,
+        prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+    )
+    detail_inspection = _inspect_details(selected, args, client)
+    diagnostics.update(detail_inspection.as_diagnostics())
+    failures.extend(detail_inspection.failures)
+    if getattr(args, "require_zh", False):
+        if getattr(args, "trust_cjk_title_for_zh", False):
+            trusted = [
+                (item, query)
+                for item in selected
+                if (query := _trusted_cjk_title_query(item, args)) is not None
+            ]
+            for item, query in trusted:
+                _mark_cjk_title_trusted(item, query)
+            verified = [item for item, _query in trusted]
+            diagnostics.update(
+                {
+                    "required_subtitle": "trusted_chinese_release_title",
+                    "cjk_title_trust_used": True,
+                    "cjk_title_trusted_count": len(verified),
+                }
+            )
+        else:
+            verified = [item for item in selected if item.candidate.detail_chinese_confirmed]
+            diagnostics.update(
+                {
+                    "required_subtitle": "simplified_or_traditional_chinese",
+                }
+            )
+        if not verified:
+            if (
+                not getattr(args, "trust_cjk_title_for_zh", False)
+                and cache_state == "hit"
+                and not refresh_cache
+                and cache_path is not None
+            ):
+                refresh_args = argparse.Namespace(**vars(args))
+                elapsed_seconds = detail_inspection.elapsed_ms / 1000.0
+                refresh_args.detail_budget_seconds = max(
+                    0.0,
+                    float(getattr(args, "detail_budget_seconds", 30.0)) - elapsed_seconds,
+                )
+                refreshed = search_release_report(
+                    refresh_args,
+                    intent=intent,
+                    requested_episode=requested_episode,
+                    include_specials=include_specials,
+                    cache_path=cache_path,
+                    refresh_cache=True,
+                    context=context,
+                    client=client,
+                )
+                refreshed.diagnostics.update(
+                    {
+                        "strict_cache_refresh_used": True,
+                        "strict_cache_initial_raw_count": diagnostics["raw_count"],
+                        "strict_cache_initial_detail_elapsed_ms": detail_inspection.elapsed_ms,
+                    }
+                )
+                if refreshed.status in {
+                    "network_error",
+                    "no_rss_candidates",
+                    "no_nyaa_release_for_target",
+                }:
+                    refreshed.status = "subtitle_check_incomplete"
+                return refreshed
+            return ReleaseSearchReport(
+                intent=intent,
+                requested_season=requested_season,
+                requested_episode=requested_episode,
+                status=(
+                    "subtitle_unqualified"
+                    if detail_inspection.complete and rss_failure_count == 0
+                    else "subtitle_check_incomplete"
+                ),
+                selected=[],
+                choices=[],
+                diagnostics=diagnostics,
+                failures=failures,
+                cache=cache_state,
+            )
+        selected = _rank(
+            verified,
+            prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+        )
+    selected = _rank(
+        selected,
+        prefer_in_tier=bool(getattr(args, "allow_upward_compatibility", False)),
+    )[: max(1, args.limit)]
+    return ReleaseSearchReport(
+        intent=intent,
+        requested_season=requested_season,
+        requested_episode=requested_episode,
+        status="found",
+        selected=selected,
+        choices=[],
+        diagnostics=diagnostics,
+        failures=failures,
+        cache=cache_state,
+    )
