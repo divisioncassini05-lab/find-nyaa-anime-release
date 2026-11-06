@@ -113,6 +113,8 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 已完结作品不新建周期追番：没有指定未来时间时走一次性检索或导入；明确指定未来时间时只按一次性任务处理。宿主不支持一次性任务时会说明限制，不擅自改成每周任务。
 
+一次性导入只有交付成功或你明确取消后才删除任务；失败会保留诊断与恢复所需信息，不因触发过一次就声称完成。
+
 ![以 Codex 为例的自动追番与 qBittorrent 提交](assets/readme/automation-submit.png)
 
 ![qBittorrent 中的任务](assets/readme/qbittorrent-task.png)
@@ -153,6 +155,7 @@ Agent 审核候选并按当前交互规则完成选择，脚本验证结论与�
 | 创建或修改定时任务 | [scheduled-new-anime.md](skills/find-nyaa-anime-release/references/scheduled-new-anime.md) |
 | 定时执行与按需补查 | [scheduled-run.md](skills/find-nyaa-anime-release/references/scheduled-run.md)、[scheduled-retry.md](skills/find-nyaa-anime-release/references/scheduled-retry.md) |
 | 客户端环境与下载异常 | [client-readiness.md](skills/find-nyaa-anime-release/references/client-readiness.md) |
+| Nyaa 连接、代理与 TLS 故障 | [failure-recovery.md](skills/find-nyaa-anime-release/references/failure-recovery.md#transport-recovery-boundaries)、`scripts/network_doctor.py` |
 | 恢复与完结清理 | [failure-recovery.md](skills/find-nyaa-anime-release/references/failure-recovery.md)、[completion.md](skills/find-nyaa-anime-release/references/completion.md) |
 | 当前状态、审核、交付命令 | `scripts/watch.py` 和 `scripts/watch_v3/` |
 | 保留的兼容检索入口与报告 | `scripts/find_anime_release.py`、[retrieval-core-v2.md](skills/find-nyaa-anime-release/references/retrieval-core-v2.md) |
@@ -168,10 +171,13 @@ v3 是追番状态的唯一写入入口。`anime_release/` 等共用模块和兼
 ```powershell
 python scripts/watch.py inspect "作品名"
 python scripts/qbittorrent_submit.py --client-status --json
+python scripts/network_doctor.py
 python scripts/watch.py recover --operation "OPERATION_ID"
 ```
 
-前两条只读：`inspect` 查看追番状态，`--client-status` 查看客户端选择和运行状态。`recover` 会恢复已授权的原下载操作并可能提交进度，应使用实际报告中的操作 ID。
+前三条只读：`inspect` 查看追番状态，`--client-status` 查看客户端选择和运行状态；`network_doctor.py` 检查实际代理端口和 Nyaa 列表响应，不改网络设置、不下载、不推进进度，也不输出代理凭据。代理端口可连接不等于 Nyaa 可访问，网络失败不等于没有资源。
+
+`recover` 会恢复已授权的原下载操作并可能提交进度，应使用实际报告中的操作 ID。
 
 原始检索先执行 `python scripts/watch.py workspace`，将其返回的绝对 `run_dir` 用作 `discover`、`detail` 和 `review` 的输出目录。完整示例见上面的检索流程；不要直接批量运行文档中的占位符命令。
 

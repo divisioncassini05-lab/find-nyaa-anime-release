@@ -1,19 +1,6 @@
 # Quality, Ranking, and Diagnostics
 
-Use this reference for quality disputes, batch math, downgrade decisions, or diagnostics. Follow SKILL.md for raw discovery and Agent review. All delivery paths preserve the requested tier and constraints; changing tier requires a new explicit user decision.
-
-## Search Budget
-
-The fixed query/page and automatic-fallback details here describe the compatibility
-resolver. The default [full-evidence workflow](agent-review.md) uses explicit
-chronological pages and Agent-decided coverage. It retains the quality bounds below
-without inheriting a top-k reading limit or silently choosing another tier.
-
-- The high-level path uses at most three verified broad query titles. Latest discovery retains episode-free RSS recency queries even when a schedule predicts an episode; exact episodes, complete seasons, premium tiers, explicit bounds and trusted Chinese-title lanes use the bounded HTML size-sorted lane.
-- A size-sorted lane reads at most three pages per query and stops on an exhausted page, not on a quality match or floor. The complete collected window is retained before quality decisions. Report the query/page scope and coverage notes; a bounded search does not prove global absence.
-- Raw RSS or size-sorted listing items are cached briefly and rescored/reclassified under every new season, episode, and size policy. Final "no result" conclusions are not cached as facts.
-- Schedule metadata is cached briefly for latest/next checks. Use `--refresh-cache` for an explicitly fresh check, contradictory current evidence, or the single cached-negative refresh / scheduled retry defined in [failure recovery](failure-recovery.md).
-- If no exact target is confirmed, the bounded fallback uses explicit seasonal/episode and bare episode formats. In hard-Chinese mode, a complete but unqualified search also receives one exact-episode supplement with both Chinese script spellings and stable Latin anchors. Queries, the primary rejection, and supplement outcomes remain visible in `strict_zh_supplement` and `search_run`. Conversion generates search spellings only, never new identity aliases or numbering offsets.
+Use this reference for quality disputes, batch math, downgrade decisions, or diagnostics. Use [retrieval-workflow.md](retrieval-workflow.md) for discovery and delivery. All delivery paths preserve the requested tier and constraints; changing tier requires a new explicit user decision.
 
 ## Tiers and Size Floors
 
@@ -82,7 +69,7 @@ eligibility exceptions do not waive this evidence-based comparison.
 
 ## Structured Outcomes
 
-- `release_unqualified` means target candidates were seen and rejected by quality. For a single episode with a hard upper bound, `above_max_count > 0` means the reply should say that the current range has no qualified release but a higher-range release exists; do not expose that release's title, size, page, or magnet. For season packages, report only aggregate rejection counts and never expose rejected titles or magnets.
+- `release_unqualified` means target candidates failed the hard conditions. Explain the decisive unmet condition; `above_max_count > 0` indicates candidates above the requested cap. Rejected candidates are not eligible download choices.
 - `no_complete_season_release` means inspected packages were partial, wrong-season, special-only, or otherwise failed complete regular coverage.
 - `season_check_incomplete` means a plausible package could not be verified because its detail page, file list, or file identity remained unavailable or ambiguous.
 - `no_nyaa_release_for_target` means no regular candidate matched the target after parsing, not that a regex hid it.
@@ -91,5 +78,5 @@ eligibility exceptions do not waive this evidence-based comparison.
 - `subtitle_check_incomplete` means the detail budget expired, a request failed, a URL was unavailable, or candidates remain unchecked. Do not state that no Chinese release exists.
 - `needs_quality_fallback_confirmation` is retained for reading historical reports; new searches never lower tiers automatically.
 - `needs_quality_upgrade_confirmation` is retained for historical reports; a user-requested tier change requires a new review.
-- `needs_confirmation` means special/batch/unknown parsing makes a definitive choice unsafe. Present at most two choices and their parsed identity.
+- `needs_confirmation` means special/batch/unknown parsing left the identity unresolved. Inspect the raw evidence and ask only for a real remaining scope ambiguity; a parser diagnostic does not impose a candidate-choice limit.
 - `latest_unresolved` means release-based latest cannot be confirmed due to identity ambiguity or incomplete query evidence. A missing official schedule alone does not imply it. Keep official airing evidence separate from observed resource publication.

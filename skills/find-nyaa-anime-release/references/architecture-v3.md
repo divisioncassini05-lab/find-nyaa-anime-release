@@ -70,6 +70,11 @@ remain recoverable.
 
 ## Acceptance
 
+Maintenance copies and test states belong under `.skill-maintenance`, not the
+Download root. Keep one recoverable backup and remove disposable test outputs.
+Deploy tested files only after checking source hashes for concurrent changes;
+compare deployed hashes. Maintenance does not mutate live downloads or schedules.
+
 The suite covers delayed finale evidence, pivot recovery, exact-hash adapters, cleanup
 replay and failure, multi-target ownership, migration, old-writer rejection and
 same/different-track concurrency. Run `pytest -q -p no:cacheprovider`.

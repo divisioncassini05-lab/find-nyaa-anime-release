@@ -116,6 +116,11 @@ def native_get(request, timeout: float, max_bytes: int, executable: str) -> tupl
         code = {60: "tls_certificate_verification_failed", 35: "tls_handshake_failed",
                 28: "timeout", 5: "proxy_dns_failed", 6: "dns_failed", 7: "connection_failed",
                 22: "http_error", 63: "response_too_large"}.get(result.returncode, "native_network_error")
+        if result.returncode == 22:
+            # Preserve the HTTP cause without exposing raw stderr/credentials.
+            match = re.search(rb'returned error: (\d{3})\b', result.stderr)
+            if match:
+                code = "http_" + match.group(1).decode("ascii")
         # Keep only allowlisted Schannel symbols, never raw stderr or proxy secrets.
         symbols = re.findall(r'\bSEC_E_[A-Z_]+\b', result.stderr.decode('utf-8', 'replace'))
         if 'SEC_E_NO_CREDENTIALS' in symbols:

@@ -25,50 +25,35 @@ tasks. Existing tasks retain their explicit rules unless the user changes them.
 | Windows firewall or first-run confirmation prompt | Follow [client-readiness.md](client-readiness.md). Inspect the actual executable and network profile; this is environment setup, not release absence. Preserve any original operation/hash and accepted receipt. Do not repeatedly launch, re-enqueue or schedule a resource retry to dismiss the prompt. |
 | completed / cleanup_pending | Follow completion.md; only outbox cleanup remains. No new discovery or torrent submission. |
 
-## Discover and review using current v3 commands
+## Resume the appropriate stage
 
-```powershell
-python scripts/watch.py discover "VERIFIED SEARCH TITLE" --latest --output "RUN_DIR/LISTING.json"
-python scripts/watch.py detail CANDIDATE_ID --output "RUN_DIR/DETAIL.json"
-python scripts/watch.py review --manifest "RUN_DIR/REVIEW.json" --tier browse --want-zh --allow-upward-compatibility
-```
-
-Carry actual user overrides in both review and deliver. Read all rows in the native
-chronological listing; additional pages/verified aliases must address a real coverage
-gap. A Chinese-only query, newest upload, or a planned air date cannot establish latest.
-Use fresh evidence for a later scheduled retry; do not reuse an old negative as a new
-search. Do not import legacy fixed-shortlist, keyword rewriting, seven-day rescue or
-candidate-id finalization instructions into the reviewed v3 path. Independent search
-results do not advance tracking; no direct legacy writer is permitted.
-
-Before preparing an operation, qualified alternatives can be compared and reviewed.
-After preparing one, recovery remains bound to its operation_id and info_hash.
-Stop when coverage is sufficient or a real stage remains blocked; report the checked
-scope and actual rejection. Do not claim universal absence.
+Use [retrieval-workflow.md](retrieval-workflow.md) to repair incomplete evidence
+before an operation exists. Later retries need fresh evidence rather than an old
+negative result. Once prepared, recovery stays bound to operation_id and info_hash.
 
 ## Transport recovery boundaries
 
-The shared http_transport recovers eligible GETs only, never torrent submissions.
-Timeout/EOF/reset/DNS/incomplete-read/502/503/504 recovery is bounded by its request
-budget. Keep returned orchestration/session IDs and await the existing command;
-empty output does not mean exit. Do not stack another identical command on top.
+After an exhausted request, use `python scripts/network_doctor.py` once when a
+diagnosis is needed. It checks the effective proxy TCP endpoint and a real Nyaa
+listing without changing settings or touching delivery/progress. An open local
+proxy port does not establish Nyaa reachability. A native curl fallback shares the
+same route; changing HTTP clients does not prove an independent network path.
 
-Certificate failures are not transient release absence. Keep hostname and certificate
-verification enabled. The Windows native curl fallback, when eligible, preserves
-proxy/trust constraints; do not add --insecure, switch routes, modify proxy settings
-or install a fetched CA. HTTP permission failures are not rerouted. Classify
-`tls_certificate_verify_failed`, `tls_user_context_unavailable`, exhausted transport,
-and ordinary transient network failures separately.
+Use `transport.scheduled_outcome` and the complete attempt chain:
 
-For an execution-context failure use the execution tool's permitted approval route
-for the same read-only diagnostic or original-operation recovery. Never repeatedly
-retry an unchanged restricted context. Report certificate trust/context failures without
-scheduling resource retries. `tls_unexpected_eof` and `tls_handshake_failed` alone do
-not prove a trust failure: use `transport.scheduled_outcome` (or TransportError's same
-field). `network_transient` permits existing bounded four-hour supplementation, with
-TLS verification and the original proxy retained. Certificate/context/permission
-failure anywhere in the attempt chain takes precedence over a later generic handshake
-interruption. Unknown errors require diagnosis. Preserve diagnostics without credentials.
+| Result | Handling |
+| --- | --- |
+| `network_transient`, including exhausted EOF/handshake/reset/timeout and eligible 502/503/504 | Preserve incomplete coverage; scheduled runs use the existing bounded retry planner. |
+| `tls_certificate_verify_failed`, `tls_user_context_unavailable`, permission/authentication failure | Diagnose the specific trust/context/permission issue; no ordinary resource retry. A specific failure takes precedence over a later generic handshake error. |
+| Inspected HTTP challenge/403 | Report the actual response; a TLS EOF alone is not Cloudflare evidence. |
+| Unknown error | Diagnose before assigning a retry class. |
+
+`http_transport` already bounds eligible GET retries. Keep certificate/hostname
+verification enabled. For execution-context failures use the tool's permitted
+approval route for the same diagnostic or original-operation recovery. Await a
+still-running command by its returned session ID instead of stacking probes.
+Record sanitized diagnostics in the existing run memory. Diagnostics never submit
+torrents or advance progress.
 
 ## Recover the exact delivery operation
 
@@ -113,14 +98,8 @@ only after durable commit or with pending-operation references preserved.
 
 ## Scheduled failure handling
 
-Use the fixed template's read-only planner to decide finite resource retries. It
-computes at most three checks four hours apart on the original task and restores the
-base schedule on success, exhaustion or a nonretryable result. Read back before claiming
-that a schedule changed. Do not carry last week's success into the next window.
-
-The automation memory records scheduling intent/count/window, not authoritative
-progress. Save intent before changing the app schedule. An uncertain update is resolved
-by reading the exact task, not by creating another. Failure to save intent prevents a
-new temporary schedule; if a prior temporary schedule exists, restore the base through
-the app tool and report that outcome independently. An unapplied or uncertain plan must
-never be reported as scheduled. Follow completion cleanup before ordinary retry handling.
+Finish failed scheduled runs through [scheduled-run.md](scheduled-run.md) and
+[scheduled-retry.md](scheduled-retry.md). The planner handles bounded same-task
+supplementation and restoration of the regular schedule. Persist intent before
+an app update, then read back its result; an unapplied plan is not a scheduled
+retry. Completion cleanup takes precedence. Automation memory is not progress.

@@ -114,6 +114,20 @@ def test_native_error_does_not_leak_proxy_passwords():
     assert failure.value.code == 'tls_certificate_verification_failed'
 
 
+@pytest.mark.parametrize('status,outcome', [(503, 'network_transient'),
+    (407, 'permission_denied'), (403, 'permanent_failure')])
+def test_native_http_failure_preserves_cause(status, outcome):
+    result = subprocess.CompletedProcess([], 22, stdout=b'',
+        stderr=f'curl: (22) The requested URL returned error: {status} user:SECRET'.encode())
+    with patch.object(transport, 'proxy_for', return_value=''), \
+         patch.object(transport.subprocess, 'run', return_value=result):
+        with pytest.raises(transport.TransportError) as failure:
+            transport.native_get(request(), 4, 2048, 'curl.exe')
+    assert failure.value.code == f'http_{status}'
+    assert failure.value.scheduled_outcome == outcome
+    assert 'SECRET' not in str(failure.value)
+
+
 def test_windows_credential_failure_is_a_context_problem():
     result = subprocess.CompletedProcess([], 35, stdout=b'', stderr=b'SEC_E_NO_CREDENTIALS (0x8009030e) https://u:SECRET@proxy')
     with patch.object(transport, 'proxy_for', return_value=''), \

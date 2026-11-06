@@ -45,6 +45,19 @@ the actual work and numbering evidence. Do not change a locked identity to fit a
 candidate. If the existing verifier cannot represent the established numbering,
 report that limitation rather than absence or bypassing verification.
 
+## Compatibility query budget
+
+The fixed query/page and automatic-fallback details here describe the compatibility
+resolver. The default [full-evidence workflow](agent-review.md) uses explicit
+chronological pages and Agent-decided coverage. It retains the quality bounds below
+without inheriting a top-k reading limit or silently choosing another tier.
+
+- The high-level path uses at most three verified broad query titles. Latest discovery retains episode-free RSS recency queries even when a schedule predicts an episode; exact episodes, complete seasons, premium tiers, explicit bounds and trusted Chinese-title lanes use the bounded HTML size-sorted lane.
+- A size-sorted lane reads at most three pages per query and stops on an exhausted page, not on a quality match or floor. The complete collected window is retained before quality decisions. Report the query/page scope and coverage notes; a bounded search does not prove global absence.
+- Raw RSS or size-sorted listing items are cached briefly and rescored/reclassified under every new season, episode, and size policy. Final "no result" conclusions are not cached as facts.
+- Schedule metadata is cached briefly for latest/next checks. Use `--refresh-cache` for an explicitly fresh check, contradictory current evidence, or the single cached-negative refresh / scheduled retry defined in [failure recovery](failure-recovery.md).
+- If no exact target is confirmed, the bounded fallback uses explicit seasonal/episode and bare episode formats. In hard-Chinese mode, a complete but unqualified search also receives one exact-episode supplement with both Chinese script spellings and stable Latin anchors. Queries, the primary rejection, and supplement outcomes remain visible in `strict_zh_supplement` and `search_run`. Conversion generates search spellings only, never new identity aliases or numbering offsets.
+
 ## Reports and Agent use
 
 `report_version: 2` adds:
