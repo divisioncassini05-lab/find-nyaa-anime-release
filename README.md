@@ -203,6 +203,7 @@ python scripts/watch.py recover --operation "OPERATION_ID"
 
 - Codex 和 DSH 版本在同一仓库维护：先更新公共核心，再生成 DSH 适配副本，并通过同步检查；不会把两套用户进度合并。
 - 维护者运行 `python tools/sync_skills.py --bump patch` 同步更新，`python tools/sync_skills.py --check` 检查遗漏。DSH 宿主接口发生变化时需要调整适配并重新验证，不能盲目覆盖。
+- GitHub 自动检查同时覆盖 Windows 和 Linux：Windows 运行完整离线套件；Linux 排除 11 个 Windows 原生进程/权限专用断言，其余核心、DSH 适配和打包检查仍运行。自动检查不等同于桌面端真实下载测试。
 - 更新 Skill 或重新安装仓库不会自动改写已有定时任务；新建任务才会读取当前的定时追更模板。
 - 新番交互与定时任务沿用已保存的默认配置；其他交互请求的体积向上兼容需明确允许。任何模式都不能突破用户明确的体积上限或中文字幕硬要求。
 - 追番状态、原始页面证据、审核清单和交付恢复记录保存在本机，仓库只提供代码、规则和测试。

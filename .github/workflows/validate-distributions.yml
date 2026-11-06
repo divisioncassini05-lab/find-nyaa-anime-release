@@ -43,6 +43,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Keep native Windows assertions on the Windows runner
+        if: runner.os != 'Windows'
+        run: |
+          # These fixtures invoke Win32 APIs or assert Windows-only branches.
+          # Windows runs the full suite; keep all other tests on Linux as well.
+          $windowsOnly = @(
+            'test_client_context_preflight.py::test_sandbox_identity_fails_closed_before_client_launch'
+            'test_qbittorrent_submit.py::QbittorrentSubmitTests::test_absence_is_distinct_from_failed_probe'
+            'test_qbittorrent_submit.py::QbittorrentSubmitTests::test_exact_installation_is_running'
+            'test_qbittorrent_submit.py::QbittorrentSubmitTests::test_other_installation_is_not_reused'
+            'test_qbittorrent_submit.py::QbittorrentSubmitTests::test_permission_denial_is_not_a_transient_network_failure'
+            'test_windows_client_runtime.py::test_running_installation_wins_over_old_known_install'
+            'test_windows_client_runtime.py::test_multiple_active_installations_are_a_conflict'
+            'test_windows_client_runtime.py::test_newer_portable_beats_running_registered_version_and_detects_updates'
+            'test_windows_client_runtime.py::test_equal_versions_prefer_running_copy'
+            'test_windows_client_runtime.py::test_unknown_version_does_not_silently_select_old_copy'
+            'test_windows_client_runtime.py::test_broker_failure_never_falls_back_to_direct_client_launch'
+          )
+          $options = ($windowsOnly | ForEach-Object { "--deselect=skills/find-nyaa-anime-release/tests/$_" }) -join ' '
+          "PYTEST_ADDOPTS=$options" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install test-only dependencies without lifecycle scripts
         run: |
           python -m pip install pytest hypothesis tzdata
