@@ -26,6 +26,9 @@ The Chinese display name is `动漫搜索与自动追番`; keep technical identi
   the `latest` tag. Use existing npm authorization; never put tokens in this repo.
   Verify the registry version, `latest` tag and tarball integrity before declaring
   publication complete. A local pack or GitHub push is not an npm release.
+  A `0.0.0-stage` placeholder is not a released version. If staged, use npm 11.15+
+  `stage list/view/approve` and let the owner complete browser 2FA; then repeat
+  the public metadata/integrity checks. Do not reinstall the staging placeholder.
 - After the code commit and verified npm publication, generate `marketplace.json`
   with `--source npm --path plugins/dsh-find-nyaa-anime-release`, then commit the
   index. Keep the index URL stable. Do not advertise an unpublished npm version.

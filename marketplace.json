@@ -24,13 +24,11 @@
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4IiB2aWV3Qm94PSIwIDAgMTI4IDEyOCI+CiAgPHJlY3Qgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIHJ4PSIyNCIgZmlsbD0iIzE3M0MzNiIvPgogIDxyZWN0IHg9IjIzIiB5PSIyNiIgd2lkdGg9IjY5IiBoZWlnaHQ9IjU1IiByeD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRjBGNEVFIiBzdHJva2Utd2lkdGg9IjciLz4KICA8cGF0aCBkPSJNNDkgNDB2MjdsMjItMTMuNXoiIGZpbGw9IiNENkI3NTciLz4KICA8Y2lyY2xlIGN4PSI4NCIgY3k9IjgzIiByPSIyMSIgZmlsbD0iIzE3M0MzNiIgc3Ryb2tlPSIjNzVDOUIxIiBzdHJva2Utd2lkdGg9IjciLz4KICA8cGF0aCBkPSJtMTAwIDk5IDEzIDEzIiBzdHJva2U9IiM3NUM5QjEiIHN0cm9rZS13aWR0aD0iOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+Cjwvc3ZnPgo=",
       "versions": [
         {
-          "version": "0.2.1",
-          "publishTimestamp": 1794064540,
+          "version": "0.2.2",
+          "publishTimestamp": 1794072330,
           "source": {
-            "type": "git",
-            "url": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release",
-            "commit": "1aaf1b8d05b0697eb38cd921de9bb990f4ac8cbe",
-            "path": "plugins/dsh-find-nyaa-anime-release"
+            "type": "npm",
+            "registry": "https://registry.npmjs.org/"
           },
           "engines": {
             "dsh": ">=0.2.2-rc.1 <0.3.0"
