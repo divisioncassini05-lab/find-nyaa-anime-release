@@ -21,12 +21,23 @@ The Chinese display name is `动漫搜索与自动追番`; keep technical identi
   verify the actual npm tarball. Keep host/GUI/live-download test limits explicit.
 - Before a new DSH release, update its version (also for wrapper-only changes),
   README version examples and build report. Commit both distributions together.
-- After that code commit, generate `marketplace.json` using its real commit and
-  `--path plugins/dsh-find-nyaa-anime-release`, then commit the index. Never point
-  an index at an older commit that lacks the declared plugin version.
+- Release requests include npm publication as well as GitHub. Publish the same
+  verified tarball to the public `dsh-find-nyaa-anime-release` npm package with
+  the `latest` tag. Use existing npm authorization; never put tokens in this repo.
+  Verify the registry version, `latest` tag and tarball integrity before declaring
+  publication complete. A local pack or GitHub push is not an npm release.
+- After the code commit and verified npm publication, generate `marketplace.json`
+  with `--source npm --path plugins/dsh-find-nyaa-anime-release`, then commit the
+  index. Keep the index URL stable. Do not advertise an unpublished npm version.
+  The generator's Git mode is only an explicit alternative, not the default
+  release channel: path/Git/tarball installations lack native registry updates.
 - For an authorized GitHub update, push both commits and attach the matching tgz,
   source ZIP and checksums to `dsh-v<VERSION>`. Never replace another release's
   assets or force-push. Market indexing is not proof of community-market approval.
+- Existing DSH profiles should use the registry package under its original name.
+  Preserve profile selection, external data and schedules on migration. Verify
+  the installed source and version; the latest installed version should not show
+  an update badge until a newer compatible npm version is published.
 
 User tracking state stays on each user's machine. Synchronization here concerns
 code, rules and distribution artifacts, not personal tracking/download history.

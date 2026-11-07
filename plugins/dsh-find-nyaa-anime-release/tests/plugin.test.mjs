@@ -16,6 +16,10 @@ test('native bundle has complete metadata and no install-time side effects', asy
   assert.equal(pkg.dsh.engines, undefined);
   for (const hook of ['preinstall', 'install', 'postinstall', 'prepare']) assert.equal(pkg.scripts[hook], undefined);
   assert.equal(pkg.dependencies, undefined);
+  assert.deepEqual(pkg.publishConfig, { access: 'public', registry: 'https://registry.npmjs.org/', tag: 'latest' });
+  const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].version, pkg.version);
   for (const file of ['index.js', 'cordis.patch.yml', 'icon.svg', 'LICENSE', 'locale/en.json', 'locale/zh.json',
     'skills/find-nyaa-anime-release/scripts/watch.py', 'skills/find-nyaa-anime-release/scripts/package_release.py',
     'skills/find-nyaa-anime-release/scripts/dsh_host.py']) {
@@ -96,4 +100,24 @@ test('bundle metadata and generated market index pass official format checks', {
   assert.equal(entry.versions[0].version, pkg.version);
   assert.equal(marketInstallTarget(entry.name, entry.versions[0]).spec,
     'git+https://example.org/test-only/repository.git#0123456789abcdef0123456789abcdef01234567&path:/plugins/nyaa');
+  const npmResult = spawnSync(process.env.PYTHON || 'python', ['-c',
+    'import json; from tools.make_market_index import make_index; print(json.dumps(make_index("https://example.org/test-only/repository", subpath="plugins/nyaa", published_at=1794000000, source_type="npm")))'],
+  { cwd: root, encoding: 'utf8' });
+  assert.equal(npmResult.status, 0, npmResult.stderr);
+  const npmEntry = parseMarketIndex(JSON.parse(npmResult.stdout), 'https://example.org/test-only/index.json').plugins[0];
+  assert.equal(npmEntry.repository.directory, 'plugins/nyaa');
+  assert.deepEqual(marketInstallTarget(npmEntry.name, npmEntry.versions[0]), {
+    spec: `${pkg.name}@${pkg.version}`, registry: 'https://registry.npmjs.org/',
+  });
+});
+
+test('market generator rejects invalid or mixed source identity', () => {
+  for (const args of [[], ['--source', 'git', '--commit', 'bad'],
+    ['--source', 'npm', '--commit', '0123456789abcdef0123456789abcdef01234567'],
+    ['--source', 'npm', '--path', '../outside']]) {
+    const result = spawnSync(process.env.PYTHON || 'python', ['tools/make_market_index.py',
+      '--repository', 'https://example.org/test-only/repository', '--output', 'unused-index.json', ...args],
+    { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 2, result.stderr);
+  }
 });

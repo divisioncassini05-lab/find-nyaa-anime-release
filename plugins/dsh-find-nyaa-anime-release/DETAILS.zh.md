@@ -22,7 +22,16 @@
 
 ## 安装与第一次使用
 
-### 安装发布包
+### 从 npm 安装（推荐）
+
+在 DSH「插件 → 添加插件」输入 `dsh-find-nyaa-anime-release`，选择 npm 官方注册表
+`https://registry.npmjs.org/`。安装者无需 npm 账号。
+
+从 npm 安装后，后续发布更高的兼容版本时，DSH 原生插件列表可以显示“可更新”。
+已装最新版时不会显示这个提示。旧路径、Git 或压缩包安装需要一次性迁移来源，
+详见 [更新已有安装](README.md#更新已有安装)。
+
+### 安装发布包（备用）
 
 1. 打开上方发布页，下载 `dsh-find-nyaa-anime-release-版本号.tgz`。
 2. 把本地文件交给 DSH，告诉它：
@@ -36,16 +45,16 @@
 也可以在 CLI 中指定实际 profile 和文件绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.1.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.2.tgz"
 ```
 
 桌面版优先使用应用内当前 profile 的插件管理器。`web` 只是 CLI 示例，不能照抄后误装到另一套环境。
 
-发布包已包含 Skill、Python 脚本、必要的随附解析器和许可文件，不需要构建。安装时没有自动执行的安装脚本，也不会替你安装 Python、开启 qBittorrent Web API 或修改网络设置。目前不提供 npm 包名安装，不要把包名当成已发布的 npm 包。
+发布包已包含 Skill、Python 脚本、必要的随附解析器和许可文件，不需要构建。安装时没有自动执行的安装脚本，也不会替你安装 Python、开启 qBittorrent Web API 或修改网络设置。npm 与 GitHub 提供同一份校验过的安装包。
 
 ### 通过自定义市场索引安装
 
-在 DSH 的 **Custom plugin indexes / Discover** 添加本项目的 [市场索引](https://raw.githubusercontent.com/divisioncassini05-lab/find-nyaa-anime-release/main/marketplace.json)，刷新后选择「动漫搜索与自动追番」。索引使用固定版本的 Git 源码，不依赖 npm 发布；这个地址后续保持不变。
+在 DSH 的 **Custom plugin indexes / Discover** 添加本项目的 [市场索引](https://raw.githubusercontent.com/divisioncassini05-lab/find-nyaa-anime-release/main/marketplace.json)，刷新后选择「动漫搜索与自动追番」。`0.2.2` 起索引使用对应的 npm 精确版本；这个地址后续保持不变。
 
 这是作者维护的自定义索引，不代表已被官方或社区公共市场收录。只想本地安装时，使用上面的 `.tgz` 即可，无需添加索引。
 

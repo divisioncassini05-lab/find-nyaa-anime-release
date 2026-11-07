@@ -23,8 +23,10 @@
 | Codex | 下方 Skill 安装命令，原安装链接不变 |
 | DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
-DSH `0.2.1` 包含可选 Bangumi 同步与原生侧栏面板，面板操作生成待发送聊天草稿。
-可通过 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.1) 或项目自定义市场索引更新；验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md#图形面板021)。Codex 安装方式及核心流程不变。
+DSH `0.2.2` 保留可选 Bangumi 同步与原生侧栏面板，新增 npm 发布渠道。
+推荐在 DSH「添加插件」输入 `dsh-find-nyaa-anime-release`，使用 npm 官方注册表安装，之后可通过原生版本检查更新。
+也提供 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.2)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
+验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md#图形面板021)。Codex 安装链接及核心流程不变。
 
 ## 能做什么
 
@@ -232,6 +234,7 @@ python scripts/watch.py recover --operation "OPERATION_ID"
 
 - Codex 和 DSH 版本在同一仓库维护：先更新公共核心，再生成 DSH 适配副本，并通过同步检查；不会把两套用户进度合并。
 - 维护者运行 `python tools/sync_skills.py --bump patch` 同步更新，`python tools/sync_skills.py --check` 检查遗漏。DSH 宿主接口发生变化时需要调整适配并重新验证，不能盲目覆盖。
+- 发布更新时同一版本同步到 npm、GitHub Release 和项目自定义市场索引；npm 与 GitHub 使用同一个已校验安装包。已安装最新版不会显示更新提示，后续有更高兼容版本才会显示。
 - GitHub 自动检查同时覆盖 Windows 和 Linux：Windows 运行完整离线套件；Linux 排除 11 个 Windows 原生进程/权限专用断言，其余核心、DSH 适配和打包检查仍运行。自动检查不等同于桌面端真实下载测试。
 - 更新 Skill 或重新安装仓库不会自动改写已有定时任务；新建任务才会读取当前的定时追更模板。
 - 新番交互与定时任务沿用已保存的默认配置；其他交互请求的体积向上兼容需明确允许。任何模式都不能突破用户明确的体积上限或中文字幕硬要求。

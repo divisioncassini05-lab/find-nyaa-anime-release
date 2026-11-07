@@ -38,17 +38,32 @@
 
 ## 安装
 
-### 从插件包安装
+### 从 npm 安装（推荐）
 
-当前版本为 `0.2.1`。从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.1) 下载
-`dsh-find-nyaa-anime-release-0.2.1.tgz`，交给 DSH，并说：
+当前版本为 `0.2.2`。在 DSH「插件 → 添加插件」输入：
+
+```text
+dsh-find-nyaa-anime-release
+```
+
+选择 npm 官方注册表 `https://registry.npmjs.org/`。也可让 DSH 的 Agent 通过
+当前 profile 的插件管理器安装这个包。普通使用者不需要 npm 账号。
+[npm 包页面](https://www.npmjs.com/package/dsh-find-nyaa-anime-release)。
+
+这种安装方式可以使用 DSH 原生版本检查：发布更高且兼容的版本后，刷新插件列表会
+显示可更新。已经安装最新版时不会显示更新提示。镜像站可能延迟同步。
+
+### 本地插件包（备用）
+
+从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.2) 下载
+`dsh-find-nyaa-anime-release-0.2.2.tgz`，交给 DSH，并说：
 
 > 请通过当前 profile 的插件管理器安装这个本地插件包，完成后确认技能可加载。
 
 也可以在 DSH CLI 中使用实际 profile 和本地绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.1.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.2.tgz"
 ```
 
 桌面端优先在应用内用插件管理器安装到当前 profile，不要照抄 `web` 去改另一个 profile。
@@ -61,10 +76,15 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.1.t
 
 ### 更新已有安装
 
-- 通过项目自定义市场安装：刷新原索引，在当前 profile 的插件管理器中更新到 `0.2.1`。
-  [索引地址](https://raw.githubusercontent.com/divisioncassini05-lab/find-nyaa-anime-release/main/marketplace.json) 保持不变，版本固定到对应的源码提交。
-- 通过本地包安装：下载新版 `.tgz`，让当前 profile 的插件管理器用它更新同名插件。
-  不要只替换 `SKILL.md`；脚本、面板和宿主适配必须一起更新。
+- npm 安装：刷新插件列表，在插件详情的版本区更新。包名保持不变。
+- 项目自定义市场：[索引地址](https://raw.githubusercontent.com/divisioncassini05-lab/find-nyaa-anime-release/main/marketplace.json)
+  保持不变，`0.2.2` 起安装来源为对应的 npm 精确版本。
+- 旧版路径、Git 或 `.tgz` 安装不会自动变成 npm 安装，也不显示原生注册表更新提示。
+  迁移时先保留当前 profile 的配置和外部数据，再用插件管理器把同名依赖替换为
+  `dsh-find-nyaa-anime-release@0.2.2`，保留启用状态并按宿主要求重载。
+  若界面拒绝同名安装，可先移除插件再从 npm 添加；不要删除数据目录或定时任务。
+- 仍使用本地包时，需要手动下载新版 `.tgz` 并更新同名插件。不要只替换 `SKILL.md`；
+  脚本、面板和宿主适配必须一起更新。
 - 更新不会自动迁移 Codex 的记录或授权。已有 DSH 数据和定时任务保留；Bangumi
   凭据在 DSH 执行宿主中单独配置。同机可显式引用已有的私密令牌文件。
 
@@ -150,8 +170,8 @@ npm pack --ignore-scripts
 预览只含示例数据，不访问真实追番记录或下载客户端。
 `.tgz` 不含测试和 Python 字节码；源码 ZIP 另外提供测试、适配覆盖文件和构建工具。
 本次实际验证记录见 [BUILD-REPORT.md](BUILD-REPORT.md)。
-上架资料与索引生成步骤见 [MARKETPLACE.md](MARKETPLACE.md)。本地生成的包不等于已经
-发布到 npm 或被市场收录，需先发布源码/版本，再提交所使用市场的收录渠道。
+维护发布时同步 Codex、DSH、npm 与项目索引；步骤见 [MARKETPLACE.md](MARKETPLACE.md)。
+npm 发布和自定义索引可用不代表已被社区公共市场收录。
 
 基础 skill：[divisioncassini05-lab/find-nyaa-anime-release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release)。
 本插件沿用 MIT 许可；随附的 Python 依赖和身份目录保留各自许可文件。

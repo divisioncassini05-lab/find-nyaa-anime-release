@@ -1,12 +1,18 @@
-# Build verification: 0.2.1 Bangumi mirror and DSH panel
+# Build verification: 0.2.2 npm distribution
 
-Build date: 2026-11-07. Host: Windows, Node.js 24.16.0, Python 3.14.0.
+Build date: 2026-11-08. Host: Windows, Node.js 24.16.0, Python 3.14.0.
 Reference DSH: 0.2.2-rc.1, source commit
 `fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159`.
 
-Release artifacts use tag `dsh-v0.2.1`. The project-maintained marketplace index
-pins the exact code commit for 0.2.1; it is not a claim of public community-market
-acceptance or a logged-in DSH desktop test.
+Release artifacts use tag `dsh-v0.2.2`. The project-maintained marketplace index
+uses the exact npm version after registry publication is verified. The same
+checked tarball is used for npm and GitHub. This is not a claim of public
+community-market acceptance or a logged-in DSH desktop test.
+
+This release changes publication metadata, index generation and installation
+documentation, not the shared search core or DSH runtime. The offline suites
+were rerun for 0.2.2; the independent UI screenshots below were captured for 0.2.1
+and its unchanged runtime, not repeated as a new desktop integration test.
 
 ## Completed checks
 
@@ -16,12 +22,15 @@ acceptance or a logged-in DSH desktop test.
 - Python adapter and upstream offline suite: **778 passed**, 15 subtests passed,
   3 skipped, 1 deselected. Skips cover opt-in network/process tests and a
   Windows broker stderr-stream condition. No real client submission occurred.
-- JavaScript: **13 passed**, including actual Cordis 4.1.0 / DSH SkillRegistry
+- JavaScript: **14 passed**, including actual Cordis 4.1.0 / DSH SkillRegistry
   registration, skill loading and disposal, the official market-index parser,
   and checks that both localized detail pages and their screenshots are packaged.
   New checks cover owner-only read-only RPC, cancellation, state projection,
   byte limits, native ModuleLoader registration, style disposal and unsent draft
   handoff. Real Cordis verifies optional Connection registration and disposal.
+  The official market parser accepts both pinned Git and exact npm sources;
+  npm targets retain the package name and public registry. Invalid/mixed source
+  identifiers are refused. Package and lockfile versions are checked together.
 - Bangumi fixtures cover credential redaction, pagination, bounded personal ratings/
   comments, cache hits, exact episode mapping, explicit watched scopes, duplicate
   write recovery, failed downloads and cloud outages. Reads/collection changes do
@@ -45,14 +54,11 @@ acceptance or a logged-in DSH desktop test.
   **307** files. All packed Python source files
   compiled in memory without generating bytecode in the installation directory.
 
-Initial sandbox runs could not create the maintenance temporary directory and hit
-normal-user context assertions. Reruns with isolated temporary directories in the
-approved normal-user context passed both complete suites. No assertions were
-skipped or weakened to fix this.
+The Node sandbox run could not create its redirected temporary directory.
+The approved normal-user rerun passed all 14 tests. Both complete Python suites
+passed using isolated temporary directories in the normal-user context. No
+assertions were skipped or weakened to fix the environment.
 Both suites retain one pre-existing unknown `live` marker warning.
-The final publication rerun passed the complete suites again. An earlier run of
-one Windows cross-process lock test hit a transient permission error; its focused
-rerun and the subsequent full Codex run passed without changing or deselecting tests.
 
 ## Scope
 
@@ -82,7 +88,7 @@ npm run build
 npm test
 python -m pytest tests/test_dsh_adapter.py skills/find-nyaa-anime-release/tests -m "not live" -p no:cacheprovider
 npm pack --ignore-scripts
-python tools/verify_and_archive.py --tarball dsh-find-nyaa-anime-release-0.2.1.tgz --output-dir dist
+python tools/verify_and_archive.py --tarball dsh-find-nyaa-anime-release-0.2.2.tgz --output-dir dist
 ```
 
 The archive verifier compares each packed runtime file against the build tree,
