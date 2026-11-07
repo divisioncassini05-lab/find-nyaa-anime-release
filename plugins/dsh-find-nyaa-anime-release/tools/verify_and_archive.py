@@ -27,8 +27,13 @@ def file_sets():
     assets = {path.relative_to(ROOT).as_posix() for path in (ROOT / 'assets').rglob('*') if path.is_file()}
     prefix = 'skills/find-nyaa-anime-release/'
     runtime = root_files | locales | assets | {prefix + path for path in runtime_skill}
+    for folder in ('host', 'lib'):
+        runtime.update(path.relative_to(ROOT).as_posix() for path in (ROOT / folder).rglob('*') if path.is_file())
     source = runtime | {prefix + path for path in skill_files} | {'.gitignore', '.npmignore', 'skills/.npmignore'}
     source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'tools').glob('*.py'))
+    source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'tools').glob('*.mjs'))
+    source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'client').glob('*') if path.is_file())
+    source.add('package-lock.json')
     source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'tests').glob('*')
                   if path.is_file() and path.suffix in {'.py', '.mjs'})
     source.update('overlays/' + path for path in manifest['added_files'])

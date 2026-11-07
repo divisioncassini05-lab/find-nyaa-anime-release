@@ -13,7 +13,8 @@ SUCCESS_STATUSES = {'already_present', 'submitted', 'submitted_verified'}
 PHASES = {'airing', 'finale_pending_evidence', 'completed', 'blocked'}
 COMMANDS = {'create_track', 'record_delivery', 'record_pending_operation', 'record_operation_review',
             'record_failed_operation', 'attach_completion_evidence', 'reconcile_completion',
-            'record_waiting', 'repair_identity', 'append_outbox_action', 'ack_outbox_action'}
+            'record_waiting', 'repair_identity', 'append_outbox_action', 'ack_outbox_action',
+            'bind_bangumi', 'record_bangumi_snapshot', 'queue_bangumi_watch'}
 
 
 def now_iso():
@@ -61,6 +62,18 @@ def validate(data):
             op = show.get('operations', {}).get(receipt.get('operation_id'))
             require(op is not None and op.get('info_hash') == receipt.get('info_hash'), 'orphan_receipt')
         require(len({r['operation_id'] for r in show['deliveries']}) == len(show['deliveries']), 'duplicate_receipt')
+        cloud = show.get('bangumi')
+        if cloud:
+            require(type(cloud.get('account_id')) is int and cloud['account_id'] > 0
+                    and type(cloud.get('subject_id')) is int and cloud['subject_id'] > 0
+                    and type(cloud.get('episode_offset')) is int, 'invalid_bangumi_binding')
+            require(cloud.get('collection_type') in {None, 1, 2, 3, 4, 5}, 'invalid_bangumi_collection')
+            require(isinstance(cloud.get('watched_episodes'), list) and all(type(n) is int and n > 0
+                    for n in cloud['watched_episodes']), 'invalid_bangumi_progress')
+            require(isinstance(cloud.get('episode_map'), dict) and all(str(k).isdigit() and int(k) > 0
+                    and type(v) is int and v > 0 for k, v in cloud['episode_map'].items()), 'invalid_bangumi_episode_map')
+            require(str(show['identity']['provider_bindings'].get('bangumi', {}).get('entry_id'))
+                    == str(cloud['subject_id']), 'bangumi_identity_conflict')
     return data
 
 
@@ -123,12 +136,47 @@ def migrate_state(data):
 
 
 def _append(show, action):
-    require(action.get('outbox_id') and action.get('kind') in {'reconcile_completion', 'delete_owning_automation'}, 'invalid_outbox_action')
+    require(action.get('outbox_id') and action.get('kind') in {'reconcile_completion', 'delete_owning_automation', 'bangumi_watched'}, 'invalid_outbox_action')
     found = next((a for a in show['outbox'] if a['outbox_id'] == action['outbox_id']), None)
     if found:
         require(found['kind'] == action['kind'] and found.get('payload', {}) == action.get('payload', {}), 'outbox_id_conflict')
         return
     show['outbox'].append({**copy.deepcopy(action), 'status': 'pending', 'attempts': 0, 'created_at': now_iso()})
+
+
+def _queue_bangumi(show, episodes, *, event_id, source, complete=False):
+    binding = show.get('bangumi')
+    require(binding is not None, 'bangumi_binding_required')
+    require(episodes and all(type(n) is int and n > 0 for n in episodes), 'invalid_watched_episodes')
+    payload = {k: binding[k] for k in ('account_id', 'subject_id', 'episode_offset')}
+    payload.update(episodes=sorted(set(episodes)), complete=bool(complete), source=source,
+                   identity_revision=show['identity_revision'])
+    _append(show, {'outbox_id': 'bangumi:' + event_id, 'kind': 'bangumi_watched', 'payload': payload})
+
+
+def _delivery_mirror(state_path, show):
+    if show.get('bangumi'):
+        return True
+    from .bangumi_client import BangumiError, load_config, positive_id
+    try:
+        config = load_config(state_path)
+        if not config or not config.get('delivery_as_watched', True):
+            return False
+        provider = show['identity']['provider_bindings'].get('bangumi') or {}
+        if not provider.get('entry_id'):
+            raise BangumiError('bangumi_binding_required')
+        offset = provider.get('episode_offset', 0)
+        if type(offset) is not int:
+            raise BangumiError('bangumi_numbering_confirmation_required')
+        show['bangumi'] = {'account_id': config['account_id'], 'subject_id': positive_id(provider['entry_id']),
+                          'episode_offset': offset, 'collection_type': None,
+                          'episode_map': {}, 'watched_episodes': [], 'synced_at': None}
+        show['extra'].pop('bangumi_sync_warning', None)
+        return True
+    except BangumiError as exc:
+        # Optional account/configuration errors never undo an accepted download.
+        show['extra']['bangumi_sync_warning'] = str(exc)
+        return False
 
 
 def _reconcile(show):
@@ -261,6 +309,11 @@ class StateRepository:
             require(expected_revision is None or show['revision'] == expected_revision, 'revision_conflict')
             before_all = {s['track_id']: copy.deepcopy(s) for s in data['shows']}
             self._apply(show, kind, fields)
+            if kind == 'bind_bangumi':
+                binding = show['bangumi']
+                require(not any(other['track_id'] != track_id and other.get('bangumi', {}).get('account_id') == binding['account_id']
+                                and other.get('bangumi', {}).get('subject_id') == binding['subject_id'] for other in data['shows']),
+                        'bangumi_subject_already_bound')
             _reconcile(show)
             _cleanup_actions(data, track_id)
             for changed in data['shows']:
@@ -325,7 +378,34 @@ class StateRepository:
             s['progress']['handled_episode'] = max(s['progress']['handled_episode'], op['episode'])
             s['progress']['latest_release_episode'] = max(s['progress']['latest_release_episode'], op['episode'])
             s['extra'].pop('pending_download', None)
+            if _delivery_mirror(self.path, s):
+                _queue_bangumi(s, [op['episode']], event_id='delivery:' + op['operation_id'], source='delivery')
             _append(s, {'outbox_id': 'reconcile:' + op['operation_id'], 'kind': 'reconcile_completion', 'payload': {'track_id': s['track_id']}})
+        elif kind == 'bind_bangumi':
+            binding = copy.deepcopy(f['binding'])
+            require(type(binding.get('account_id')) is int and binding['account_id'] > 0
+                    and type(binding.get('subject_id')) is int and binding['subject_id'] > 0
+                    and type(binding.get('episode_offset')) is int, 'invalid_bangumi_binding')
+            old = s.get('bangumi')
+            require(not old or all(old[k] == binding[k] for k in ('account_id', 'subject_id', 'episode_offset')), 'bangumi_binding_conflict')
+            provider = s['identity']['provider_bindings'].get('bangumi')
+            require(not provider or str(provider['entry_id']) == str(binding['subject_id']), 'bangumi_identity_conflict')
+            require(not any(not op.get('committed') and op.get('status') in {'prepared', 'recovering', 'accepted'}
+                            for op in s['operations'].values()), 'pending_operation_identity_locked')
+            if not provider:
+                s['identity']['provider_bindings']['bangumi'] = {'entry_id': binding['subject_id']}
+                s['identity_revision'] += 1
+            s['bangumi'] = {**(old or {}), **binding}
+        elif kind == 'record_bangumi_snapshot':
+            snapshot = copy.deepcopy(f['snapshot'])
+            binding = s.get('bangumi')
+            require(binding and all(binding[k] == snapshot[k] for k in ('account_id', 'subject_id', 'episode_offset')), 'bangumi_binding_conflict')
+            require(snapshot.get('collection_type') in {1, 2, 3, 4, 5}, 'invalid_bangumi_collection')
+            require(all(type(n) is int and n > 0 for n in snapshot.get('watched_episodes', [])), 'invalid_bangumi_progress')
+            s['bangumi'].update(snapshot)
+        elif kind == 'queue_bangumi_watch':
+            require(f.get('explicit') is True, 'explicit_watched_instruction_required')
+            _queue_bangumi(s, f['episodes'], event_id=f['event_id'], source='user', complete=f.get('complete', False))
         elif kind == 'attach_completion_evidence':
             evidence = copy.deepcopy(f['evidence'])
             _validate_completion(s, evidence)
@@ -345,6 +425,9 @@ class StateRepository:
         elif kind == 'repair_identity':
             require(f.get('evidence', {}).get('reviewed') is True, 'identity_repair_evidence_required')
             require(not any(not o.get('committed') and o['status'] in {'prepared','recovering','accepted'} for o in s['operations'].values()), 'pending_operation_identity_locked')
+            require(not any(a['kind'] == 'bangumi_watched' and a['status'] != 'done' for a in s['outbox']), 'pending_bangumi_identity_locked')
+            require(not s.get('bangumi') or f['identity'].get('provider_bindings', {}).get('bangumi', {}).get('entry_id')
+                    == s['bangumi']['subject_id'], 'bangumi_bound_identity_locked')
             s['identity'] = copy.deepcopy(f['identity'])
             s['identity_revision'] += 1
             s['extra'].setdefault('identity_repairs', []).append(copy.deepcopy(f['evidence']))
@@ -358,6 +441,7 @@ class StateRepository:
                 s['automation_owners'] = [o for o in s.get('automation_owners', []) if o['automation_id'] != owner['automation_id']] + [owner]
             else:
                 require(f['action'].get('kind') != 'delete_owning_automation', 'cleanup_requires_eligibility')
+                require(f['action'].get('kind') != 'bangumi_watched', 'bangumi_use_domain_command')
                 _append(s, f['action'])
         elif kind == 'ack_outbox_action':
             action = next((x for x in s['outbox'] if x['outbox_id'] == f['outbox_id']), None)
@@ -368,6 +452,11 @@ class StateRepository:
                 receipt = f.get('receipt') or {}
                 owner = action['payload']
                 require(receipt.get('automation_id') == owner['automation_id'] and receipt.get('scope_hash') == owner['scope_hash'] and receipt.get('status') in {'deleted','already_absent'}, 'cleanup_receipt_required')
+            if f.get('success') and action['kind'] == 'bangumi_watched':
+                receipt = f.get('receipt') or {}
+                payload = action['payload']
+                require(receipt.get('status') == 'bangumi_verified' and all(receipt.get(k) == payload[k]
+                    for k in ('account_id', 'subject_id', 'episodes')), 'bangumi_receipt_required')
             action.update(status='done' if f.get('success') else 'pending', last_error=f.get('error'), checked_at=now_iso(), attempts=action.get('attempts', 0)+1)
             if f.get('receipt'):
                 action['receipt'] = copy.deepcopy(f['receipt'])

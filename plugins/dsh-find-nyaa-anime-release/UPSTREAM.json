@@ -4,7 +4,7 @@
   "source_files": [
     {
       "path": "SKILL.md",
-      "sha256": "428bcaa308712451fc50cb1ab68f7bf8bd9103bf9911d944ef79dcd807d4374e"
+      "sha256": "1c212507215e25b01866107dddf337d7d0ce001fe6a6425eff5d4a72a54cd5e4"
     },
     {
       "path": "data/AOD-LICENSE.txt",
@@ -36,7 +36,11 @@
     },
     {
       "path": "references/architecture-v3.md",
-      "sha256": "951bd8b8bbb700417d9731996fbca046332d80f043cf25379ec4a514888ac54b"
+      "sha256": "046cb3bca9974b823633b9712d32023bcdee5e36372cb74f1c23971e2b4215c9"
+    },
+    {
+      "path": "references/bangumi-sync.md",
+      "sha256": "356a7caa43649e705b0a31ea0c8bbcb7295bb49fcd8de6753e3968a82d0b718b"
     },
     {
       "path": "references/client-readiness.md",
@@ -803,8 +807,20 @@
       "sha256": "f344739df2a843976e226b668b1587f585b818d90b665816aca4d52496d9a49d"
     },
     {
+      "path": "scripts/watch_v3/bangumi.py",
+      "sha256": "99df2c91c5264dad5eab57634d4c8e0e3bd0bbf2ce74c16490345373872a3b94"
+    },
+    {
+      "path": "scripts/watch_v3/bangumi_cli.py",
+      "sha256": "2efb8d76760b37b1f514b9a4b1fdc1fe98d25e19f0b2b855f35db2e15910984f"
+    },
+    {
+      "path": "scripts/watch_v3/bangumi_client.py",
+      "sha256": "7aae772beb6264746729986cb9a270d0cd74e88f73a3eb181b2693367d844dda"
+    },
+    {
       "path": "scripts/watch_v3/cli.py",
-      "sha256": "933fcb833cf14730a32efcd50b93b95b38822edceb807fb68b947479b883f13d"
+      "sha256": "b733fc2e9db53a13581203f3eb312fa109fefe60f79bca2fc775be5586ad6bcc"
     },
     {
       "path": "scripts/watch_v3/clients.py",
@@ -820,19 +836,19 @@
     },
     {
       "path": "scripts/watch_v3/finalization.py",
-      "sha256": "7a8179b9d90ff447c839165e8dbac6a758d108dd8995dc7c7cc53b63bb9f81d7"
+      "sha256": "178019f259d3dd6fbbb8814f0e891e69968c9d070a7a1f6d8616fabb711b3f68"
     },
     {
       "path": "scripts/watch_v3/outbox.py",
-      "sha256": "6327f7c72477bf7d3b1e11566d12ee27223c833f126f6eb1993c184436ebd6ec"
+      "sha256": "91c68184908c2c980e47cd00b5631b829aba965d9780451ea55d6ab345db11f9"
     },
     {
       "path": "scripts/watch_v3/store.py",
-      "sha256": "0ae75f0cb2749fbd2ffb76fde9afd596ff1d94f0ffad8089806a46cdde9a31ed"
+      "sha256": "b48bb4fc6478e2b66df08a425d1011ff9a66d0b203b2789409eb829d6b91a113"
     },
     {
       "path": "scripts/watch_v3/workflow.py",
-      "sha256": "402988dc440e1d3f3d8a075a2c62eace008a3615b4f3438cbd3ade93cb3a1283"
+      "sha256": "907dfa0d33431b5adaaf8608cc27fb7963a920b7a63578b8f08a959d9dad8bd0"
     },
     {
       "path": "scripts/windows_client_runtime.py",
@@ -901,6 +917,10 @@
     {
       "path": "tests/test_architecture_v2.py",
       "sha256": "d24f61569f2b8624e8c32798d4754eb731e4a57365122debbdf5dcda9d647219"
+    },
+    {
+      "path": "tests/test_bangumi_sync.py",
+      "sha256": "9a15dea03a2f70a878ec5514333de897b33d963344ce1cc3a536332298cf71b0"
     },
     {
       "path": "tests/test_chinese_search_recovery.py",

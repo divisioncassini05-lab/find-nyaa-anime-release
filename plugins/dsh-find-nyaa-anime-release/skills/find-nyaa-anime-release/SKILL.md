@@ -1,6 +1,6 @@
 ---
 name: find-nyaa-anime-release
-description: Find and verify Nyaa anime releases using full page evidence, and create or run scheduled anime tracking with qBittorrent. Supports latest/next/exact episodes, movies, seasons, subtitles and magnets. Default minimums are 1 GiB per regular episode and 10 GiB per movie.
+description: Find and verify Nyaa anime releases, track with qBittorrent, and optionally sync watched episodes to Bangumi. Read personal Bangumi lists, ratings and comments for library questions or recommendations. Default minimums are 1 GiB per regular episode and 10 GiB per movie.
 ---
 
 # Find Nyaa Anime Release
@@ -14,6 +14,7 @@ Read the matching workflow and load supporting references only when needed.
 
 | Request | Read next |
 | --- | --- |
+| First use, Bangumi list/progress, personal recommendations, or "I finished/watched" | [bangumi-sync.md](references/bangumi-sync.md) |
 | Interactive search/download, next/latest/exact release | [retrieval-workflow.md](references/retrieval-workflow.md) |
 | Create/change an anime schedule | [scheduled-new-anime.md](references/scheduled-new-anime.md) |
 | A scheduled run or retry | [scheduled-run.md](references/scheduled-run.md) |
@@ -41,14 +42,25 @@ Read the matching workflow and load supporting references only when needed.
 
 ## Delivery and state
 
+- On first use in each host, run `python scripts/watch.py bangumi status`. If not
+  connected, show its official token setup link and ask the user to configure a
+  local token file/environment variable, never to paste a token into chat. Do not
+  claim cloud sync without authorization. Read bangumi-sync.md for setup and writes.
+- Bangumi is an optional personal-library mirror, not a search/download authority.
+  Never let its progress, collection status or availability override local targets,
+  quality or delivery decisions. Accepted regular-episode delivery counts as watched;
+  explicit watched/finished requests also write back. Link-only and failed adds do not.
+  Read ratings/comments only for relevant personal-library questions or recommendations;
+  use bounded queries, not a full-library dump on every search.
 - The Agent establishes identity, episode numbering and selection from complete
   listings and details. Use [single-episode review](references/agent-review.md) or
   [season/movie review](references/package-review.md). Every add needs fresh
   validation and its matching process-local capability; raw magnets and serialized
   pass reports cannot authorize delivery.
-- v3 is the sole progress authority. Recover pending work by its original
+- v3 is the local delivery ledger and Bangumi cache/outbox. Recover pending work by its original
   operation/hash before new retrieval. Only matching accepted receipts and committed
-  progress count as delivery. A scheduled run delivers at most one resource.
+  progress count as delivery. Cloud writes retry independently of downloads.
+  A scheduled run delivers at most one resource.
 - Check-only/link-only/no-download skips submission and progress changes. A missing
   scheduled track is not recreated; completed tracks only finish scoped cleanup.
   Confirm completion independently of download progress or expected end dates.

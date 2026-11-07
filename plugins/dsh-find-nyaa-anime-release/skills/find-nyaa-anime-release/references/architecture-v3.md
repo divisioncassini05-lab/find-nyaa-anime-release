@@ -59,6 +59,18 @@ Failure leaves recoverable state. No completed archive or tombstone is written.
 Preview is strictly read-only. Deliver, recover, reconcile and ack-outbox invoke apply
 only for their own track/group, and reports use an in-memory snapshot after removal.
 
+## Optional Bangumi mirror
+
+`bangumi` is a separate per-track binding/snapshot, never an input to target
+planning, validation or lifecycle decisions. A connected account can lazily bind
+an already verified provider ID at delivery commit, with no network precondition.
+`bangumi_watched` is queued in that same atomic write; the worker verifies subject,
+account and episode mapping, writes provider episode IDs and reads them back.
+Failure retains the action without undoing acceptance or resubmitting a torrent.
+Pending writes retain their record until synchronized. Explicit cloud writes do not
+forge delivery receipts. Library queries never import local tracks; bounded
+ratings/comments are loaded only on request. See [bangumi-sync.md](bangumi-sync.md).
+
 ## Migration
 
 Migration is previewable and apply requires the preview SHA-256. It locks, fsyncs a

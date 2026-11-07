@@ -74,6 +74,9 @@ def render_report(repo, result):
     report = asdict(result)
     report.pop('tracking_snapshot', None)
     return {**report, 'progress':show['progress'] if show else None,
+            'progress_source':'local_delivery',
+            'bangumi':{k:show['bangumi'].get(k) for k in ('subject_id','collection_type','watched_episodes','synced_at')} if show and show.get('bangumi') else None,
+            'bangumi_sync_warning':show.get('extra', {}).get('bangumi_sync_warning') if show else None,
             'lifecycle':show['lifecycle'] if show else None,
             'outbox':current['outbox'] if current else [], 'local_record_exists':current is not None}
 

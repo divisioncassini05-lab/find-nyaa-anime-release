@@ -77,7 +77,14 @@ jobs:
         run: python -m pytest tests/test_dsh_adapter.py skills/find-nyaa-anime-release/tests --rootdir . -q -m 'not live' -p no:cacheprovider
       - name: Check native registry and market metadata
         working-directory: plugins/dsh-find-nyaa-anime-release
-        run: node --test tests/plugin.test.mjs
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git diff --exit-code -- lib/
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm test
       - name: Build and verify distributable archives
         working-directory: plugins/dsh-find-nyaa-anime-release
         run: |

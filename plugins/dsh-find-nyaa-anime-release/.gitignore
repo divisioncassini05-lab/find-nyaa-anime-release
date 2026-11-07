@@ -6,3 +6,6 @@ __pycache__/
 .hypothesis/
 *.pyc
 test-results/
+.preview/
+*.bangumi.json
+*.bangumi-list-cache.json

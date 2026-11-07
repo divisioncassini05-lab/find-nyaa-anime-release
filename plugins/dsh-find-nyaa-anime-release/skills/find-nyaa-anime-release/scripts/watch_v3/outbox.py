@@ -5,7 +5,7 @@ from .finalization import related_tracks
 from anime_release.storage import file_lock
 
 
-def drain(repo, *, automation=None, track_id=None):
+def drain(repo, *, automation=None, track_id=None, bangumi=None, kinds=None):
     results = []
     # Separate worker lock; delivery holds only a per-work lock, never the
     # global state lock while doing network IO.
@@ -16,6 +16,7 @@ def drain(repo, *, automation=None, track_id=None):
             selected = set(related_tracks(data, track_id)) if track_id else {s['track_id'] for s in data['shows']}
             pending = [(s['track_id'], a) for s in data['shows'] if s['track_id'] in selected
                        for a in s['outbox'] if a['status'] != 'done'
+                       and (kinds is None or a['kind'] in kinds)
                        and (s['track_id'], a['outbox_id']) not in processed]
             if not pending:
                 break
@@ -25,6 +26,11 @@ def drain(repo, *, automation=None, track_id=None):
                 result = None
                 if item['kind'] == 'reconcile_completion':
                     repo.command(tid, 'reconcile_completion')
+                elif item['kind'] == 'bangumi_watched':
+                    if bangumi is None:
+                        from .bangumi import BangumiSync
+                        bangumi = BangumiSync(repo)
+                    result = bangumi.apply_action(tid, item)
                 elif item['kind'] == 'delete_owning_automation':
                     if automation is None:
                         results.append({'track_id':tid, 'outbox_id':item['outbox_id'], 'status':'cleanup_pending',

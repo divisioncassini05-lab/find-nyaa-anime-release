@@ -26,6 +26,8 @@ def related_tracks(data, track_id):
 
 def completion_blockers(show):
     reasons = []
+    if any(a['kind'] == 'bangumi_watched' and a['status'] != 'done' for a in show.get('outbox', [])):
+        reasons.append('bangumi_sync_pending')
     if show['lifecycle']['phase'] != 'completed':
         reasons.append('scope_not_completed')
     completion = show['broadcast'].get('completion') or {}

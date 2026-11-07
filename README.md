@@ -23,6 +23,9 @@
 | Codex | 下方 Skill 安装命令，原安装链接不变 |
 | DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
+DSH `0.2.1` 包含可选 Bangumi 同步与原生侧栏面板，面板操作生成待发送聊天草稿。
+可通过 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.1) 或项目自定义市场索引更新；验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md#图形面板021)。Codex 安装方式及核心流程不变。
+
 ## 能做什么
 
 - 识别中文名、简称、英文名和罗马字名，区分季度、正篇、特典、剧场版与合集。
@@ -34,6 +37,7 @@
 - 返回最终推荐前验证磁力，不把失败或不合格候选暴露给用户。
 - 为新番维护交付进度，也可按明确要求为尚未开播的新番建定时任务；老番、电影、特典和失败检索不推进追番记录。
 - 可选将最终结果提交到本机 qBittorrent，也可用于定时追番任务；下文以 Codex Automations 为例。
+- 可选连接 Bangumi：查询个人番单、进度、评分和短评，辅助推荐；将已交付的追番单集或明确说看完的内容同步为已看。
 
 ## 安装（以 Codex 为例）
 
@@ -95,6 +99,28 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 “允许向上兼容”表示在当前档位没有合格结果时，可以接受更大的资源；显式上限仍然有效。新番交互与定时任务沿用已保存的默认配置，其中包含向上兼容；其他交互请求需明确允许。整季包另按文件列表核验覆盖和逐集最低线，不能仅凭总大小判断。草稿、审核、交付和恢复保持同一份质量条件，不自动降档。
 
+## Bangumi 番单（可选）
+
+Bangumi 用来方便你管理记录，不介入原本的找番决策。绑定、拉取云端进度或修改收藏状态，都不会自动改变本地下一集、画质要求或下载策略；未绑定、令牌失效或服务暂时不可用，也不妨碍找番。
+
+首次使用会提醒授权：在 [Bangumi 官方令牌页面](https://next.bgm.tv/demo/access-token) 创建 Access Token，保存到仓库和安装目录之外的本机私密文本文件，只把**文件路径**告诉 Agent；也可以在执行宿主中设置 `BANGUMI_ACCESS_TOKEN`。不要把令牌贴进聊天。Codex 和 DSH 分别配置，安装包不包含作者的账号或记录。
+
+连接后可以直接问：
+
+```text
+看看我 Bangumi 在看哪些番，分别看到哪了。
+根据我看过的番、评分和短评，推荐几部没看过的。
+我以前给这部番打了几分，写过什么评价？
+这部番第 6 集看完了，帮我记到 Bangumi。
+这部番我已经全部看完，更新一下 Bangumi。
+```
+
+按需读取在看、看过、想看、搁置或抛弃列表，支持筛选和分页，不在每次找番时加载整个收藏库。推荐可参考你实际填写的评分与收藏短评；没有评分不等于不喜欢，目前不读取长篇日志评论。查列表和做推荐不会改动收藏。
+
+对已核验交付的追番正篇单集，约定 **qBittorrent 接受任务即记为已看**，并不是检测到你实际播放了视频。只查链接、添加失败、特典或整季/电影包不自动推断逐集观看进度。明确说“第 N 集看完”“看到第 N 集”“整部看完”会按不同范围写回，不更改评分、短评、标签或隐私设置。云端失败单独保留待同步任务，不回退交付、不重复下载。
+
+完整命令、编号映射与恢复说明见 [Bangumi 使用说明](skills/find-nyaa-anime-release/references/bangumi-sync.md)。账号绑定本身不会把此前全部下载记录上传。
+
 ## 实际效果
 
 ### 整季与高画质
@@ -128,6 +154,8 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 qBittorrent 提交是可选功能。普通搜索不要求安装 qBittorrent。“已加入客户端”表示客户端接受了该任务；实际传输、下载完成和已观看是不同状态。
 
+上面的 Bangumi 同步是用户启用后的记账约定，不改变这些客户端状态的含义。
+
 Windows 桌面提交会比较已发现安装的文件版本，优先选择可核验的较新版本；显式路径优先。若另一套安装仍在运行，会报告冲突。新启动通过本地 WMI 创建独立进程，以避免客户端随命令执行器退出；更新 Skill 不会改变已运行进程的启动方式。配置和传输问题按[客户端诊断流程](skills/find-nyaa-anime-release/references/client-readiness.md)处理。
 
 ## 工作方式
@@ -155,6 +183,7 @@ Agent 审核候选并按当前交互规则完成选择，脚本验证结论与�
 
 | 场景或模块 | 入口 |
 | --- | --- |
+| Bangumi 番单、评分短评与观看同步 | [bangumi-sync.md](skills/find-nyaa-anime-release/references/bangumi-sync.md)、`watch.py bangumi` |
 | 交互检索、指定集、下一集或最新集 | [retrieval-workflow.md](skills/find-nyaa-anime-release/references/retrieval-workflow.md) |
 | 填写候选审核、验证和交付 | [agent-review.md](skills/find-nyaa-anime-release/references/agent-review.md) |
 | 整季／电影的审核、交付和恢复 | [package-review.md](skills/find-nyaa-anime-release/references/package-review.md)、`scripts/package_release.py` |

@@ -19,6 +19,8 @@ def parser():
     p = argparse.ArgumentParser(prog='watch')
     p.add_argument('--state', type=Path, default=DEFAULT_STATE)
     sub = p.add_subparsers(dest='command', required=True)
+    from .bangumi_cli import add_parser
+    add_parser(sub)
     for name in ('inspect','discover'):
         q = sub.add_parser(name)
         q.add_argument('title')
@@ -124,8 +126,11 @@ def read_json(path):
 
 
 def report(show):
+    remote = show.get('bangumi')
     return {'status':show['lifecycle']['phase'], 'track_id':show['track_id'], 'identity':show['identity'],
             'progress':show['progress'], 'broadcast':show['broadcast'], 'outbox':show['outbox'],
+            'progress_source':'local_delivery',
+            'bangumi':{k:remote.get(k) for k in ('subject_id','collection_type','watched_episodes','episode_count','synced_at')} if remote else None,
             'next_episode':show['progress']['target_episode'],
             'message':'等待完结确认' if show['lifecycle']['phase'] == 'finale_pending_evidence' and show['progress']['target_episode'] is None else None}
 
@@ -163,11 +168,16 @@ def run(argv=None):
         else:
             # New entry accepts only v3. Mutating commands perform the one-time
             # hash-guarded migration; read commands report migration_required.
-            if args.command in {'create','deliver','recover','reconcile','bind-automation'} or (args.command == 'finalize' and args.apply):
+            bangumi_mutation = args.command == 'bangumi' and (args.bangumi_command in {'bind','pull','flush'}
+                                or args.bangumi_command == 'watched' and args.track_id is not None)
+            if args.command in {'create','deliver','recover','reconcile','bind-automation'} or (args.command == 'finalize' and args.apply) or bangumi_mutation:
                 raw = args.state.read_bytes() if args.state.exists() else b'{}'
                 if json.loads(raw.decode('utf-8-sig')).get('version') != 3:
                     repo.migrate(expected_sha256=hashlib.sha256(raw).hexdigest())
-            if args.command == 'workspace':
+            if args.command == 'bangumi':
+                from .bangumi_cli import run as run_bangumi
+                result = run_bangumi(args, repo)
+            elif args.command == 'workspace':
                 from evidence_artifacts import new_workspace, collect_expired
                 collect_expired(args.state)
                 result = {'status':'workspace_created', 'run_dir':str(new_workspace(args.state))}
@@ -276,6 +286,11 @@ def run(argv=None):
         return 6 if result.get('status') in {'available_enqueue_failed','accepted_receipt_commit_failed','recovery_failed','recovery_required','blocked'} else 0
     except Exception as exc:
         failure = {'status':'workflow_error', 'error_type':type(exc).__name__, 'error':str(exc)}
+        from .bangumi_client import BangumiError, setup_hint
+        if isinstance(exc, BangumiError):
+            failure['status'] = 'bangumi_sync_failed'
+            if str(exc) in {'bangumi_not_connected', 'bangumi_token_required', 'bangumi_token_file_unavailable', 'bangumi_http_401', 'bangumi_http_403'}:
+                failure.update(status='bangumi_auth_required', **setup_hint())
         from http_transport import TransportError
         cause, seen = exc, set()
         while cause is not None and id(cause) not in seen:

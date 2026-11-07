@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { sep } from 'node:path';
+import { ENDPOINT, snapshotHandler } from './host/snapshot.js';
 
 export const name = 'find-nyaa-anime-release';
 export const inject = ['skills'];
@@ -17,6 +18,11 @@ const summary = Object.freeze({
 });
 
 export function apply(ctx) {
+  // Optional: the same package remains a headless Skill provider.
+  ctx.inject(['connection'], (scoped) => {
+    scoped.effect(() => scoped.connection.rpc.intercept('/api', (endpoint) => endpoint === ENDPOINT,
+      snapshotHandler()), 'anime-release: read-only snapshot');
+  });
   // The registry owns disposal. No copying into ~/.codex or ~/.dsh/skills.
   ctx.skills.registerProvider(() => ({
     name: summary.provider,

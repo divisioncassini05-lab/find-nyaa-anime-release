@@ -10,6 +10,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = {'__pycache__', '.pytest_cache', '.hypothesis', '.git'}
+PRIVATE_SUFFIXES = ('.bangumi.json', '.bangumi-list-cache.json')
 TOP = {'SKILL.md', 'pytest.ini', 'requirements-parsers.txt', 'requirements-search.txt'}
 DIRECTORIES = {'scripts', 'references', 'data', 'tests'}
 
@@ -31,7 +32,7 @@ def rebuild(source, output_root=None, *, emit=True):
     files = []
     def visit(directory):
         for path in sorted(directory.iterdir(), key=lambda item: item.name):
-            if path.is_symlink() or path.name in EXCLUDED:
+            if path.is_symlink() or path.name in EXCLUDED or path.name.endswith(PRIVATE_SUFFIXES):
                 continue
             relative = path.relative_to(source)
             if len(relative.parts) == 1 and path.name not in TOP | DIRECTORIES:

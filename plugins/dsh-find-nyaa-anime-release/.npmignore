@@ -4,3 +4,5 @@
 **/.pytest_cache/**
 **/.hypothesis/**
 skills/*/tests/**
+**/*.bangumi.json
+**/*.bangumi-list-cache.json

@@ -38,7 +38,7 @@ test('native bundle has complete metadata and no install-time side effects', asy
 
 test('provider discovers without reading full instructions and loads absolute resources', async () => {
   let provider;
-  plugin.apply({ skills: { registerProvider: (make) => { provider = make(); } } });
+  plugin.apply({ inject() {}, skills: { registerProvider: (make) => { provider = make(); } } });
   assert.deepEqual(plugin.inject, ['skills']);
   const [entry] = await provider.list();
   assert.equal(entry.name, 'find-nyaa-anime-release');
