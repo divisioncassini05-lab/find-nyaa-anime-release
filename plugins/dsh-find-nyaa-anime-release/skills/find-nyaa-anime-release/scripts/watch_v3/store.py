@@ -155,6 +155,9 @@ def _queue_bangumi(show, episodes, *, event_id, source, complete=False):
 
 
 def _delivery_mirror(state_path, show):
+    from dsh_panel_policy import owns_track
+    if owns_track(state_path, show['track_id']):
+        return False
     if show.get('bangumi'):
         return True
     from .bangumi_client import BangumiError, load_config, positive_id
@@ -330,7 +333,8 @@ class StateRepository:
         if kind == 'create_track':
             return
         if kind == 'record_pending_operation':
-            require(s['lifecycle']['phase'] not in {'blocked', 'completed'}, 'track_not_deliverable')
+            from dsh_panel_targets import allows_backfill
+            require(s['lifecycle']['phase'] != 'blocked' and (s['lifecycle']['phase'] != 'completed' or (f['operation'].get('review_manifest', {}).get('intent') == 'specific_episode' and allows_backfill(self.path, s['track_id']))), 'track_not_deliverable')
             op = copy.deepcopy(f['operation'])
             require(op.get('track_id') == s['track_id'] and op.get('identity_revision') == s['identity_revision'], 'operation_identity_conflict')
             require(re.fullmatch('[0-9a-f]{40}', op.get('info_hash', '')) is not None, 'invalid_info_hash')

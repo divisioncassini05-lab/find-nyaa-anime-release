@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const options = { absWorkingDir: root, bundle: true, minify: true, target: 'es2022', jsx: 'transform',
-  legalComments: 'linked', loader: { '.css': 'text' }, define: { 'process.env.NODE_ENV': '"production"' } };
+  legalComments: 'linked', loader: { '.css': 'text', '.webp': 'dataurl', '.png': 'dataurl', '.gif': 'dataurl' }, define: { 'process.env.NODE_ENV': '"production"' } };
 // DSH consumes factory registrations and supplies its own shared React instance.
 await build({ ...options, entryPoints: ['client/index.jsx'], outfile: 'lib/client.js', format: 'cjs', external: ['react', 'react-dom'],
   banner: { js: 'window.__ModuleLoader__.load({id:"dsh-find-nyaa-anime-release",factory:(require)=>{var module={exports:{}};var exports=module.exports;' },

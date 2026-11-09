@@ -49,8 +49,8 @@ def load_config(state):
 
 
 def setup_hint():
-    return {'setup_url': TOKEN_URL, 'message': '首次使用请先登录 Bangumi 创建 Access Token，在本机配置环境变量或令牌文件；不要把令牌发到聊天里。未授权时不会同步个人追番状态。',
-            'next_action': 'watch bangumi connect --token-file ABSOLUTE_TOKEN_FILE'}
+    return {'setup_url': TOKEN_URL, 'message': 'Bangumi 为可选配置，不影响搜索。请在官方页面创建 Access Token，然后说“连接 Bangumi”，在本机小窗口填写；不要把令牌发到聊天里。无桌面环境仍可使用令牌文件或环境变量。',
+            'next_action': 'python scripts/setup_gui.py --section bangumi'}
 
 
 def credentials(config):

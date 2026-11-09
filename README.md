@@ -2,6 +2,8 @@
 
 `find-nyaa-anime-release` · Codex Skill / DeepSeek Harness 插件
 
+第一次使用？先看 [使用教程与常用说法](skills/find-nyaa-anime-release/references/getting-started.md)，也可以在 Agent 中直接说“使用教程”。
+
 <p align="center">
   <strong>让本地 Agent 识别动画、筛选画质与字幕、记录新番进度，并返回经过验证的 Nyaa 发布。</strong>
 </p>
@@ -23,10 +25,10 @@
 | Codex | 下方 Skill 安装命令，原安装链接不变 |
 | DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
-DSH `0.2.2` 保留可选 Bangumi 同步与原生侧栏面板，新增 npm 发布渠道。
+DSH `0.2.3` 提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排，采用明暗双主题的水下风格界面。
 推荐在 DSH「添加插件」输入 `dsh-find-nyaa-anime-release`，使用 npm 官方注册表安装，之后可通过原生版本检查更新。
-也提供 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.2)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
-验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md#图形面板021)。Codex 安装链接及核心流程不变。
+也提供 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.3)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
+验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md)。Codex 安装链接及核心流程不变。
 
 ## 能做什么
 
@@ -39,7 +41,19 @@ DSH `0.2.2` 保留可选 Bangumi 同步与原生侧栏面板，新增 npm 发布
 - 返回最终推荐前验证磁力，不把失败或不合格候选暴露给用户。
 - 为新番维护交付进度，也可按明确要求为尚未开播的新番建定时任务；老番、电影、特典和失败检索不推进追番记录。
 - 可选将最终结果提交到本机 qBittorrent，也可用于定时追番任务；下文以 Codex Automations 为例。
-- 可选连接 Bangumi：查询个人番单、进度、评分和短评，辅助推荐；将已交付的追番单集或明确说看完的内容同步为已看。
+- 可选连接 Bangumi：查询个人番单、进度、评分和短评，辅助推荐。Codex 聊天流程沿用已交付单集的记账约定；DSH 页面计划由用户点击按钮同步进度。
+
+### DSH 追番收件箱
+
+设好作品、画质、字幕要求和时间后，平时主要查看新资源、下载状态与待同步进度。
+
+- 三种查找范围：整季合集、最新一集、补齐未记录集数；整季任务找到合格合集后进入已完成，下载状态另行显示。
+- 每周、每天或预约一次；可直接在列表管理自动运行，不必进入聊天修改命令。
+- 找到、提交下载、下载完成与 Bangumi 已看分开记录。新番点同步，整季任务点标记看过；搁置、抛弃会停止后续定时，记录仍保留。
+- Bangumi 番单展示五种收藏状态，支持封面、检索、类型筛选与评分/日期排序；读取番单不会自动下载。
+- 本地筛选、设置与手动同步不调用模型；资源检索仍保留必要的完整证据审核。
+
+![DSH 追番收件箱示例数据预览](plugins/dsh-find-nyaa-anime-release/assets/readme/dsh-panel-preview.png)
 
 ## 安装（以 Codex 为例）
 
@@ -105,7 +119,9 @@ $find-nyaa-anime-release 攻壳机动队，找到后提交 qBittorrent
 
 Bangumi 用来方便你管理记录，不介入原本的找番决策。绑定、拉取云端进度或修改收藏状态，都不会自动改变本地下一集、画质要求或下载策略；未绑定、令牌失效或服务暂时不可用，也不妨碍找番。
 
-首次使用会提醒授权：在 [Bangumi 官方令牌页面](https://next.bgm.tv/demo/access-token) 创建 Access Token，保存到仓库和安装目录之外的本机私密文本文件，只把**文件路径**告诉 Agent；也可以在执行宿主中设置 `BANGUMI_ACCESS_TOKEN`。不要把令牌贴进聊天。Codex 和 DSH 分别配置，安装包不包含作者的账号或记录。
+两端采用不同的宿主交互方式：Codex 保留固定首次引导和按需配置小窗口；DSH 通过“动漫追番”页面的设置入口连接 Bangumi、配置 qBittorrent，不再复用 Codex 的长篇开场白或 Python 弹窗。配置均可跳过，不阻塞只查资源，定时任务不弹窗。在 [Bangumi 官方令牌页面](https://next.bgm.tv/demo/access-token) 创建 Token 后，填写到对应配置窗口，不要贴进聊天。
+
+无图形环境时仍可使用令牌文件/`BANGUMI_ACCESS_TOKEN` 方式。凭据保存在安装目录之外；Codex 和 DSH 分别配置，安装包不包含作者的账号或记录。
 
 连接后可以直接问：
 
@@ -119,7 +135,9 @@ Bangumi 用来方便你管理记录，不介入原本的找番决策。绑定、
 
 按需读取在看、看过、想看、搁置或抛弃列表，支持筛选和分页，不在每次找番时加载整个收藏库。推荐可参考你实际填写的评分与收藏短评；没有评分不等于不喜欢，目前不读取长篇日志评论。查列表和做推荐不会改动收藏。
 
-对已核验交付的追番正篇单集，约定 **qBittorrent 接受任务即记为已看**，并不是检测到你实际播放了视频。只查链接、添加失败、特典或整季/电影包不自动推断逐集观看进度。明确说“第 N 集看完”“看到第 N 集”“整部看完”会按不同范围写回，不更改评分、短评、标签或隐私设置。云端失败单独保留待同步任务，不回退交付、不重复下载。
+**Codex 与非页面管理的聊天流程**：对已核验交付的追番正篇单集，约定 **qBittorrent 接受任务即记为已看**，并不是检测到你实际播放了视频。只查链接、添加失败、特典或整季/电影包不自动推断逐集观看进度。明确说“第 N 集看完”“看到第 N 集”“整部看完”会按不同范围写回，不更改评分、短评、标签或隐私设置。云端失败单独保留待同步任务，不回退交付、不重复下载。
+
+**DSH 页面计划**：执行任务时可将未看过的作品置为在看，但找到资源或下载完成不会自动写观看进度。用户点击同步后才按已核验的最新找到集数写回；确认最终集时同次操作标记看过。操作失败保留待同步状态，完成记录不会自动删除。
 
 完整命令、编号映射与恢复说明见 [Bangumi 使用说明](skills/find-nyaa-anime-release/references/bangumi-sync.md)。账号绑定本身不会把此前全部下载记录上传。
 
@@ -219,7 +237,7 @@ python scripts/watch.py recover --operation "OPERATION_ID"
 
 原始检索先执行 `python scripts/watch.py workspace`，将其返回的绝对 `run_dir` 用作 `discover`、`detail` 和 `review` 的输出目录。完整示例见上面的检索流程；不要直接批量运行文档中的占位符命令。
 
-## 追番规则
+## Codex 聊天型追番规则
 
 - 新番 TV、短篇 TV 或 ONA 可以进入追番状态；明确安排未来追番时可先建档，实际交付仍需发布证据。
 - 交互式场景下，已追踪动画直接说动画名默认找下一集；定时任务或明确说“最新”则找最新已发布的正篇。

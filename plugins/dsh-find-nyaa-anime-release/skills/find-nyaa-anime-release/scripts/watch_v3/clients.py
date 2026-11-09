@@ -153,12 +153,13 @@ class DesktopLauncherClient:
 
 
 class QbittorrentWebApiClient:
-    def __init__(self, base_url='http://127.0.0.1:8080', *, username=None, password=None, timeout=8, opener=None):
+    def __init__(self, base_url='http://127.0.0.1:8080', *, username=None, password=None, timeout=8, opener=None, save_path=None):
         parsed = urlsplit(base_url)
         if parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('invalid_client_url')
         self.base_url = base_url.rstrip('/')
         self.username, self.password, self.timeout = username, password, timeout
+        self.save_path = str(save_path) if save_path else None
         self.opener = opener or build_opener(HTTPCookieProcessor(CookieJar()))
 
     def _request(self, path, data=None, content_type=None, *, delivery=None):
@@ -221,6 +222,7 @@ class QbittorrentWebApiClient:
         return receipt(request, 'submitted_verified' if evidence.verified else 'submitted', evidence)
 
     def _add_payload(self, request):
+        save_path = request.save_path or self.save_path
         if request.torrent_path:
             boundary = 'watch-' + request.operation_id
             data = Path(request.torrent_path).read_bytes()
@@ -228,14 +230,14 @@ class QbittorrentWebApiClient:
             if torrent_info_hash(data) != request.info_hash:
                 raise ClientFailure('torrent_hash_mismatch')
             body = (f'--{boundary}\r\nContent-Disposition: form-data; name="torrents"; filename="release.torrent"\r\nContent-Type: application/x-bittorrent\r\n\r\n'.encode() + data + b'\r\n')
-            if request.save_path:
-                body += f'--{boundary}\r\nContent-Disposition: form-data; name="savepath"\r\n\r\n{request.save_path}\r\n'.encode()
+            if save_path:
+                body += f'--{boundary}\r\nContent-Disposition: form-data; name="savepath"\r\n\r\n{save_path}\r\n'.encode()
             body += f'--{boundary}--\r\n'.encode()
             content_type = 'multipart/form-data; boundary=' + boundary
         else:
             fields = {'urls':request.magnet}
-            if request.save_path:
-                fields['savepath'] = request.save_path
+            if save_path:
+                fields['savepath'] = save_path
             body = urlencode(fields).encode()
             content_type = 'application/x-www-form-urlencoded'
         return body, content_type

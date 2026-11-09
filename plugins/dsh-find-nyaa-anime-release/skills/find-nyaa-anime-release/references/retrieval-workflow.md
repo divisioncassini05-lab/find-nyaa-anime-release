@@ -31,12 +31,18 @@ or legacy migration, read [airing-watch-state.md](airing-watch-state.md).
 
 ```powershell
 python scripts/watch.py workspace
-python scripts/watch.py discover "VERIFIED SEARCH TITLE" --latest --output "RUN_DIR/LISTING.json"
-python scripts/watch.py detail CANDIDATE_ID --output "RUN_DIR/DETAIL.json"
+python scripts/watch.py discover "VERIFIED SEARCH TITLE" --latest --compact --output "RUN_DIR/LISTING.json"
+python scripts/watch.py detail CANDIDATE_ID --compact --output "RUN_DIR/DETAIL.json"
 ```
 
 Use the workspace's absolute `run_dir` for listings, details, reviews and temporary
 inputs. If the CLI redirects an output, read its returned `output_path`.
+
+Prefer `--compact`: it prints every listing row and file with shared fields in
+`common` and varying cells in `columns`/`values`; descriptions stay complete.
+Saved JSON keeps the original schema. If the tool output is complete, do not read
+that same file again. Read only missing chunks when the host truncates output.
+Inspect script source only for an actual failure, not to rediscover normal usage.
 
 Use a verified distinctive title, without invented episode/season suffixes. Read
 all first-page titles, IDs, sizes, publication times and swarm counts in native
@@ -69,13 +75,15 @@ record the decisive comparison and uncertainty in `quality_comparison`.
 For a single regular episode, follow [agent-review.md](agent-review.md):
 
 ```powershell
-python scripts/watch.py review --track-id TRACK_ID --listing "RUN_DIR/LISTING.json" --detail "RUN_DIR/DETAIL.json" --intent latest_regular --episode N --tier browse --want-zh --output "RUN_DIR/REVIEW.json"
-python scripts/watch.py review --manifest "RUN_DIR/REVIEW.json" --tier browse --want-zh
+python scripts/watch.py review --track-id TRACK_ID --listing "RUN_DIR/LISTING.json" --detail "RUN_DIR/DETAIL.json" --intent latest_regular --episode N --tier browse --want-zh --compact --output "RUN_DIR/REVIEW.json"
 python scripts/watch.py deliver "TITLE" --review "RUN_DIR/REVIEW.json" --latest --tier browse --want-zh --include-magnet --legal-ok --enqueue-qbittorrent
 ```
 
-The first command creates an **unreviewed** draft; fill it before audit/delivery.
-Use the actual policy flags in all three commands. Repeat `--listing` for additional
+The first command creates an **unreviewed** draft; read and fill it before delivery.
+For authorized delivery, `deliver` itself performs fresh validation; do not also
+run a standalone audit immediately beforehand. For link-only/choices, use
+`review --manifest "RUN_DIR/REVIEW.json"` with the same policy instead of delivery.
+Use the actual policy flags throughout. Repeat `--listing` for additional
 evidence; use `specific_episode` or `next_tracked` for other intents as documented
 in agent-review.md. Link-only requests return the audit's verified magnet without
 delivery or progress updates.

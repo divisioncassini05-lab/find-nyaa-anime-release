@@ -225,3 +225,30 @@ def test_lock_contention_reports_client_busy(tmp_path):
                 pytest.fail("lock must not be reentrant")
     assert error.value.code == "client_busy"
     assert error.value.retryable is True
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows byte-range locking")
+def test_empty_file_locked_by_another_handle_reports_busy(tmp_path, monkeypatch):
+    import hashlib
+    import msvcrt
+    import os
+
+    monkeypatch.setattr(qbt.tempfile, "gettempdir", lambda: str(tmp_path))
+    profile = tmp_path / "profile"
+    key = os.path.normcase(str(profile.resolve()))
+    directory = tmp_path / "codex-qbittorrent-locks"
+    directory.mkdir()
+    lock_file = directory / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
+    with lock_file.open("a+b", buffering=0) as holder:
+        msvcrt.locking(holder.fileno(), msvcrt.LK_NBLCK, 1)
+        try:
+            with pytest.raises(qbt.SubmissionError) as error:
+                with qbt._submission_lock(profile, wait_seconds=0):
+                    pytest.fail("an empty lock file must still serialize submissions")
+            assert error.value.code == "client_busy"
+            assert error.value.retryable is True
+        finally:
+            holder.seek(0)
+            msvcrt.locking(holder.fileno(), msvcrt.LK_UNLCK, 1)
+    with qbt._submission_lock(profile, wait_seconds=0):
+        assert lock_file.stat().st_size == 0

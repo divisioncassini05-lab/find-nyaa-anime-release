@@ -4,7 +4,7 @@
   "source_files": [
     {
       "path": "SKILL.md",
-      "sha256": "1c212507215e25b01866107dddf337d7d0ce001fe6a6425eff5d4a72a54cd5e4"
+      "sha256": "38f11ee9225c729179469f920cdf0fa75e5802d36b8f3de361aef0bf348281c3"
     },
     {
       "path": "data/AOD-LICENSE.txt",
@@ -20,7 +20,7 @@
     },
     {
       "path": "references/agent-review.md",
-      "sha256": "1679f204095a760b509e803cf46d4c6bc43039c146d4f46dd87c853abfe0c942"
+      "sha256": "ab0d1fd0e79da1320eb8d589ebe4bcfaa90910a0365925ad43121d0ac1c8b71b"
     },
     {
       "path": "references/airing-watch-state.md",
@@ -40,7 +40,7 @@
     },
     {
       "path": "references/bangumi-sync.md",
-      "sha256": "356a7caa43649e705b0a31ea0c8bbcb7295bb49fcd8de6753e3968a82d0b718b"
+      "sha256": "8f52b47247c64afa28fe003d065d94d59e51bc48f12547d914c3e1b3391038df"
     },
     {
       "path": "references/client-readiness.md",
@@ -55,8 +55,12 @@
       "sha256": "7b49c4d3cb53cf935808d51cf791edf0dfd251a1c6767daadffb4c64e96a84b2"
     },
     {
+      "path": "references/getting-started.md",
+      "sha256": "a15fc238e1b3cb4f9ad0c81f4c55bc435215c06139acb62a6d8bc6886c3d9091"
+    },
+    {
       "path": "references/package-review.md",
-      "sha256": "2b889791a2d45153e06931f21935e7dbdcfc0d4215bd28fffd74740161462f2b"
+      "sha256": "f48163e7e09cdb00df0cc8494dd56a811ecb047b788fa1234fa70636bff33e26"
     },
     {
       "path": "references/quality-ranking.md",
@@ -68,7 +72,7 @@
     },
     {
       "path": "references/retrieval-workflow.md",
-      "sha256": "fd59280fd2af77c6c0e3ac1782f33fbd1b408f3138115dcb1fff33456c653159"
+      "sha256": "d78c63da84648dd6c8f4ec25db8cbe536a7f264fff509f35a3833a863facd6db"
     },
     {
       "path": "references/scheduled-new-anime.md",
@@ -188,7 +192,7 @@
     },
     {
       "path": "scripts/anime_release/storage.py",
-      "sha256": "1bcc89db13f4fd53b86dd5f6e91b64d3a4c0c2696396c4c4659389d974b4deb2"
+      "sha256": "45b02784b0fd8f585199657462376792fe493041431fe3ac406755d89d08fbc8"
     },
     {
       "path": "scripts/anime_release/trace.py",
@@ -235,6 +239,10 @@
       "sha256": "de1afd171f49e39511d118360055f445a7b6c7937caf5b379d94fa89d020f22d"
     },
     {
+      "path": "scripts/first_use.py",
+      "sha256": "473e68a8dc28e517c81f3e0044458d15728471b8fcb91093ce1eeb6771f7977c"
+    },
+    {
       "path": "scripts/http_transport.py",
       "sha256": "1ca9e7ac5e99cd2d41027d17eefac9eac8da390aff323664f8b329a84a79ecd9"
     },
@@ -245,6 +253,10 @@
     {
       "path": "scripts/inspect_anime_evidence.py",
       "sha256": "43afa4a578d900050c1df218c6cdbe86010c63be22a12f8b246b5c83fcea3350"
+    },
+    {
+      "path": "scripts/local_setup.py",
+      "sha256": "b1c5fcc64bb856f4b466d753b8c3b9363c62768cef5e0c142d5d80ce7457517b"
     },
     {
       "path": "scripts/migrate_tracking_state.py",
@@ -604,7 +616,7 @@
     },
     {
       "path": "scripts/qbittorrent_submit.py",
-      "sha256": "dd562a86ee4c5fd4a45665596cc2ba78d8fac1cc656e05d52df9e8f694c29d64"
+      "sha256": "6cad407b9d716aa11666fe8a85214f3fecf14555af7b9ed0949d058e37af15d3"
     },
     {
       "path": "scripts/quality_review.py",
@@ -779,6 +791,10 @@
       "sha256": "79134f82df862aa0f4dc80b65a60aa791adc727dd7e80a29f5fcd08d193228e0"
     },
     {
+      "path": "scripts/setup_gui.py",
+      "sha256": "d3a607d8bbc0fa6f5d7c314eae359deda653e515dfd50f7be905f060cb8bbc46"
+    },
+    {
       "path": "scripts/state_io.py",
       "sha256": "62032f31182bc38cf24bcb213ee6c60c9ad92ac14e2c01a6addf0a6a168fef6c"
     },
@@ -808,7 +824,7 @@
     },
     {
       "path": "scripts/watch_v3/bangumi.py",
-      "sha256": "99df2c91c5264dad5eab57634d4c8e0e3bd0bbf2ce74c16490345373872a3b94"
+      "sha256": "38e3ca4bc991cabed13a5bf3927af055845c33f37d23c1159c823285697cb3a8"
     },
     {
       "path": "scripts/watch_v3/bangumi_cli.py",
@@ -816,15 +832,15 @@
     },
     {
       "path": "scripts/watch_v3/bangumi_client.py",
-      "sha256": "7aae772beb6264746729986cb9a270d0cd74e88f73a3eb181b2693367d844dda"
+      "sha256": "55ebad949fea8604268c84a74de685b65e86bb42878e1d3fce1fc80f147f4ac4"
     },
     {
       "path": "scripts/watch_v3/cli.py",
-      "sha256": "b733fc2e9db53a13581203f3eb312fa109fefe60f79bca2fc775be5586ad6bcc"
+      "sha256": "e2c925a01292dcd0d4e8766e30692f7f4f7864001bc2b69cba42d85261eb4b8b"
     },
     {
       "path": "scripts/watch_v3/clients.py",
-      "sha256": "2528ed992f98d0afa913f093918a12d4c171f5ec54e80dbb6a87dc0152f4738e"
+      "sha256": "1180973f50266fe1e433a862efcab7a94d0913ce82c3b62b04a86a411d7e7046"
     },
     {
       "path": "scripts/watch_v3/compat.py",
@@ -841,6 +857,10 @@
     {
       "path": "scripts/watch_v3/outbox.py",
       "sha256": "91c68184908c2c980e47cd00b5631b829aba965d9780451ea55d6ab345db11f9"
+    },
+    {
+      "path": "scripts/watch_v3/output.py",
+      "sha256": "616dc25581744be1949ae7cceee27ce1bd1b507497b73a79431901cb61473442"
     },
     {
       "path": "scripts/watch_v3/store.py",
@@ -916,7 +936,7 @@
     },
     {
       "path": "tests/test_architecture_v2.py",
-      "sha256": "d24f61569f2b8624e8c32798d4754eb731e4a57365122debbdf5dcda9d647219"
+      "sha256": "03b3858f82eb5b0993cc78ac4938a9fd68167dd709470bd0f1224eb58192f477"
     },
     {
       "path": "tests/test_bangumi_sync.py",
@@ -933,6 +953,10 @@
     {
       "path": "tests/test_client_context_recovery.py",
       "sha256": "751ff51c77856465114fc83fce58eff07797b05fe6251ac60d373e72cc3c5857"
+    },
+    {
+      "path": "tests/test_compact_evidence.py",
+      "sha256": "5688300b0c42be25f3762ebcffa2e5946ecc39be961252adf4ab5995ae12bb8a"
     },
     {
       "path": "tests/test_completed_record_cleanup.py",
@@ -967,6 +991,10 @@
       "sha256": "9f8fc1a57619b6f6c372b431d693a74c9065e9ce472de7092579343dd9e6ff65"
     },
     {
+      "path": "tests/test_local_setup.py",
+      "sha256": "9e2b1039afae5fed7853c2a866001e84b8dc87e9ead9048c5a97cca86410fc64"
+    },
+    {
       "path": "tests/test_network_doctor.py",
       "sha256": "5a9de23b4c5a686c777cce45fd5ac825ca4f806f2b42eaccd3e072e4699ce8b7"
     },
@@ -984,7 +1012,7 @@
     },
     {
       "path": "tests/test_qbittorrent_acceptance.py",
-      "sha256": "63b56566b98974257727251faa3d02fa1ed7995c96571378604576729929142f"
+      "sha256": "b77d50988cde5b3c3cdfe7d9d48e8d30fe6c9b4492f531ad955905e0f873a222"
     },
     {
       "path": "tests/test_qbittorrent_submit.py",
@@ -1040,7 +1068,7 @@
     },
     {
       "path": "tests/test_windows_client_runtime.py",
-      "sha256": "0a4e3bebc9cd964093304a719532bb52703d5afc3b97393b670780ac7d650fab"
+      "sha256": "366aab222101b55fe523e9a3db45d5ead6ecd74c8c7d95280fa76e9e8c505857"
     }
   ],
   "adapted_files": [
@@ -1050,7 +1078,11 @@
     "scripts/watch_v3/automation.py",
     "scripts/watch_v3/outbox.py",
     "scripts/watch_v3/finalization.py",
+    "scripts/watch_v3/store.py",
+    "scripts/watch_v3/workflow.py",
     "scripts/watch_v3/cli.py",
+    "scripts/watch_v3/evidence.py",
+    "scripts/package_release.py",
     "scripts/scheduled_watch.py",
     "references/scheduled-new-anime.md",
     "references/scheduled-run.md",
@@ -1059,10 +1091,18 @@
   ],
   "added_files": [
     "references/dsh-host-runtime.md",
+    "references/panel-management.md",
     "references/scheduled-new-anime.md",
     "scripts/dsh_doctor.py",
     "scripts/dsh_host.py",
+    "scripts/dsh_panel_download.py",
+    "scripts/dsh_panel_policy.py",
+    "scripts/dsh_panel_run.py",
+    "scripts/dsh_panel_targets.py",
     "scripts/dsh_paths.py",
-    "scripts/runtime_paths.py"
+    "scripts/runtime_paths.py",
+    "tests/test_panel_execution.py",
+    "tests/test_panel_inbox.py",
+    "tests/test_panel_targets.py"
   ]
 }

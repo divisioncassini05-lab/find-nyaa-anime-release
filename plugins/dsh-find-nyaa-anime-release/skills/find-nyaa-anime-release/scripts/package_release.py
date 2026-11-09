@@ -140,6 +140,8 @@ def audit(path, policy, *, client=None):
                   quality_policy=policy, quality_comparison=comparison,
                   coverage=dict(complete=True, quality_fit=True, episodes=count, sizes_gib=sizes,
                                 source_exception=exemption if exempt else None), state_update='none')
+    from dsh_panel_run import record_found
+    record_found(report, review=review, review_path=path)
     return permit, report, review
 
 

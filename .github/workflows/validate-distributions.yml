@@ -67,14 +67,14 @@ jobs:
         run: |
           python -m pip install pytest hypothesis tzdata
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm install --prefix '${{ runner.temp }}/dsh-test-deps' --ignore-scripts --no-audit --no-fund @deepseek-ai/cordis@4.1.0 @deepseek-ai/dsh-skill@0.2.2-rc.1 @deepseek-ai/dsh-plugin-market-index@0.2.2-rc.1 yaml@2.8.1 semver@7.7.3
+          npm install --prefix '${{ runner.temp }}/dsh-test-deps' --ignore-scripts --no-audit --no-fund @deepseek-ai/cordis@4.1.0 @deepseek-ai/dsh-skill@0.2.2-rc.1 @deepseek-ai/dsh-client-connection@0.2.2-rc.1 @deepseek-ai/dsh-plugin-market-index@0.2.2-rc.1 yaml@2.8.1 semver@7.7.3
       - name: Check synchronized generated payload
         run: python -m pytest tests/test_distribution_sync.py -q -p no:cacheprovider
       - name: Test Codex distribution
         run: python -m pytest skills/find-nyaa-anime-release/tests --rootdir . -q -m 'not live' -p no:cacheprovider
       - name: Test DSH distribution
         working-directory: plugins/dsh-find-nyaa-anime-release
-        run: python -m pytest tests/test_dsh_adapter.py skills/find-nyaa-anime-release/tests --rootdir . -q -m 'not live' -p no:cacheprovider
+        run: python -m pytest tests/test_dsh_adapter.py tests/test_panel_policy.py skills/find-nyaa-anime-release/tests --rootdir . -q -m 'not live' -p no:cacheprovider
       - name: Check native registry and market metadata
         working-directory: plugins/dsh-find-nyaa-anime-release
         run: |

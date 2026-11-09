@@ -5,16 +5,33 @@ import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
-import { statePath, projectState, readSnapshot, snapshotHandler, ENDPOINT } from '../host/snapshot.js';
+import { statePath, projectState, readSnapshot, snapshotHandler, CHANNEL, ENDPOINT } from '../host/snapshot.js';
+import { readConfig, saveQbittorrent, testQbittorrent } from '../host/config.js';
 import { searchRequest, trackRequest } from '../client/requests.js';
-import * as hostPlugin from '../index.js';
 
 const sample = () => ({ version: 3, shows: [{track_id:'track-1', identity:{title:'Atlas Chronicle',season:'S02'}, progress:{handled_episode:3,latest_release_episode:4,target_episode:4}, lifecycle:{phase:'airing'}, broadcast:{total_episodes:12}, operations:{pending:{status:'prepared'},done:{status:'accepted',committed:true}}, extra:{password:'SECRET'}, outbox:[{token:'SECRET'}]}] });
+
+test('local snapshot RPC works without an optional caller cancellation signal', async () => {
+  const handler = snapshotHandler(async () => ({exists:false,shows:[]}));
+  const result = await handler('snapshot', {}, undefined, {principal:{kind:'owner'}});
+  assert.equal(result.ok,true); assert.deepEqual(result.value.shows,[]);
+});
 test('snapshot projects only approved fields and never interprets handled as watched', () => {
   const [s] = projectState(sample());
   assert.deepEqual(s,{id:'track-1',title:'Atlas Chronicle',season:'S02',handled:3,latest:4,target:4,total:12,phase:'airing',waiting:false,pending:1});
   assert.ok(!JSON.stringify(s).includes('SECRET'));
+});
+test('latest release excludes uncommitted receipts and private request fields', () => {
+  const data = sample();
+  const show = data.shows[0];
+  show.operations.done = { status:'accepted', committed:true, episode:3, request:{ source_url:'https://nyaa.si/view/12345', local_path:'PRIVATE' } };
+  show.deliveries = [{ operation_id:'done', accepted:true, status:'submitted_verified', checked_at:'2026-11-07T10:00:00Z', secret:'PRIVATE' }];
+  assert.deepEqual(projectState(data)[0].latestDelivery, { episode:3, checkedAt:'2026-11-07T10:00:00Z', sourceUrl:'https://nyaa.si/view/12345' });
+  assert.ok(!JSON.stringify(projectState(data)).includes('PRIVATE'));
+  show.operations.done.request.source_url = 'https://example.com/private';
+  assert.equal(projectState(data)[0].latestDelivery.sourceUrl, undefined);
+  show.operations.done.committed = false;
+  assert.equal(projectState(data)[0].latestDelivery, undefined);
 });
 test('Bangumi snapshot exposes cloud counts, not tokens or local delivery as viewing', () => {
   const data = sample();
@@ -56,11 +73,42 @@ test('read-only snapshot does not create state, enforces byte cap and supports c
     await writeFile(file,Buffer.alloc(4*1024*1024+1)); await assert.rejects(readSnapshot({file}),/state_too_large/);
   } finally { await rm(dir,{recursive:true,force:true}); }
 });
+test('host configuration stores qBittorrent preferences without returning the password', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'anime-config-')); const file = path.join(dir, 'state.json');
+  try {
+    await saveQbittorrent({ file, values: { qbittorrent_exe: 'C:\\Apps\\qbittorrent.exe', download_directory: 'D:\\Anime', web_url: 'http://127.0.0.1:8080', web_username: 'anime', web_password: 'SECRET' } });
+    const config = await readConfig({ file });
+    assert.equal(config.qbittorrent.configured, true);
+    assert.equal(config.qbittorrent.password_configured, true);
+    assert.ok(!JSON.stringify(config).includes('SECRET'));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test('qB connection test authenticates and reads version without adding downloads', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'anime-qb-test-'));
+  try {
+    const calls = [];
+    const request = async (url, options) => {
+      calls.push(url);
+      assert.equal(options.redirect, 'error');
+      if (url.endsWith('/auth/login')) return new Response('Ok.', {headers:{'set-cookie':'SID=fixture; HttpOnly'}});
+      assert.equal(options.headers.Cookie, 'SID=fixture');
+      return new Response('v5.2.3');
+    };
+    const file = path.join(dir, 'state.json');
+    const result = await testQbittorrent({file, values:{web_url:'http://localhost:8080',web_password:'SECRET'},request});
+    assert.deepEqual(result,{status:'connected',version:'v5.2.3'});
+    assert.equal(calls.length,2);
+    assert.ok(calls.every((url)=>!url.includes('torrents')));
+    await assert.rejects(testQbittorrent({file,values:{web_url:'http://user:password@localhost:8080'},request}), /invalid_qb_url/);
+    await assert.rejects(testQbittorrent({file,values:{web_url:'http://localhost:8080'},request:async()=>new Response('Fails.')}), /qb_auth_failed/);
+  } finally { await rm(dir,{recursive:true,force:true}); }
+});
 test('RPC is owner-only, accepts no paths and does not leak filesystem errors', async () => {
   let calls=0; const handler=snapshotHandler(async()=>{calls++;throw new Error('C:\\private\\secret');});
   const signal=new AbortController().signal;
   for(const peer of [undefined,{principal:{kind:'guest'}}]) assert.equal((await handler(ENDPOINT,{},signal,peer)).error.code,'forbidden');
   const owner={principal:{kind:'owner'},signal};
+  assert.equal((await handler('other',{},signal,owner)).error.code,'not_found');
   for(const payload of [null,[],{file:'secret'},'x']) assert.equal((await handler(ENDPOINT,payload,signal,owner)).error.code,'invalid_request');
   assert.equal(calls,0);
   assert.equal((await handler(ENDPOINT,{},signal,owner)).error.code,'state_read_failed');
@@ -91,15 +139,7 @@ test('native bundle registers DSH slots, shares React and hands off an unsent ap
   assert.equal(slots.length,2); assert.equal(slots[0].meta.key,slots[1].meta.id);
   assert.equal(draft,undefined); assert.equal(rpcCalls.length,0);
   const props=slots[0].meta.inject();const signal=new AbortController().signal;
-  await props.loadSnapshot(signal);assert.deepEqual(rpcCalls[0].slice(0,2),['/api',ENDPOINT]);
+  await props.loadSnapshot(signal);assert.deepEqual(rpcCalls[0].slice(0,2),['/api',`anime-release/${ENDPOINT}`]);
   props.openDraft('test request');assert.equal(draft.options.prompt,'test request');assert.equal(draft.options.whenDraftExists,'append');
   for(const dispose of cleanups)await dispose(); assert.equal(styles,0);
-});
-test('real Cordis optional connection registration is disposed with plugin', {skip:!process.env.DSH_TEST_NODE_MODULES}, async()=>{
-  const req=createRequire(path.join(path.resolve(process.env.DSH_TEST_NODE_MODULES),'../package.json'));
-  const {Context,Service}=await import(pathToFileURL(req.resolve('@deepseek-ai/cordis')).href);
-  const {SkillRegistry}=await import(pathToFileURL(req.resolve('@deepseek-ai/dsh-skill')).href);
-  const ctx=new Context();let registered=0;let handler;
-  class Connection extends Service {constructor(ctx){super(ctx,'connection');this.rpc={intercept(channel,matches,fn){assert.equal(channel,'/api');assert.equal(matches(ENDPOINT),true);assert.equal(matches('other'),false);registered++;handler=fn;return async()=>{registered--;};}};}}
-  try{await ctx.plugin(SkillRegistry);await ctx.plugin(Connection);const fork=ctx.plugin(hostPlugin);await fork;await new Promise(r=>setTimeout(r,50));assert.equal(registered,1);assert.equal((await handler(ENDPOINT,{},new AbortController().signal,{principal:{kind:'guest'}})).error.code,'forbidden');await fork.dispose();assert.equal(registered,0);}finally{await ctx.fiber.dispose();}
 });

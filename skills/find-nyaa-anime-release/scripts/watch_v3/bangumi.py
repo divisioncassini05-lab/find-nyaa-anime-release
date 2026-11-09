@@ -229,7 +229,18 @@ class BangumiSync:
         sid = positive_id(subject_id)
         # No synthetic local tracking entry for an old series or movie.
         binding = {'account_id': self.config['account_id'], 'subject_id': sid, 'episode_offset': episode_offset}
-        before = self.snapshot(binding)
+        try:
+            before = self.snapshot(binding)
+        except BangumiError as exc:
+            if str(exc) != 'bangumi_http_404':
+                raise
+            subject = self.client.subject(sid)
+            if subject.get('type') != 2:
+                raise BangumiError('bangumi_not_anime')
+            # An explicit watched instruction may create the remote collection;
+            # it still never creates a local DSH tracking record.
+            self.client.set_collection(sid, 2 if complete else 3)
+            before = self.snapshot(binding, subject=subject)
         numbers = watched_scope(before, episode=episode, through=through, complete=complete)
         after = self._write_watched(before, numbers, complete=complete)
         return {'status': 'bangumi_watched', 'subject_id': sid, 'collection_type': after['collection_type'],

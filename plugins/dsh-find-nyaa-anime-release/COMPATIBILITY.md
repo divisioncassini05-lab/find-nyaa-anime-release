@@ -30,16 +30,16 @@ service, terminal, browser, scheduler or model is force-installed by the bundle.
 | Discovery | Native skill provider with lazy body loading and directory resourceBase |
 | Commands | Packaged Python scripts, executed through the host's terminal approvals |
 | State | Per-user DSH data directory; never auto-adopt Codex or publisher records |
-| Bangumi | Optional shared Python client; separate host credentials, bounded personal-library reads and post-delivery writes; no cloud veto of local decisions |
+| Bangumi | Separate host credentials; shared Python client for chat, native account/library services for the panel; panel progress writes require a user action |
 | Client | Original audited delivery capability; portable paths, explicit Web API for remote use |
 | Schedules | Native schedule tools; no Codex automation_update/heartbeat/thread IDs |
 | Ownership | Complete live tool JSON converted into read-only v3 inventory/binding evidence |
-| Cleanup | Missing/stale/partial inventory blocks deletion; exact-ID delete plus readback required |
+| Cleanup | Chat cleanup requires exact ownership/readback; panel-managed plans retain completed history until explicitly deleted |
 | Retry | Native full DTSTART + RRULE and expectedUpdatedAt, with existing bounded weekly planner |
 | Updates | Payload immutable; user state and pending operations stay outside node_modules |
 | UI | Native `main` and `sidebar.panellist` slots; shared React; scoped styles removed on disposal |
-| UI data | Owner-only read-only RPC over DSH Connection; no arbitrary paths or command execution |
-| UI actions | `uiWorkspace.startSession` with an unsent appended draft; no direct model/download call |
+| UI data | Owner-only, allowlisted RPC over DSH Connection; separate local plans and cached account library; no arbitrary command execution |
+| UI actions | Native plan, configuration, schedule and explicit sync operations; resource runs use the host scheduler and the existing Agent audit/delivery path, not chat drafts |
 
 The bridge is not a scheduler. Its input is actual unfiltered native tool output,
 not a model's summary. It stores unrelated tasks only as a short-lived safety
@@ -62,12 +62,13 @@ host; macOS/Linux data paths are unit-tested, not real-desktop launch tested. Py
 3.11 is the supported minimum; this build is tested with the available local Python.
 
 The panel currently uses Chinese copy, with a Chinese/English sidebar label. Its
-read-only projection supports v3 records only and never migrates them. UI state
-refresh is manual; returning from a completed Agent request may require Refresh.
+projection supports v3 records without silently migrating them. Panel plan data is
+stored separately outside the package. Completed plans remain local; reading a
+Bangumi collection does not import tasks. Refresh reads the current host state.
 Preview fixtures are excluded from the native client bundle and runtime tarball.
 
 Bangumi automated tests use fake accounts, episode IDs and network failures. Live
 authorization and read-only completed-list access were also checked in the installed
-Codex distribution; real cloud writes and DSH-side live authorization remain untested.
+Codex distribution; release regression does not mutate real accounts or downloads.
 Only collection short comments are read, not long-form blogs; account state is an
 auxiliary mirror, not a target-planner input.

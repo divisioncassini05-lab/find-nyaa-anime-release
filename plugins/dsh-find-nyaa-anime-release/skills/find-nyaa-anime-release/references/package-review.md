@@ -58,11 +58,12 @@ Use identical policy arguments for drafting, auditing and delivery. Movies defau
 to a 10 GiB minimum; `--min-total-gib` / `--max-total-gib` express explicit bounds.
 
 ```powershell
-python scripts/package_release.py audit --review RUN_DIR/package-review.json --tier premium --want-zh
 python scripts/package_release.py deliver --review RUN_DIR/package-review.json --tier premium --want-zh --legal-ok --enqueue-qbittorrent
 ```
 
-Delivery revalidates current details, hash, original policy, per-episode files and
+For link-only requests or catalogue choices, use `audit --review ...` with the
+same policy instead. Do not routinely audit and immediately deliver: delivery
+already validates current details, hash, original policy, per-episode files and
 comparison citations. It then issues an in-process capability and calls the
 configured desktop or Web API adapter. Do not pass a magnet to qbittorrent_submit.py
 or import its submit function as a workaround; these paths reject missing validation.

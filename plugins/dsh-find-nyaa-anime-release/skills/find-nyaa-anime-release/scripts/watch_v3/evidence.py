@@ -82,4 +82,6 @@ class ReviewValidator:
             require_audio=policy.require_audio, require_source=policy.require_source, prefer_group=policy.prefer_groups)
         validated, report = audit(args, client=self.client, track=validation_snapshot(show))
         release = validated[0] if validated and validated[0] != 'reconcile_completion' else None
+        from dsh_panel_run import record_found
+        record_found(report, show=show, review=manifest.content, review_path=manifest.path)
         return SelectionResult(release, report)

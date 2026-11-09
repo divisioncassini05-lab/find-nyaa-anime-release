@@ -129,6 +129,9 @@ class Workflow:
             reconcile_completion(self.repo, tid)
             show = load_metadata_snapshot(self.repo, tid)
             plan = plan_target(show)
+            from dsh_panel_targets import allows_backfill
+            if plan.phase != 'blocked' and manifest.content.get('intent') == 'specific_episode' and allows_backfill(self.repo.path, tid):
+                plan = TargetPlan(manifest.content["target_episode"], plan.phase, True)
             if not plan.deliverable:
                 return WorkflowResult(plan.phase, tid)
             pending = [op for op in show['operations'].values() if not op.get('committed') and op.get('status') in {'prepared','recovering','accepted'}]

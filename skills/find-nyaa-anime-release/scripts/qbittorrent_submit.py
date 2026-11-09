@@ -110,11 +110,9 @@ def _submission_lock(profile: Path, wait_seconds: float = DEFAULT_LOCK_WAIT_SECO
         directory.mkdir(parents=True, exist_ok=True)
         lock_file = directory / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
         # Do not unlink lock files: waiters must always lock the same inode.
-        with lock_file.open("a+b") as stream:
-            stream.seek(0, os.SEEK_END)
-            if stream.tell() == 0:
-                stream.write(b"\0")
-                stream.flush()
+        # Windows supports locking beyond EOF. Initializing a byte before locking
+        # races with another process that already owns that byte.
+        with lock_file.open("a+b", buffering=0) as stream:
             while True:
                 stream.seek(0)
                 try:

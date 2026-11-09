@@ -117,6 +117,9 @@ def _preview(data, track_id, inventory):
 def finalize(repo, track_id, *, apply=False, expected_revision=None):
     data = repo.read()
     preview = _preview(data, track_id, repo.automation_inventory(data))
+    from dsh_panel_policy import retain_tracks
+    if apply and retain_tracks(repo.path, preview.get('target_track_ids', [track_id])):
+        return {**preview, 'status': 'panel_record_retained', 'deleted_track_ids': []}
     if not apply or preview['status'] == 'track_absent':
         return preview
     if not preview['eligible']:

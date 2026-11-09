@@ -27,11 +27,19 @@ def drain(repo, *, automation=None, track_id=None, bangumi=None, kinds=None):
                 if item['kind'] == 'reconcile_completion':
                     repo.command(tid, 'reconcile_completion')
                 elif item['kind'] == 'bangumi_watched':
+                    from dsh_panel_policy import owns_track
+                    if item.get('payload', {}).get('source') == 'delivery' and owns_track(repo.path, tid):
+                        results.append({'track_id': tid, 'outbox_id': item['outbox_id'], 'status': 'manual_sync_required'})
+                        continue
                     if bangumi is None:
                         from .bangumi import BangumiSync
                         bangumi = BangumiSync(repo)
                     result = bangumi.apply_action(tid, item)
                 elif item['kind'] == 'delete_owning_automation':
+                    from dsh_panel_policy import retain_tracks
+                    if retain_tracks(repo.path, item.get('payload', {}).get('target_track_ids', [tid])):
+                        results.append({'track_id': tid, 'outbox_id': item['outbox_id'], 'status': 'panel_record_retained'})
+                        continue
                     if automation is None:
                         results.append({'track_id':tid, 'outbox_id':item['outbox_id'], 'status':'cleanup_pending',
                                         'required_tool':'schedule_edit', 'payload':item['payload']})

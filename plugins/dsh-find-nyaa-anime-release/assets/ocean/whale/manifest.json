@@ -1,0 +1,22 @@
+{
+  "canvas": [
+    512,
+    512
+  ],
+  "module_order": [
+    "idle",
+    "receive",
+    "reading",
+    "return"
+  ],
+  "same_idle_on_wrap": true,
+  "frame_count_per_clip": 16,
+  "sha256": {
+    "idle.gif": "64de05299cf30426b1c8c09510b83d7107946c5b5bfb97e5e948e1567f63f4d3",
+    "receive.gif": "14139fb2634fb3ef3fbf1b4a7c8648d4537f456666e71b2867c6e74051d5d9ac",
+    "reading.gif": "2a9f46dd2930b2b0493ce49801d37394c6501e8fd873b3adf73f487232074cad",
+    "return.gif": "9d3301553f8d8800a5f237dd856a13e99d4a514b95b655dae472689666569ab8",
+    "idle-poster.png": "165b02552aecceed89fdec60a87cec4a20bf5c05140c14d48e90e0cceba88036"
+  },
+  "cleanup": "Tiny residual right-cuff glint only; no geometry, timing or other action changes"
+}

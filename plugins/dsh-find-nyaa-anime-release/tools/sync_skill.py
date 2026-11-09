@@ -65,10 +65,59 @@ def rebuild(source, output_root=None, *, emit=True):
         "    if directory is None:\n        from dsh_host import inventory_for_state\n        return inventory_for_state(data)\n    base = Path(directory)"))
     for relative in ('scripts/watch_v3/outbox.py', 'scripts/watch_v3/finalization.py'):
         edit(relative, lambda text: text.replace("'automation_update'", "'schedule_edit'"))
+    edit('scripts/watch_v3/store.py', lambda text: replace_once(text,
+        'def _delivery_mirror(state_path, show):\n',
+        'def _delivery_mirror(state_path, show):\n'
+        '    from dsh_panel_policy import owns_track\n'
+        "    if owns_track(state_path, show['track_id']):\n        return False\n"))
+    edit('scripts/watch_v3/outbox.py', lambda text: replace_once(text,
+        "                elif item['kind'] == 'bangumi_watched':\n",
+        "                elif item['kind'] == 'bangumi_watched':\n"
+        '                    from dsh_panel_policy import owns_track\n'
+        "                    if item.get('payload', {}).get('source') == 'delivery' and owns_track(repo.path, tid):\n"
+        "                        results.append({'track_id': tid, 'outbox_id': item['outbox_id'], 'status': 'manual_sync_required'})\n"
+        '                        continue\n'))
+    edit('scripts/watch_v3/finalization.py', lambda text: replace_once(text,
+        "    preview = _preview(data, track_id, repo.automation_inventory(data))\n",
+        "    preview = _preview(data, track_id, repo.automation_inventory(data))\n"
+        '    from dsh_panel_policy import retain_tracks\n'
+        "    if apply and retain_tracks(repo.path, preview.get('target_track_ids', [track_id])):\n"
+        "        return {**preview, 'status': 'panel_record_retained', 'deleted_track_ids': []}\n"))
+    edit('scripts/watch_v3/outbox.py', lambda text: replace_once(text,
+        "                elif item['kind'] == 'delete_owning_automation':\n",
+        "                elif item['kind'] == 'delete_owning_automation':\n"
+        '                    from dsh_panel_policy import retain_tracks\n'
+        "                    if retain_tracks(repo.path, item.get('payload', {}).get('target_track_ids', [tid])):\n"
+        "                        results.append({'track_id': tid, 'outbox_id': item['outbox_id'], 'status': 'panel_record_retained'})\n"
+        '                        continue\n'))
     edit('scripts/scheduled_watch.py', lambda text: text.replace('Agent calls automation_update', 'Agent calls schedule_edit'))
     edit('scripts/watch_v3/cli.py', lambda text: replace_once(text,
         "q.add_argument('--qbittorrent-save-path', type=Path)",
         "q.add_argument('--qbittorrent-save-path', help='Client-side path; kept verbatim for remote Web API')"))
+    edit('scripts/watch_v3/evidence.py', lambda text: replace_once(text,
+        '        return SelectionResult(release, report)\n',
+        '        from dsh_panel_run import record_found\n'
+        '        record_found(report, show=show, review=manifest.content, review_path=manifest.path)\n'
+        '        return SelectionResult(release, report)\n'))
+    edit('scripts/watch_v3/workflow.py', lambda text: replace_once(text,
+        '            if not plan.deliverable:\n',
+        '            from dsh_panel_targets import allows_backfill\n'
+        "            if plan.phase != 'blocked' and manifest.content.get('intent') == 'specific_episode' and allows_backfill(self.repo.path, tid):\n"
+        '                plan = TargetPlan(manifest.content["target_episode"], plan.phase, True)\n'
+        '            if not plan.deliverable:\n'))
+    edit('scripts/watch_v3/store.py', lambda text: replace_once(text,
+        "            require(s['lifecycle']['phase'] not in {'blocked', 'completed'}, 'track_not_deliverable')\n",
+        '            from dsh_panel_targets import allows_backfill\n'
+        "            require(s['lifecycle']['phase'] != 'blocked' and (s['lifecycle']['phase'] != 'completed' or (f['operation'].get('review_manifest', {}).get('intent') == 'specific_episode' and allows_backfill(self.path, s['track_id']))), 'track_not_deliverable')\n"))
+    edit('scripts/watch_v3/cli.py', lambda text: replace_once(text,
+        "                if show and (show['lifecycle']['phase'] in {'completed','blocked'} or show['progress']['target_episode'] is None):\n",
+        '                from dsh_panel_targets import allows_backfill\n'
+        "                if show and (show['lifecycle']['phase'] == 'blocked' or ((show['lifecycle']['phase'] == 'completed' or show['progress']['target_episode'] is None) and not allows_backfill(repo.path, show['track_id']))):\n"))
+    edit('scripts/package_release.py', lambda text: replace_once(text,
+        '    return permit, report, review\n',
+        '    from dsh_panel_run import record_found\n'
+        '    record_found(report, review=review, review_path=path)\n'
+        '    return permit, report, review\n'))
 
     for path in (target / 'references').glob('*.md'):
         text = path.read_text(encoding='utf-8-sig')
@@ -96,16 +145,37 @@ def rebuild(source, output_root=None, *, emit=True):
         'Run commands from this skill directory. Read the matching workflow and load its\nsupporting references only when needed.',
         'Run commands from the absolute resource directory supplied by DSH, not the chat workspace.\n'
         'Use DSH file/terminal tools and an installed Python 3.11+ (python, python3, or py -3).\n'
-        'On first use run `python scripts/dsh_doctor.py`; it is read-only. No install-time commands run.\n'
+        'For environment diagnostics use `python scripts/dsh_doctor.py` (read-only). No install-time commands run.\n'
         'Never use Codex tools, local Codex records or an assumed model/browser API. For scheduling\n'
         'and completion, read [DSH host integration](references/dsh-host-runtime.md) first.\n'
         'Read the matching workflow and load supporting references only when needed.'))
+    edit('SKILL.md', lambda text: replace_once(text,
+        'On the first interactive invocation in a conversation, run `python scripts/first_use.py`.\n'
+        'If `reply_text` is nonempty, relay that fixed guidance verbatim once, then continue\n'
+        "the user's search. Do not repeat it for every title or block searches on optional\n"
+        'setup. A scheduled/background run never displays onboarding or opens windows.\n'
+        'When the user asks to connect Bangumi/enter a token, run\n'
+        '`python scripts/setup_gui.py --section bangumi`. For needed local download settings,\n'
+        'use `--section qbittorrent` after the existing client-readiness check.\n'
+        'Let the user fill the small window; read `--status` after they finish, never read\n'
+        "credentials. Use the host's approved visible desktop context, not an isolated\n"
+        'sandbox desktop. On `gui_unavailable`, explain the desktop/Tk requirement and offer\n'
+        'manual file/env setup. Existing config is not proof of live connection success.',
+        'In DSH, use the native Anime tracking panel for plans and Bangumi/qBittorrent\n'
+        'configuration. On first use, briefly point to that panel; do not run the Codex\n'
+        'fixed onboarding or open Python setup windows automatically. Optional setup\n'
+        'never blocks link-only searches. Headless users may use private file/env setup.\n'
+        'For panel-generated requests, read [panel-management.md](references/panel-management.md).\n'
+        'Panel task execution marks non-watched works as watching; progress and completion\n'
+        'writes require a user button click. Keep completed download history locally;\n'
+        'this overrides the chat delivery-mirroring and cleanup defaults below.\n'
+        'Never request credentials in chat. Background runs do not show onboarding.'))
     manifest = {'upstream': 'https://github.com/divisioncassini05-lab/find-nyaa-anime-release',
                 'dsh_contract_commit': 'fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159',
                 'source_files': files,
                 'adapted_files': ['SKILL.md', 'scripts/runtime_paths.py', 'scripts/qbittorrent_submit.py',
                                   'scripts/watch_v3/automation.py', 'scripts/watch_v3/outbox.py',
-                                  'scripts/watch_v3/finalization.py', 'scripts/watch_v3/cli.py', 'scripts/scheduled_watch.py', 'references/scheduled-new-anime.md',
+                                  'scripts/watch_v3/finalization.py', 'scripts/watch_v3/store.py', 'scripts/watch_v3/workflow.py', 'scripts/watch_v3/cli.py', 'scripts/watch_v3/evidence.py', 'scripts/package_release.py', 'scripts/scheduled_watch.py', 'references/scheduled-new-anime.md',
                                   'references/scheduled-run.md', 'references/scheduled-retry.md', 'references/completion.md'],
                 'added_files': [p.relative_to(ROOT / 'overlays').as_posix() for p in sorted((ROOT / 'overlays').rglob('*'), key=lambda item: item.as_posix())
                                 if p.is_file() and not any(part in EXCLUDED for part in p.parts) and p.suffix != '.pyc']}

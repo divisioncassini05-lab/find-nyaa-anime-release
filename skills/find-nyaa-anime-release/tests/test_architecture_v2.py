@@ -248,6 +248,49 @@ def process_delivery(params):
     finalize(release_for(identity,episode), request(), path, accepted, client_options={})
     return episode
 
+@pytest.mark.parametrize('winerror', [5, 32, 33])
+def test_read_retries_transient_replacement_denial_without_writes(tmp_path, monkeypatch, winerror):
+    import anime_release.storage as storage
+    path = state_file(tmp_path)
+    original = Path.read_text
+    reads = []
+    pauses = []
+
+    def interrupted_read(target, **kwargs):
+        reads.append(target)
+        if len(reads) == 1:
+            error = PermissionError('replacement in progress')
+            error.winerror = winerror
+            raise error
+        return original(target, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', interrupted_read)
+    monkeypatch.setattr(storage.time, 'sleep', pauses.append)
+    assert StateRepository(path).read()['shows']
+    assert len(reads) == 2 and pauses == [0.02]
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize('winerror, attempts', [(5, 4), (32, 4), (None, 1)])
+def test_persistent_read_denial_is_bounded_and_never_empty_state(tmp_path, monkeypatch, winerror, attempts):
+    import anime_release.storage as storage
+    path = state_file(tmp_path)
+    reads = []
+
+    def denied_read(target, **kwargs):
+        reads.append(target)
+        error = PermissionError('access denied')
+        error.winerror = winerror
+        raise error
+
+    monkeypatch.setattr(Path, 'read_text', denied_read)
+    monkeypatch.setattr(storage.time, 'sleep', lambda _: None)
+    with pytest.raises(storage.StateFileError):
+        StateRepository(path).read()
+    assert len(reads) == attempts
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_two_processes_same_show_monotonic_and_other_show_preserved(tmp_path):
     path = state_file(tmp_path)
     row = StateRepository(path).read()['shows'][0]

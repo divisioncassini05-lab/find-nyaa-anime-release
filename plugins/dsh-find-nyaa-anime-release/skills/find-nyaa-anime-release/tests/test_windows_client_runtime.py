@@ -114,6 +114,7 @@ def test_unknown_version_does_not_silently_select_old_copy(tmp_path):
 
 def test_broker_failure_never_falls_back_to_direct_client_launch():
     with (patch.object(qbt.os, "name", "nt"),
+          patch("client_context.require_context", return_value={"ok": True}),
           patch.object(runtime, "_powershell_json", return_value={"return_value": 2, "pid": 0}),
           patch.object(qbt.subprocess, "Popen") as direct):
         with pytest.raises(qbt.SubmissionError) as error:
@@ -128,6 +129,7 @@ def test_broker_preserves_argv_without_executing_shell_syntax():
                r"--save-path=C:\文件夹 with spaces",
                "magnet:?xt=test&dn=`$(write-host bad);'\"end"]
     with (patch.object(runtime, "_powershell_json", return_value={"return_value": 0, "pid": 123}) as call,
+          patch("client_context.require_context", return_value={"ok": True}),
           patch.object(runtime, "BrokerProcess", return_value=Mock(pid=123))):
         runtime.launch(command)
     script = call.call_args.args[0]

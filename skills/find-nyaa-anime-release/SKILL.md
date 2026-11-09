@@ -8,9 +8,30 @@ description: Find and verify Nyaa anime releases, track with qBittorrent, and op
 Run commands from this skill directory. Read the matching workflow and load its
 supporting references only when needed.
 
+Use compact evidence output as described in the retrieval workflow. Reuse complete
+reports already read; do not dump the entire library, source code or all references
+for routine searches. Delivery performs its own fresh audit. Optional integration
+failure must not trigger a repeated search, weaker constraints or a retry loop.
+Efficiency must not reduce search coverage or evidence quality: retain every
+candidate, resolve uncertain names/formats, and use necessary web fallback.
+Never skip identity, episode, size or required-subtitle checks to save tokens.
+
+On the first interactive invocation in a conversation, run `python scripts/first_use.py`.
+If `reply_text` is nonempty, relay that fixed guidance verbatim once, then continue
+the user's search. Do not repeat it for every title or block searches on optional
+setup. A scheduled/background run never displays onboarding or opens windows.
+When the user asks to connect Bangumi/enter a token, run
+`python scripts/setup_gui.py --section bangumi`. For needed local download settings,
+use `--section qbittorrent` after the existing client-readiness check.
+Let the user fill the small window; read `--status` after they finish, never read
+credentials. Use the host's approved visible desktop context, not an isolated
+sandbox desktop. On `gui_unavailable`, explain the desktop/Tk requirement and offer
+manual file/env setup. Existing config is not proof of live connection success.
+
 | Request | Read next |
 | --- | --- |
-| First use, Bangumi list/progress, personal recommendations, or "I finished/watched" | [bangumi-sync.md](references/bangumi-sync.md) |
+| Introduction, usage tutorial, examples, or "how do I use this?" | [getting-started.md](references/getting-started.md) |
+| Bangumi list/progress, personal recommendations, or "I finished/watched" | [bangumi-sync.md](references/bangumi-sync.md) |
 | Interactive search/download, next/latest/exact release | [retrieval-workflow.md](references/retrieval-workflow.md) |
 | Create/change an anime schedule | [scheduled-new-anime.md](references/scheduled-new-anime.md) |
 | A scheduled run or retry | [scheduled-run.md](references/scheduled-run.md) |
@@ -38,16 +59,28 @@ supporting references only when needed.
 
 ## Delivery and state
 
-- On first use in each host, run `python scripts/watch.py bangumi status`. If not
-  connected, show its official token setup link and ask the user to configure a
-  local token file/environment variable, never to paste a token into chat. Do not
-  claim cloud sync without authorization. Read bangumi-sync.md for setup and writes.
+- Bangumi authorization is entered only in the local setup window (manual file/env
+  configuration remains supported). Never ask for tokens in chat or claim cloud
+  sync without authorization. Read bangumi-sync.md for setup and writes.
 - Bangumi is an optional personal-library mirror, not a search/download authority.
-  Never let its progress, collection status or availability override local targets,
-  quality or delivery decisions. Accepted regular-episode delivery counts as watched;
-  explicit watched/finished requests also write back. Link-only and failed adds do not.
-  Read ratings/comments only for relevant personal-library questions or recommendations;
-  use bounded queries, not a full-library dump on every search.
+  The host-local record remains authoritative for the active `watching` list, next
+  episode and schedule. Bangumi may be read for the user's recorded library,
+  ratings, comments and recommendations without changing local tracking. Never let
+  its progress, collection status or availability override local targets, quality
+  or delivery decisions.
+- Bangumi writes are different: accepted regular-episode delivery counts as watched,
+  and explicit watched/finished or explicit collection-status instructions may write
+  back. Link-only and failed adds do not. Do not infer a sync request from a casual
+  mention or complaint; “put it on hold” and “drop it” are explicit, while “I do not
+  feel like watching it” is not.
+- Read-only Bangumi access may be used for a relevant list, history or recommendation
+  question. It must not be used merely because an unrelated title happened to appear
+  in ordinary conversation. Use bounded queries, not a full-library dump on every
+  resource search.
+- Keep found, accepted by the download client, downloaded and watched distinct.
+  Before a Bangumi write, confirm the account, exact work/season and requested
+  episode scope; never overwrite ratings/comments/tags. Report pending or partial
+  writes honestly and verify by readback. See bangumi-sync.md for host boundaries.
 - The Agent establishes identity, episode numbering and selection from complete
   listings and details. Use [single-episode review](references/agent-review.md) or
   [season/movie review](references/package-review.md). Every add needs fresh

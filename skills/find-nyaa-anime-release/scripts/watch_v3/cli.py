@@ -28,11 +28,13 @@ def parser():
         if name == 'discover':
             q.add_argument('--page', type=int, default=1)
             q.add_argument('--output', type=Path)
+            q.add_argument('--compact', action='store_true', help='Lossless table view; saved JSON is unchanged')
     q = sub.add_parser('workspace', help='Create an owned temporary evidence run')
     q = sub.add_parser('cleanup', help='Clean an ended run or expired unreferenced evidence')
     q.add_argument('--run', type=Path)
     q = sub.add_parser('detail')
     q.add_argument('candidate_id'); q.add_argument('--output', type=Path, required=True)
+    q.add_argument('--compact', action='store_true', help='Lossless table view; saved JSON is unchanged')
     q = sub.add_parser('create')
     q.add_argument('--identity', type=Path, required=True)
     q.add_argument('--track-id', required=True)
@@ -44,6 +46,7 @@ def parser():
     q.add_argument('--episode', type=int)
     q.add_argument('--output', type=Path)
     q.add_argument('--manifest', type=Path)
+    q.add_argument('--compact', action='store_true', help='Print only a receipt for an unreviewed draft')
     quality_args(q)
     q = sub.add_parser('deliver')
     q.add_argument('title', nargs='?')
@@ -97,8 +100,8 @@ def quality_args(q):
 
 
 def client_args(q):
-    q.add_argument('--client', choices=['desktop','webapi'], default='desktop')
-    q.add_argument('--qb-url', default='http://127.0.0.1:8080')
+    q.add_argument('--client', choices=['desktop','webapi'], default=None)
+    q.add_argument('--qb-url', default=None)
     q.add_argument('--qb-username-env', default='QBITTORRENT_USERNAME')
     q.add_argument('--qb-password-env', default='QBITTORRENT_PASSWORD')
     q.add_argument('--qbittorrent-exe', type=Path)
@@ -108,8 +111,12 @@ def client_args(q):
 
 
 def client(args):
+    from local_setup import client_defaults
+    settings = client_defaults(args, getattr(args, 'state', DEFAULT_STATE))
     if args.client == 'webapi':
-        return QbittorrentWebApiClient(args.qb_url, username=os.environ.get(args.qb_username_env), password=os.environ.get(args.qb_password_env))
+        from local_setup import load_settings
+        directory = args.qbittorrent_save_path or load_settings(getattr(args, 'state', DEFAULT_STATE)).get('download_directory')
+        return QbittorrentWebApiClient(settings['url'], username=settings['username'], password=settings['password'], save_path=directory)
     return DesktopLauncherClient(executable=args.qbittorrent_exe, save_path=args.qbittorrent_save_path,
         backup_dir=args.qbittorrent_backup_dir, profile_path=args.qbittorrent_profile)
 
@@ -282,7 +289,11 @@ def run(argv=None):
         if getattr(args, 'output', None) and args.output.is_file():
             register(args.output,args.state)
             result['output_path'] = str(args.output)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if getattr(args, 'compact', False):
+            from .output import compact_report
+            print(json.dumps(compact_report(result), ensure_ascii=False, separators=(',', ':')))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         return 6 if result.get('status') in {'available_enqueue_failed','accepted_receipt_commit_failed','recovery_failed','recovery_required','blocked'} else 0
     except Exception as exc:
         failure = {'status':'workflow_error', 'error_type':type(exc).__name__, 'error':str(exc)}

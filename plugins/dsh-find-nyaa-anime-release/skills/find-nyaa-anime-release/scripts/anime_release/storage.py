@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -55,12 +56,24 @@ def _os_lock(path):
             else:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
+def _read_state_text(path):
+    # Windows replacement can briefly deny opens; read-only calls create no locks.
+    delays = (0.02, 0.05, 0.1)
+    for attempt in range(len(delays) + 1):
+        try:
+            return path.read_text(encoding='utf-8-sig')
+        except PermissionError as exc:
+            if getattr(exc, 'winerror', None) not in {5, 32, 33} or attempt == len(delays):
+                raise
+            time.sleep(delays[attempt])
+
+
 def read_json(path):
     path = Path(path)
     if not path.exists():
         return {'version': 2, 'shows': []}
     try:
-        data = json.loads(path.read_text(encoding='utf-8-sig'))
+        data = json.loads(_read_state_text(path))
         if not isinstance(data, dict) or not isinstance(data.get('shows', []), list):
             raise ValueError('state must contain an object list')
         if not all(isinstance(show, dict) for show in data.get('shows', [])):
