@@ -56,11 +56,11 @@ export function closeWhaleClips(clips) {
   for (const clip of Object.values(clips || {})) for (const frame of clip.frames) frame.close();
 }
 
-export async function decodeWhaleClips(urls, cancelled, Decoder = globalThis.ImageDecoder) {
+export async function decodeWhaleClips(urls, cancelled, Decoder = globalThis.ImageDecoder, expected = null) {
   if (!Decoder || !(await Decoder.isTypeSupported('image/gif'))) throw new Error('Static whale fallback');
   const clips = {};
   try {
-    for (const stage of WHALE_STAGES) {
+    for (const stage of expected ? Object.keys(expected) : WHALE_STAGES) {
       if (cancelled()) throw new Error('Whale unmounted');
       const encoded = urls[stage].split(',')[1];
       const decoder = new Decoder({type: 'image/gif', data: Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))});
@@ -68,7 +68,7 @@ export async function decodeWhaleClips(urls, cancelled, Decoder = globalThis.Ima
       try {
         await decoder.tracks.ready;
         const track = decoder.tracks.selectedTrack;
-        if (!track || track.frameCount !== 16) throw new Error('Unexpected whale frames');
+        if (!track || track.frameCount !== (expected?.[stage] || 16)) throw new Error('Unexpected whale frames');
         for (let i = 0; i < track.frameCount; i++) {
           if (cancelled()) throw new Error('Whale unmounted');
           const {image} = await decoder.decode({frameIndex: i, completeFramesOnly: true});

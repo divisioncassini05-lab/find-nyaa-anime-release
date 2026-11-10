@@ -50,11 +50,11 @@ try {
   assert.deepEqual([pixels.width, pixels.height], [512, 512]);
   assert.ok(pixels.bundled && pixels.transparent > pixels.area * .15 && pixels.opaque > pixels.area * .15, 'sprite is nonblank and genuinely transparent, bundled without an external request');
   await assertSeated();
-  const row = await page.locator('.anime-row').first().boundingBox();
+  const row = await page.locator('.anime-inbox-row').first().boundingBox();
   const frameBefore = await image.getAttribute('data-elapsed');
   await page.waitForTimeout(3300);
   assert.notEqual(await image.getAttribute('data-elapsed'), frameBefore, 'native clip frames advance');
-  assert.deepEqual(await page.locator('.anime-row').first().boundingBox(), row, 'idle motion never shifts data');
+  assert.deepEqual(await page.locator('.anime-inbox-row').first().boundingBox(), row, 'idle motion never shifts data');
   const requestCount = requests.length;
   await whale.click();
   await page.locator('.anime-whale-seat.is-greeting').waitFor({ state: 'attached' });
@@ -63,7 +63,7 @@ try {
   await page.screenshot({ path: fileURLToPath(new URL('whale-interaction.png', output)), clip: { x: 0, y: 36, width: 1440, height: 380 } });
   await page.waitForFunction(() => !document.querySelector('.anime-whale-seat.is-greeting'));
   assert.equal(requests.length, requestCount, 'petting never calls services or loads assets');
-  assert.deepEqual(await page.locator('.anime-row').first().boundingBox(), row);
+  assert.deepEqual(await page.locator('.anime-inbox-row').first().boundingBox(), row);
   await whale.focus(); await page.keyboard.press('Enter');
   await page.locator('.anime-whale-seat.is-greeting').waitFor({ state: 'attached' });
   await page.waitForFunction(() => !document.querySelector('.anime-whale-seat.is-greeting'));

@@ -1,4 +1,26 @@
-# Build verification: 0.2.3
+# Build verification: 0.2.4
+
+## Ambient gestures: 2026-11-10
+
+- Added five reviewed idle/reading gestures, independent continuously timed book
+  layer, palm water, and blue-water-to-black-ink effect. Original four master GIFs
+  remain byte-identical. No retrieval, download, schedule or cloud behavior changed.
+- Full Python regression: canonical 758 + distribution 7 passed; DSH 846 passed.
+  Each core suite retains 3 platform skips, 1 excluded live test and 15 subtests.
+  Native Node: 131 passed, including the actual DSH Connection adapter tests.
+  Tests use isolated paths and synthetic data, not real downloads/cloud writes.
+- Effect preview checked 108 desktop/mobile/theme/time samples, ink colour
+  progression, book-cover occlusion, empty effect tails, real-time completion and
+  pause. Built-plugin Playwright checks also passed all five lazy-decoded actions
+  at 150px/132px, continuous book phase, reduced motion and resume, with no browser
+  errors. The four-stage browser suite passed three real-time cycles at each size,
+  themes, visibility, keyboard control and poster fallback. Runtime/source archive
+  contents are checked separately against the final tree before publication.
+- Only one extra ambient GIF is decoded at a time. Parent loops continue while a
+  gesture decodes; a failed gesture cannot freeze playback. Offscreen/reduced
+  motion retains animation phase. Small redraw differences remain in sleeve/chin
+  gestures; technical results are not a claim of pixel-perfect artwork.
+- Earlier reports below describe their respective releases or local candidates.
 
 ## Release verification: 2026-11-10
 
