@@ -1,4 +1,57 @@
-# Build verification: 0.2.4
+# Build verification: 0.2.5
+
+## Pre-publication local verification: 2026-11-11
+
+- This report records pre-publication local verification, not remote publication
+  or desktop installation. Publication records are maintained separately.
+- Integrates the approved checking summon with a stable-idle handoff before entry.
+  Checking fish use the upper 70% of the currently visible water area; the limit
+  covers the full sprite, including turns and viewport contraction, not only its
+  centre. Reading/return/ambient playback must finish before checking owns the actor.
+- Includes the approved repaired trace animation and native perspective water
+  effects. Removes permanent button chrome from the transparent mascot while
+  retaining keyboard focus indication. These are presentation changes, not new
+  retrieval, download, scheduling or Bangumi write operations.
+- Excludes background fauna, ocean paintings, overlays
+  and related background code. The canonical skill and DSH host adapters retain
+  their existing behavior; original Codex installation and marketplace URLs stay
+  unchanged.
+- Offline Python rerun in separate processes: canonical 758 plus distribution
+  synchronization 7 passed (765 total); DSH adapter, panel policy and generated
+  skill suite 846 passed. Each process retained 3 skips, 1 excluded live test,
+  15 passing subtests and the existing unregistered live-marker warning.
+- Full Node suite: 223 passed, 0 failed, 0 skipped, including actual Cordis,
+  SkillRegistry, Connection and official market-index checks. Existing external
+  test-only dependencies were read without installing or changing them.
+- Core synchronization reports synchronized with no changed files. Both Codex
+  and DSH quick_validate.py checks passed. Package and lockfile agree on 0.2.5;
+  dependency versions are unchanged. git diff --check passed.
+- Complete Python logs and JUnit XML, Node TAP output, synchronization output and
+  validator logs were retained outside the checkout. Temporary roots, Hypothesis
+  data and application state were isolated per test process from personal data.
+- Main integration browser verification reports a 1280px desktop with a 150px
+  character and a 390px mobile layout with a 132px character, including dark
+  theme: checking-loop renders, success finishes back at idle, resident fish
+  keep moving and no browser errors occur. This is limited integration evidence,
+  not a logged-in desktop test or exhaustive result/viewport coverage.
+- The handoff suite includes 15 regressions. Final integration makes the handoff
+  own the ambient blocker on repeated starts, blocks user greetings while checking
+  loads, and pauses the normal offscreen actor while resident fish keep updating.
+- Seven component integration regressions cover the actual WhaleMascot loading
+  continuation, signal handler, timeline and checking controller together, with
+  hooks/canvas/scheduling faked. They include the final loading and missing-geometry
+  boundary repairs; this does not replace real-browser acceptance.
+- Public-input review includes all intentional checking materials; no new secret
+  or personal machine path was found. The two existing local-path matches are
+  generic installation/preview examples. Background fauna remain excluded.
+- Stable-source client build and the full Node rerun passed after the final
+  boundary repairs. Archive verification compares every runtime file with this
+  tree and checks the declared source ZIP; actual results and hashes are recorded
+  outside the checkout. Earlier local packages are superseded by this stable
+  snapshot. No installed-desktop, real-download or cloud-write test is claimed.
+  Results below for 0.2.4 and earlier remain historical.
+
+## Previous verification: 0.2.4
 
 ## Ambient gestures: 2026-11-10
 
@@ -492,22 +545,23 @@ writes and DSH-side live authorization were not exercised.
 macOS/Linux path selection is unit-tested; their desktop clients are not tested
 on those operating systems. See [COMPATIBILITY.md](COMPATIBILITY.md).
 
-## Reproduce
+## Reproduce current candidate checks
 
 The source ZIP contains the tests. For native component tests, set
 `DSH_TEST_NODE_MODULES` to a separate dependency directory containing
 `@deepseek-ai/cordis@4.1.0`, `@deepseek-ai/dsh-skill@0.2.2-rc.1`,
+`@deepseek-ai/dsh-client-connection@0.2.2-rc.1`,
 `@deepseek-ai/dsh-plugin-market-index@0.2.2-rc.1`, `yaml@2.8.1` and `semver@7.7.3`.
 These are test-only dependencies, not plugin installation requirements.
-Without this variable, the three native-component tests report skipped, not passed.
+Without this variable, native-component tests report skipped, not passed.
 
 ```sh
 npm ci --ignore-scripts
 npm run build
 npm test
-python -m pytest tests/test_dsh_adapter.py skills/find-nyaa-anime-release/tests -m "not live" -p no:cacheprovider
+python -m pytest tests/test_dsh_adapter.py tests/test_panel_policy.py skills/find-nyaa-anime-release/tests --rootdir . -m "not live" -p no:cacheprovider
 npm pack --ignore-scripts
-python tools/verify_and_archive.py --tarball dsh-find-nyaa-anime-release-0.2.2.tgz --output-dir dist
+python tools/verify_and_archive.py --tarball dsh-find-nyaa-anime-release-0.2.5.tgz --output-dir dist
 ```
 
 The archive verifier compares each packed runtime file against the build tree,

@@ -7,6 +7,7 @@ import { InboxRecord } from './InboxRecord.jsx';
 import { OceanScene, useOceanMotion } from './OceanScene.jsx';
 import { TelevisionIcon } from './TelevisionIcon.jsx';
 import { CurrentRibbon } from './CurrentRibbon.jsx';
+import { WhaleCheckStatus } from './whale-check-status.mjs';
 import { syncLabel, progressPercent, nextCheckLabel, planFacts } from './presentation.mjs';
 import { hasSchedule, scheduleLabel } from '../host/schedule.js';
 
@@ -84,6 +85,9 @@ export function Panel({ loadSnapshot, loadBangumi, loadMetadata, loadConfig, loa
   const [tab, setTab] = useState('plans'); const [selected, setSelected] = useState(null); const [modal, setModal] = useState(null); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
   const [operationError, setOperationError] = useState('');
   const [metadataLoading, setMetadataLoading] = useState(false);
+  const checkObserver = useRef(new WhaleCheckStatus());
+  const [whaleCheck, setWhaleCheck] = useState({checking:false, result:null, sequence:0});
+  useEffect(() => { setWhaleCheck(checkObserver.current.update(plans.plans || [])); }, [plans]);
   useEffect(() => setOperationError(''), [modal?.kind]);
   const [views, setViews] = useState(() => { try { const s = JSON.parse(localStorage.getItem('anime-panel-views') || '{}'); if (s.plans && !['all', 'airing', 'blocked', 'completed'].includes(s.plans.status)) s.plans.status = 'all'; return { plans: { ...defaultView(), ...s.plans, sort: s.plans?.inboxVersion === 1 ? s.plans.sort : 'inbox', inboxVersion: 1 }, bangumi: { ...defaultView(), ...s.bangumi } }; } catch { return { plans: { ...defaultView(), sort: 'inbox', inboxVersion: 1 }, bangumi: defaultView() }; } });
   useEffect(() => { try { localStorage.setItem('anime-panel-views', JSON.stringify(views)); } catch { /* Host storage is optional. */ } }, [views]);
@@ -189,7 +193,7 @@ export function Panel({ loadSnapshot, loadBangumi, loadMetadata, loadConfig, loa
     <OceanScene enabled={motion.enabled} reduced={motion.reduced}/>
     <div className="anime-scroll"><div className="anime-content">
     <header className="anime-heading"><div className="anime-brand"><span className="anime-mark"><TelevisionIcon size={46}/></span><div><h1>动漫搜索与自动追番</h1><div className="anime-eyebrow">NYAA / DSH</div></div></div><div className="anime-heading-actions"><IconButton label="刷新番单" disabled={loading} onClick={refreshAll}><RefreshCw className={loading ? 'anime-spin' : ''} size={18}/></IconButton><IconButton label="插件设置" onClick={() => setModal({ kind: 'settings' })}><Settings size={18}/></IconButton><IconButton label="使用说明" onClick={() => setModal({ kind: 'help' })}><CircleHelp size={18}/></IconButton></div></header>
-    <CurrentRibbon enabled={motion.enabled} reduced={motion.reduced}/>
+    <CurrentRibbon enabled={motion.enabled} reduced={motion.reduced} check={whaleCheck}/>
     <div className="anime-metrics">{[['正在追踪', local.filter((r) => !r.plan?.paused && !['completed', 'package_pending', 'watched', 'on_hold', 'dropped', 'wish'].includes(planStatus(r))).length, Radio], ['等待更新', local.filter((r) => r.waiting && !r.plan?.paused).length, Clock3], ['待处理', local.filter(needsAttention).length, CircleAlert], ['最近成功', local.filter(recentlySucceeded).length, CircleCheck], ['Bangumi 待同步', local.reduce((n, r) => n + (r.syncPending || 0) + (['pending', 'partial'].includes(r.plan?.collectionSync) ? 1 : 0), 0), RefreshCw]].map(([label, count, Icon], i) => <span key={label} className={`anime-metric-${i}`}><span><Icon size={14} aria-hidden="true"/>{label}</span><strong>{loading ? '—' : count}</strong></span>)}</div>
     <nav className="anime-tabs" role="tablist" aria-label="追番视图">{[['plans', '追番收件箱', local.length, Inbox], ['bangumi', 'Bangumi 番单', remote.length, Library]].map(([key, label, count, Icon]) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => { setTab(key); setSelected(null); }}><Icon size={18} aria-hidden="true"/>{label} <small>{count}</small></button>)}</nav>
     <section className="anime-library"><div className="anime-section-heading"><h2>{tab === 'plans' ? '资源与进度' : 'Bangumi 番单'} <small>{visible.length} 部</small></h2><div className="anime-toolbar-actions"><button className="anime-icon" aria-label="筛选与排序" title="筛选与排序" aria-expanded={showFilters} onClick={() => setFilterPanels((v) => ({ ...v, [tab]: !v[tab] }))}><Filter size={18}/></button><button className="anime-primary" onClick={() => setModal({ kind: 'edit' })}><Plus size={16}/>添加追番</button></div></div>

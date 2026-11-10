@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Panel } from './Panel.jsx';
 import css from './panel.css';
@@ -59,6 +59,22 @@ async function saveConfig(endpoint, payload) {
 }
 function Preview() {
   const [draft, setDraft] = useState('');
-  return <><div className="preview-label">DSH 插件界面预览 · 示例数据 · 不连接宿主、不下载</div><div className="preview-content"><Panel loadSnapshot={loadSnapshot} loadBangumi={loadBangumi} loadConfig={loadConfig} loadPlans={loadPlans} saveConfig={saveConfig}/></div></>;
+  const [reviewRevision,setReviewRevision]=useState(0);
+  const reviewPlans=useCallback(()=>loadPlans(),[reviewRevision]);
+  const review=params.get('state')==='whale-review';
+  function reviewCheck(result) {
+    const plan=demoPlans[0];
+    plan.checkStatus=result==='start'?'running':'idle';
+    if(result!=='start')plan.evidence.lastSearch={status:result,checkedAt:new Date().toISOString()};
+    setReviewRevision(value=>value+1);
+  }
+  return <><div className="preview-label">DSH 插件界面预览 · 示例数据 · 不连接宿主、不下载</div><div className="preview-content"><Panel loadSnapshot={loadSnapshot} loadBangumi={loadBangumi} loadConfig={loadConfig} loadPlans={review?reviewPlans:loadPlans} saveConfig={saveConfig}/></div>
+    {review&&<div style={{position:'fixed',bottom:8,left:8,zIndex:20,display:'flex',flexWrap:'wrap',gap:8,maxWidth:'95%',background:'#fff',padding:8,color:'#19383f'}}>
+      <button onClick={()=>reviewCheck('start')}>测试：开始检查</button>
+      <button onClick={()=>reviewCheck('found')}>测试：找到资源</button>
+      <button onClick={()=>reviewCheck('needs_confirmation')}>测试：待处理</button>
+      <button onClick={()=>reviewCheck('no_nyaa_release_for_target')}>测试：暂无更新</button>
+    </div>}
+  </>;
 }
 createRoot(document.getElementById('root')).render(<Preview/>);

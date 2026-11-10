@@ -70,13 +70,15 @@ body[data-ds-dark-theme] .anime-panel, html[data-theme='dark'] .anime-panel {
 .anime-whale-seat.is-greeting .anime-whale-ripple { opacity:.45; }
 .anime-panel button.anime-whale { position:absolute; left:calc(var(--ap-whale-size) * -.5); top:calc(var(--ap-whale-size) * -.78125);
   width:var(--ap-whale-size); height:var(--ap-whale-size); aspect-ratio:1; min-height:0; padding:0; border:0; border-radius:8px;
-  display:block; background:transparent; pointer-events:auto; touch-action:pan-y; -webkit-tap-highlight-color:transparent; }
-.anime-panel button.anime-whale:hover:not(:disabled) { background:transparent; border:0; }
+  display:block; appearance:none; background:transparent; box-shadow:none; pointer-events:auto; touch-action:pan-y; -webkit-tap-highlight-color:transparent; }
+.anime-panel button.anime-whale:hover:not(:disabled) { background:transparent; border:0; box-shadow:none; }
 .anime-whale-float { display:block; position:absolute; inset:0; }
 .anime-whale img,.anime-whale canvas { position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none; user-select:none; -webkit-user-drag:none; }
 .anime-whale canvas { visibility:hidden; }
 .anime-whale[data-playback=decoded] canvas { visibility:visible; }
 .anime-whale[data-playback=decoded] .anime-whale-poster { visibility:hidden; }
+.anime-whale canvas.anime-whale-magic { inset:-25%; width:150%; height:150%; }
+.anime-summoned-fish { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; user-select:none; }
 .anime-whale-announcement { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .anime-current[data-running=true] .anime-current-thread { animation-play-state:running; }
 .anime-current[data-running=true] .is-greeting .anime-whale-ripple { animation:anime-whale-ripple 1.6s ease-out both; }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-find-nyaa-anime-release",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Evidence-reviewed Nyaa anime search, Chinese subtitle checks and qBittorrent delivery for DeepSeek Harness.",
   "type": "module",
   "main": "./index.js",

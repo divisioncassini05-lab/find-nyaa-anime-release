@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "canvas": [
+    512,
+    512
+  ],
+  "origin": [
+    0,
+    0
+  ],
+  "scale": 1,
+  "display": {
+    "desktop": 150,
+    "narrow": 132
+  },
+  "provenance": {
+    "module": "checking-fish/hybrid-01",
+    "selection": "active-manifest.json plus serve.mjs routes; latest 70% fish-motion.mjs",
+    "authorization": "User explicitly authorized port on 2026-11-11; no new art generated",
+    "source_manifest_status": "isolated_preview_pending_user_art_review",
+    "source_exit_status": "pending_user_review",
+    "publication": "Not published by this port",
+    "fish_motion_sha256": "69be130a60f0e109913e88eb6ce11240f488baeec0d9080077c78ec02335cc77",
+    "superseded_fish_motion_manifest_sha256": "6ad4c061098d3f93f6d9b349f4469346689b244836524f51f5305fb774a892c2"
+  },
+  "assets": {
+    "enter": {
+      "file": "checking-enter.gif",
+      "source": "arm-refinement-04/delivery/checking-enter.gif",
+      "sha256": "04aea546b08884107a4185430250a322a6d077f88e2c12ec4d8cc339662b3c67",
+      "frames": 16,
+      "duration_ms": 2400
+    },
+    "guide": {
+      "file": "checking-loop.gif",
+      "source": "arm-refinement-04/delivery/checking-loop.gif",
+      "sha256": "e00d690a7b29e091999a36b20527d4d89f50df265b378bacef3aeff4bfc719a7",
+      "frames": 16,
+      "duration_ms": 3200
+    },
+    "exit": {
+      "file": "checking-exit.gif",
+      "source": "exit-review-01/delivery/checking-exit.gif",
+      "sha256": "55e85a985fdfcd9e2d53e76bd2e41e8200aa692121e73656443568d674d5f2a7",
+      "frames": 16,
+      "duration_ms": 2880
+    },
+    "success": {
+      "file": "success.gif",
+      "source": "../../delivery/success.gif",
+      "sha256": "0dc655f1130887bcf51fecd6c2ef4bffe2039afb006764d9779e9c7e3cf1e5c2",
+      "frames": 16,
+      "duration_ms": 2560
+    },
+    "attention": {
+      "file": "attention.gif",
+      "source": "../../delivery/attention.gif",
+      "sha256": "1744296044cb2d7fca1ef4d568089ea9a1ae2922908f8728a4960b87bb8578ff",
+      "frames": 16,
+      "duration_ms": 4200
+    },
+    "birth": {
+      "file": "fish-birth.gif",
+      "source": "delivery/fish-birth.gif",
+      "sha256": "408f7cf13d55968a003e3f8dd5b2abfeea5ebdf576224a30ee211c895fe401f5",
+      "frames": 16,
+      "duration_ms": 2560
+    },
+    "swim": {
+      "file": "fish-swim.gif",
+      "source": "delivery/fish-swim.gif",
+      "sha256": "baaf29b53c17ed29be4b0f82a71cb3a7aff7d15fc633e3ad6a47adbe43fa8352",
+      "frames": 16,
+      "duration_ms": 3200
+    },
+    "water": {
+      "file": "water-gather.gif",
+      "source": "water-gather-01/original.gif",
+      "sha256": "a393ce3bed7f39d3f0ee878615103d25089e6a3a2a06c8cf1609b1648cf0542b",
+      "frames": 16,
+      "duration_ms": 3200
+    }
+  },
+  "shared": {
+    "idle": {
+      "file": "../ambient/idle-character.gif",
+      "sha256": "590733588fe8adc8388af95f501b7713c23450a7080897b666d0e8b1d3f83e8a",
+      "frames": 16
+    },
+    "book": {
+      "file": "../ambient/book-loop.gif",
+      "sha256": "84a2ab07789cc14e6c1854f6e5e5ff4387231c69bec57fc40cb7b6ee57f84ddb",
+      "frames": 16
+    }
+  },
+  "clips": {
+    "checking-enter": {
+      "file": "checking-enter.gif",
+      "sha256": "04aea546b08884107a4185430250a322a6d077f88e2c12ec4d8cc339662b3c67",
+      "frames": 16,
+      "duration_ms": 2400,
+      "palm_anchors": [
+        {
+          "x": 337.5,
+          "y": 385
+        },
+        {
+          "x": 335,
+          "y": 388
+        },
+        {
+          "x": 334,
+          "y": 386
+        },
+        {
+          "x": 338.5,
+          "y": 371
+        },
+        {
+          "x": 334,
+          "y": 351
+        },
+        {
+          "x": 331,
+          "y": 333
+        },
+        {
+          "x": 327.5,
+          "y": 325
+        },
+        {
+          "x": 329,
+          "y": 305
+        },
+        {
+          "x": 328,
+          "y": 290
+        },
+        {
+          "x": 327.5,
+          "y": 281
+        },
+        {
+          "x": 326.5,
+          "y": 273
+        },
+        {
+          "x": 327,
+          "y": 273
+        },
+        {
+          "x": 326.5,
+          "y": 273
+        },
+        {
+          "x": 326.5,
+          "y": 273
+        },
+        {
+          "x": 326.5,
+          "y": 273
+        },
+        {
+          "x": 326.5,
+          "y": 273
+        }
+      ]
+    },
+    "checking-loop": {
+      "file": "checking-loop.gif",
+      "sha256": "e00d690a7b29e091999a36b20527d4d89f50df265b378bacef3aeff4bfc719a7",
+      "frames": 16,
+      "duration_ms": 3200,
+      "palm_anchors": [
+        {
+          "x": 325.90000000000003,
+          "y": 272.8
+        },
+        {
+          "x": 325.90000000000003,
+          "y": 272.8
+        },
+        {
+          "x": 327.25,
+          "y": 272.8
+        },
+        {
+          "x": 326.8,
+          "y": 272.8
+        },
+        {
+          "x": 326.35,
+          "y": 272.8
+        },
+        {
+          "x": 329.5,
+          "y": 271.9
+        },
+        {
+          "x": 330.40000000000003,
+          "y": 271.9
+        },
+        {
+          "x": 330.85,
+          "y": 271
+        },
+        {
+          "x": 326.8,
+          "y": 272.8
+        },
+        {
+          "x": 325.90000000000003,
+          "y": 272.8
+        },
+        {
+          "x": 325.90000000000003,
+          "y": 272.8
+        },
+        {
+          "x": 325.45000000000005,
+          "y": 272.8
+        },
+        {
+          "x": 325.90000000000003,
+          "y": 272.8
+        },
+        {
+          "x": 325.45000000000005,
+          "y": 272.8
+        },
+        {
+          "x": 325.45000000000005,
+          "y": 272.8
+        },
+        {
+          "x": 325.45000000000005,
+          "y": 272.8
+        }
+      ]
+    },
+    "checking-exit": {
+      "file": "checking-exit.gif",
+      "sha256": "55e85a985fdfcd9e2d53e76bd2e41e8200aa692121e73656443568d674d5f2a7",
+      "frames": 16,
+      "duration_ms": 2880,
+      "palm_anchors": [
+        {
+          "x": 325.5,
+          "y": 273
+        },
+        {
+          "x": 323.5,
+          "y": 284
+        },
+        {
+          "x": 311.5,
+          "y": 288
+        },
+        {
+          "x": 304,
+          "y": 298
+        },
+        {
+          "x": 302.5,
+          "y": 307
+        },
+        {
+          "x": 299.5,
+          "y": 320
+        },
+        {
+          "x": 301,
+          "y": 343
+        },
+        {
+          "x": 307,
+          "y": 361
+        },
+        {
+          "x": 317,
+          "y": 374
+        },
+        {
+          "x": 331.5,
+          "y": 382
+        },
+        {
+          "x": 330.5,
+          "y": 388
+        },
+        {
+          "x": 334,
+          "y": 388
+        },
+        {
+          "x": 337.5,
+          "y": 388
+        },
+        {
+          "x": 339,
+          "y": 388
+        },
+        {
+          "x": 339,
+          "y": 388
+        },
+        {
+          "x": 340,
+          "y": 387
+        }
+      ]
+    }
+  },
+  "water": {
+    "registration": {
+      "scale_x": 0.78,
+      "scale_y": 0.76,
+      "x": 116,
+      "y": 85,
+      "applies_to": "effect layer only; character unscaled"
+    },
+    "gather_ms": 900,
+    "formation_ms": 3460,
+    "synthetic_frames": 0
+  },
+  "fish": {
+    "max_depth_ratio": 0.7,
+    "depth_reference": "visible plugin area, with full rotated sprite clearance",
+    "stop_preserves_residents": true,
+    "comfort_population": {
+      "desktop": 12,
+      "narrow": 8
+    },
+    "emergency_limit": {
+      "desktop": 64,
+      "narrow": 40
+    },
+    "rare_probability": 0.003,
+    "max_wake_points": 640,
+    "max_detour_followers": 2
+  },
+  "ending": {
+    "results": [
+      "success",
+      "attention",
+      "no_update",
+      "cancelled"
+    ],
+    "idle_bridge_ms": 80,
+    "finish": "Current formation and gesture drain concurrently, then exit and one feedback gesture"
+  }
+}

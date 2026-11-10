@@ -25,10 +25,10 @@
 | Codex | 下方 Skill 安装命令，原安装链接不变 |
 | DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
-DSH `0.2.4` 提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排，采用明暗双主题的水下风格界面。
-页头小鲸鱼新增五种随机小动作：晃脚、整理袖口、拨水、指尖墨滴与托腮；原有常态、阅读和拿放书动作保持不变。小动作仅为界面表现，不会触发搜索或下载。
+DSH 本版本为 `0.2.5`，提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排。
+本次同步已确认的小鲸鱼表现：检查前先回到静坐，召唤鱼完整轮廓限制在当前可见水域上方 70% 高度内，采用修复后的指尖循行素材与原生透视水效，并移除透明角色按钮的背景和阴影装饰。背景鱼与海洋底图不在本次更新范围；这些表现不新增搜索或下载操作。
 推荐在 DSH「添加插件」输入 `dsh-find-nyaa-anime-release`，使用 npm 官方注册表安装，之后可通过原生版本检查更新。
-也提供 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.4)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
+本版本安装包见 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.5)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
 验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md)。Codex 安装链接及核心流程不变。
 
 ## 能做什么

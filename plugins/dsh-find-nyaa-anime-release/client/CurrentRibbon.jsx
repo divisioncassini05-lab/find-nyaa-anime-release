@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { WhaleMascot } from './WhaleMascot.jsx';
 
 // A separate foreground ornament; the painted ocean assets stay unchanged.
-export function CurrentRibbon({ enabled = true, reduced = false }) {
+export function CurrentRibbon({ enabled = true, reduced = false, check }) {
   const id = useId().replace(/:/g, '');
   const ref = useRef(null);
   const [visible, setVisible] = useState(!document.hidden);
@@ -50,7 +50,7 @@ export function CurrentRibbon({ enabled = true, reduced = false }) {
         <path d="M87 34C98 38 124 38 136 34" stroke="var(--ap-current-glint)" strokeOpacity=".7" strokeWidth=".8"/>
       </svg>
       <span className="anime-current-seat" aria-hidden="true"/>
-      <WhaleMascot running={running}/>
+      <WhaleMascot running={enabled && !reduced && visible} visible={onScreen} check={check}/>
     </div>
   </div>;
 }
