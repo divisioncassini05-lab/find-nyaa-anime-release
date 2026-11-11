@@ -1,19 +1,19 @@
 {
   "format": 1,
   "title": {
-    "en": "Anime search and tracking",
-    "zh": "动漫搜索与自动追番"
+    "en": "dsh-find-anime",
+    "zh": "dsh-find-anime"
   },
   "plugins": [
     {
       "name": "dsh-find-nyaa-anime-release",
       "title": {
-        "en": "Anime search and tracking",
-        "zh": "动漫搜索与自动追番"
+        "en": "dsh-find-anime",
+        "zh": "dsh-find-anime"
       },
       "description": {
-        "en": "Review anime releases, verify Chinese subtitles and deliver qualified episodes or full seasons to qBittorrent.",
-        "zh": "用自然语言找 Nyaa 动漫资源，核对季集、画质和中文字幕，返回磁力或交给 qBittorrent，并支持定时追番。"
+        "en": "Search Nyaa for the latest episode, missing episodes or complete seasons with quality and Chinese subtitle checks. Includes scheduled tracking, qBittorrent delivery, a release inbox, Bangumi lists and manual progress sync, with animated day/night underwater themes.",
+        "zh": "动漫搜索与追番管理：支持最新单集、补齐缺集与整季补番，按画质和中文字幕要求筛选 Nyaa 资源；提供定时追番、qBittorrent 下载联动与追番收件箱，可读取 Bangumi 番单并手动同步观看进度。附带昼夜水下主题、动态鱼群与互动角色。"
       },
       "author": "divisioncassini05-lab",
       "homepage": "https://github.com/divisioncassini05-lab/find-nyaa-anime-release/tree/main/plugins/dsh-find-nyaa-anime-release",
@@ -24,8 +24,8 @@
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4IiB2aWV3Qm94PSIwIDAgMTI4IDEyOCI+CiAgPHJlY3Qgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIHJ4PSIyNCIgZmlsbD0iIzE3M0M0MCIvPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEzIDkpIHNjYWxlKDMuMikiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzkzRTBEQSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj4KICAgIDxwYXRoIGQ9Im0xMCAzIDYgNiA2LTZNMTAgMjd2Mm0xMi0ydjIiIHN0cm9rZS13aWR0aD0iMi40Ii8+CiAgICA8cmVjdCB4PSIzIiB5PSI4IiB3aWR0aD0iMjYiIGhlaWdodD0iMTkiIHJ4PSI1IiBmaWxsPSIjOTNFMERBIiBmaWxsLW9wYWNpdHk9Ii4xMiIgc3Ryb2tlLXdpZHRoPSIyLjIiLz4KICAgIDxyZWN0IHg9IjciIHk9IjEyIiB3aWR0aD0iMTgiIGhlaWdodD0iMTEiIHJ4PSIyIiBmaWxsPSIjOTNFMERBIiBmaWxsLW9wYWNpdHk9Ii4wNiIgc3Ryb2tlPSJub25lIi8+CiAgICA8cGF0aCBkPSJNMTEgMTV2NG0xMC00djQiIHN0cm9rZS13aWR0aD0iMi42Ii8+CiAgPC9nPgo8L3N2Zz4K",
       "versions": [
         {
-          "version": "0.2.7",
-          "publishTimestamp": 1794375797,
+          "version": "0.2.8",
+          "publishTimestamp": 1794380175,
           "source": {
             "type": "npm",
             "registry": "https://registry.npmjs.org/"
