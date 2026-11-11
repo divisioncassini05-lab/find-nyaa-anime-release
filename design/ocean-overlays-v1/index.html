@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>水下背景 · 独立贴图</title>
+<style>
+  *{box-sizing:border-box;letter-spacing:0}
+  body{margin:0;background:#f5f7f8;color:#253d44;font:14px/1.6 system-ui,"Microsoft YaHei",sans-serif}
+  main{max-width:1240px;margin:auto;padding:32px 24px}
+  h1{font-size:24px;margin:0 0 6px}p{margin:0 0 28px;color:#526a73}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+  section{min-width:0;background:white;border:1px solid #d6e2e6;border-radius:6px;overflow:hidden}
+  header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;gap:12px}
+  h2{font-size:15px;margin:0}a{color:#117b83;text-underline-offset:3px;font-size:12px}
+  .pair{display:grid;grid-template-columns:1fr 1fr}
+  .sample{height:236px;position:relative;display:grid;place-items:center;overflow:hidden;background:#e3f9f7 url('../../plugins/dsh-find-nyaa-anime-release/assets/ocean/water-light.webp') center/cover}
+  .night{background-color:#0c3039;background-image:url('../../plugins/dsh-find-nyaa-anime-release/assets/ocean/water-dark.webp')}
+  .sample>span{position:absolute;top:8px;left:12px;font-size:11px;color:#42616b}.night>span{color:#c6e2e6}
+  img{display:block;object-fit:contain;max-width:95%;max-height:210px}
+  .note{padding:12px 16px;color:#61747c;font-size:12px;min-height:44px}
+  @media(max-width:700px){main{padding:20px 12px}.grid{grid-template-columns:1fr}.sample{height:210px}}
+</style>
+<main>
+  <h1>水下背景 · 独立贴图</h1>
+  <p>素材对照：同一张贴图分别叠在白天和夜晚背景上。页面使用精选贴图，不同时堆叠所有素材。</p>
+  <div class="grid" id="assets"></div>
+</main>
+<script>
+  const assets=[
+    ['fish-silver.png','银蓝小鱼 · 三只','220px',.7,'白天备选，一小组，不与其他鱼群同时堆叠。'],
+    ['fish-gold.png','浅金短身鱼 · 两只','180px',.65,'暖色小点缀，靠海底边缘。'],
+    ['fish-jade.png','青绿细身鱼 · 三只','220px',.65,'适合远处的小鱼群，轻一些、淡一些。'],
+    ['whale-easter-egg.png','小鲸鱼 · 彩蛋','140px',.9,'偶尔出现，不替换页面现有角色。'],
+    ['jellyfish-night.png','月光水母 · 两只','124px',.6,'主要用于夜晚；只在边角出现。'],
+    ['jellyfish-lantern.png','提灯水母 · 单只','180px',.85,'自身发光组件可直接复用，不额外开发女孩照明交互。'],
+    ['bubble-trail.png','稀疏气泡 · 五个','92px',1,'只保留透明泡壁和少量高光。'],
+    ['current-traces.png','洋流细纹','100%',.12,'低透明度的环境细节，不做明显流线。'],
+  ];
+  for(const [file,title,width,opacity,note] of assets){
+    const section=document.createElement('section');
+    const header=document.createElement('header');
+    const heading=document.createElement('h2');heading.textContent=title;
+    const link=document.createElement('a');link.href=file;link.textContent='查看原图';
+    header.append(heading,link);section.append(header);
+    const pair=document.createElement('div');pair.className='pair';
+    for(const night of [false,true]){
+      const sample=document.createElement('div');sample.className='sample'+(night?' night':'');
+      const label=document.createElement('span');label.textContent=night?'夜晚':'白天';
+      const img=document.createElement('img');img.src=file;img.alt=title;img.style.width=width;img.style.opacity=opacity;
+      sample.append(label,img);pair.append(sample);
+    }
+    const caption=document.createElement('div');caption.className='note';caption.textContent=note;
+    section.append(pair,caption);document.getElementById('assets').append(section);
+  }
+</script>
+</html>

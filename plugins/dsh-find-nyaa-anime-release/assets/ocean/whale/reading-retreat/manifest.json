@@ -1,0 +1,154 @@
+{
+  "revision": "reading-retreat-covered-return-05",
+  "accepted_for_local_install": true,
+  "canvas": [
+    512,
+    512
+  ],
+  "effect_canvas": [
+    768,
+    768
+  ],
+  "effect_size": 666,
+  "effect_origin": 51,
+  "covered_duration_ms": 7680,
+  "recover_start_ms": 600,
+  "reading_sha256": "2a9f46dd2930b2b0493ce49801d37394c6501e8fd873b3adf73f487232074cad",
+  "water_core": {
+    "file": "water-core.png",
+    "sha256": "aaf7db499736e01fe9592082b0389bc4d85fe2edf64a4dddd271b3355444b068"
+  },
+  "clips": {
+    "character": {
+      "file": "character.gif",
+      "sha256": "e6bba4030d726463b45f84980ea0566c828e9cb00e66545bc1cdcc3ef23af427",
+      "frames": 32,
+      "durations": [
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        110,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140
+      ]
+    },
+    "rise": {
+      "file": "rise.gif",
+      "sha256": "70233627659acf7b040596440dfd80eb92ac5a1d8888f48e5b9a1b59df6f946a",
+      "frames": 16,
+      "durations": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ]
+    },
+    "hold": {
+      "file": "hold.gif",
+      "sha256": "a0a660be1b0936fdd42a9f9449e5985ded86d2c4b6343561d05906df8a3e64f0",
+      "frames": 16,
+      "durations": [
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180
+      ]
+    },
+    "reveal": {
+      "file": "reveal.gif",
+      "sha256": "1e8b0ae5e4a115aa25ad259f14c263f719b44b9b3351b7aa2df438fc06bb7b35",
+      "frames": 16,
+      "durations": [
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180
+      ]
+    },
+    "recover": {
+      "file": "recover.gif",
+      "sha256": "7f1bdf4dc68a09e17cb54d836306667d00502d83112208be5f0bc79656105d2b",
+      "frames": 16,
+      "durations": [
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220,
+        220
+      ]
+    }
+  }
+}

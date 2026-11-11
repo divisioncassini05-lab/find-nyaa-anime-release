@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>水下生物贴图</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:32px;background:#edf7f6;color:#203c42;font:15px/1.6 system-ui,sans-serif;letter-spacing:0}main{max-width:1360px;margin:auto}h1{font-size:26px;margin:0}h2{font-size:20px;margin:32px 0 14px}p{color:#526d74;margin:6px 0 20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}figure{margin:0;border:1px solid #c4d8db;border-radius:6px;overflow:hidden;background:#f7fbfc}.art{height:170px;background:#d6efef;display:flex;align-items:center;justify-content:center}img{max-width:88%;max-height:148px;object-fit:contain}.night .art{background:#12333e}.night img{filter:drop-shadow(0 0 4px #6bb6cc24)}figcaption{padding:10px 12px}small{display:block;color:#667d85;font-size:12px}a{color:#007c83}@media(max-width:500px){body{padding:18px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.art{height:136px}img{max-height:118px}figcaption{font-size:13px}}
+</style>
+<main><h1>水下生物贴图</h1><p>二次元手绘 / 白天浅海 / 夜晚深海。每次只出现一只或一小群，不会全部堆在背景里。</p>
+<h2>白天</h2><section id="day" class="grid"></section>
+<h2>夜晚</h2><section id="night" class="grid night"></section>
+<p>比例是设计权重，不是现实种群统计。<a href="README.md">设计与参考来源</a></p></main>
+<script>
+const day=[['fish-silver','沙丁鱼群','30% / 小群'],['fish-jade','鳀鱼群','22% / 小群'],['clownfish-orange','小丑鱼 · 橙色','物种 14% / 色型 90%'],['clownfish-black','小丑鱼 · 深色','色型 10%'],['butterflyfish','长吻蝶鱼','10%'],['porcupinefish','刺鲀','7%'],['blue-spotted-ray','蓝点鳐','6%'],['seahorse-brown','海马 · 褐色','物种 5% / 色型 65%'],['seahorse-gold','海马 · 金色','色型 35%'],['octopus-russet','章鱼 · 赤褐色','物种 5% / 色型 60%'],['octopus-sand','章鱼 · 沙色','色型 40%'],['whale-easter-egg','小鲸鱼彩蛋','1%']];
+const night=[['lanternfish','灯笼鱼','深海生物池 60%'],['hatchetfish','斧头鱼','深海生物池 25%'],['barreleye','管眼鱼','深海生物池 9%'],['dumbo-octopus','小飞象章鱼','深海生物池 6%'],['jelly-solmissus','碟形水母','水母池 40%'],['jelly-atolla','冠水母','水母池 25%'],['jelly-pandea','红灯笼水母','水母池 18%'],['jelly-crossota','放射状水母','水母池 12%'],['jelly-phantom','巨型幽灵水母','水母池 5%']];
+for(const [id,entries] of [['day',day],['night',night]])for(const [file,name,note] of entries){const f=document.createElement('figure');const art=document.createElement('div');art.className='art';const img=document.createElement('img');img.src='../../plugins/dsh-find-nyaa-anime-release/assets/ocean/overlays/'+file+'.webp';img.alt=name;art.append(img);const caption=document.createElement('figcaption');caption.textContent=name;const small=document.createElement('small');small.textContent=note;caption.append(small);f.append(art,caption);document.getElementById(id).append(f)}
+</script>
+</html>

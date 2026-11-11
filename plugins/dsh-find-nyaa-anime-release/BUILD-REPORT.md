@@ -1,4 +1,42 @@
-# Build verification: 0.2.5
+# Build verification: 0.2.6
+
+## Reading retreat and approved ocean fauna: 2026-11-11
+
+- Combines the accepted local reading triple-click branch with the completed
+  local ocean paintings and fauna. No new artwork generation or motion redesign.
+- Reading retreat uses the exact accepted close/lift, water veil and hidden
+  reopening clips. Original four motion masters, random gestures and checking
+  fish remain unchanged. New checks wait for reveal, then complete the original
+  reading-to-idle handoff before summoning.
+- Background fauna remain separate from summoned fish. Both terrain paintings,
+  the sparse day/night species pools and local jellyfish glow come from the
+  approved local source. Theme, pause, visibility and reduced-motion behavior
+  remain local presentation only.
+- Search/quality/subtitle policy, host adapters, download operations, schedules,
+  Bangumi writes, public skill payload and user data are not changed.
+- Package and lockfile agree on 0.2.6. Installation package name, Codex URL and
+  custom-market index URL stay stable. Archive checks compare all shipped bytes
+  with this tree; credentials, test caches and personal tracking files are not
+  public inputs. Publication and registry integrity are verified separately.
+- Offline verification in separate processes: canonical Python 758 passed,
+  distribution synchronization 7 passed, generated DSH/adapter/panel Python 846
+  passed. Each Python skill suite retained 3 skips, 1 excluded live test and 15
+  passing subtests. Both skill validators and reproducibility check passed.
+- Node suite: 234 passed, 5 optional host/dependency tests skipped, 0 failed.
+  Includes real native bundle registration/shared-React checks and the new
+  reading/checking handoff regressions. This is not exhaustive host coverage.
+- Actual built-component browser checks passed at desktop 150px and narrow
+  132px: settled reading entry, all 16 hidden reopening cels, pause/resume,
+  original-reading restore and cleared magic. Ocean checks passed for sparse
+  day/night pools, movement, local light, themes, static mode, hidden lifecycle,
+  reduced motion, narrow dialogs and unchanged content layout.
+- Browser readiness is polled independently of the test-owned animation clock;
+  this avoids a parked test RAF blocking decoder readiness. Runtime behavior
+  was not changed to satisfy the test.
+- These are local component/browser checks, not a logged-in desktop,
+  real-download, cloud-write or live scheduler test.
+
+## Previous verification: 0.2.5
 
 ## Pre-publication local verification: 2026-11-11
 

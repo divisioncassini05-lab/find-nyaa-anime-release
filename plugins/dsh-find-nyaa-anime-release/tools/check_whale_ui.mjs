@@ -21,6 +21,25 @@ try {
     await page.waitForFunction(() => document.querySelector('.anime-whale')?.dataset.playback === 'decoded');
   };
   const running = async (value) => page.waitForFunction((v) => document.querySelector('.anime-current')?.dataset.running === String(v), value);
+  const assertUnframed = async () => {
+    const surface = await whale.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, image: style.backgroundImage, shadow: style.boxShadow,
+        borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth] };
+    });
+    assert.equal(surface.background, 'rgba(0, 0, 0, 0)', 'transparent sprite has no button background');
+    assert.equal(surface.image, 'none');
+    assert.equal(surface.shadow, 'none', 'generic button highlights must not frame the transparent sprite');
+    assert.deepEqual(surface.borders, ['0px', '0px', '0px', '0px']);
+  };
+  const checkSurfaceStates = async () => {
+    await whale.evaluate((element) => element.blur());
+    await page.mouse.move(0, 0); await page.waitForTimeout(180); await assertUnframed();
+    await whale.hover(); await page.waitForTimeout(180); await assertUnframed();
+    await page.mouse.down(); await assertUnframed();
+    await page.mouse.move(0, 0); await page.mouse.up();
+    await whale.evaluate((element) => element.blur());
+  };
   const geometry = () => page.evaluate(() => {
     const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom, right: r.right }; };
     return { pet: box('.anime-whale-float'), seat: box('.anime-current-seat'), heading: box('.anime-heading'), metrics: box('.anime-metrics'), current: box('.anime-current') };
@@ -35,6 +54,8 @@ try {
     assert.equal(await page.locator('.anime-scroll').evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true);
   };
   await page.goto(base); await ready(); await running(true);
+  await page.screenshot({ path: fileURLToPath(new URL('whale-surface.png', output)), clip: { x: 0, y: 36, width: 1440, height: 380 } });
+  await checkSurfaceStates();
   assert.equal(await page.locator('.anime-current').getAttribute('aria-hidden'), null, 'interactive mascot must not be aria-hidden');
   assert.equal(await page.locator('.anime-current svg').evaluateAll((items) => items.every((e) => e.getAttribute('aria-hidden') === 'true')), true);
   await page.waitForFunction(() => document.querySelector('.anime-whale')?.dataset.playback === 'decoded');
@@ -65,6 +86,8 @@ try {
   assert.equal(requests.length, requestCount, 'petting never calls services or loads assets');
   assert.deepEqual(await page.locator('.anime-inbox-row').first().boundingBox(), row);
   await whale.focus(); await page.keyboard.press('Enter');
+  assert.equal(await whale.evaluate((e) => e.matches(':focus-visible') && getComputedStyle(e).outlineWidth === '2px'), true, 'keyboard focus remains visible without permanent button decoration');
+  await assertUnframed();
   await page.locator('.anime-whale-seat.is-greeting').waitFor({ state: 'attached' });
   await page.waitForFunction(() => !document.querySelector('.anime-whale-seat.is-greeting'));
   await page.keyboard.press('Space'); await page.locator('.anime-whale-seat.is-greeting').waitFor({ state: 'attached' });
@@ -108,6 +131,7 @@ try {
     await page.evaluate((value) => { if (value) document.body.setAttribute('data-ds-dark-theme', ''); else document.body.removeAttribute('data-ds-dark-theme'); }, dark);
     for (const width of [1440, 1024, 800, 390, 320]) {
       await page.setViewportSize({ width, height: 1040 }); await assertSeated();
+      await checkSurfaceStates();
       if ([1440, 390, 320].includes(width)) await page.screenshot({ path: fileURLToPath(new URL(`whale-${width}-${dark ? 'dark' : 'light'}.png`, output)), fullPage: true });
     }
   }
@@ -141,6 +165,7 @@ try {
   await fallback.goto(base);
   await fallback.waitForFunction(() => document.querySelector('.anime-whale')?.dataset.playback === 'poster');
   assert.equal(await fallback.locator('.anime-whale-poster').evaluate((e) => e.complete && e.naturalWidth === 512), true);
+  assert.equal(await fallback.locator('.anime-whale').evaluate((e) => getComputedStyle(e).boxShadow), 'none', 'poster fallback is also unframed');
   await fallback.close();
   assert.deepEqual(errors, []);
   assert.equal(requests.some((url) => /https?:\/\/(?!127\.0\.0\.1|localhost)/.test(url)), false, 'no external mascot requests');

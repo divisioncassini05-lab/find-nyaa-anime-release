@@ -42,7 +42,7 @@
 
 ### 从 npm 安装（推荐）
 
-本版本为 `0.2.5`。在 DSH「插件 → 添加插件」输入：
+本版本为 `0.2.6`。在 DSH「插件 → 添加插件」输入：
 
 ```text
 dsh-find-nyaa-anime-release
@@ -57,15 +57,15 @@ dsh-find-nyaa-anime-release
 
 ### 本地插件包（备用）
 
-从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.5) 下载
-`dsh-find-nyaa-anime-release-0.2.5.tgz`，交给 DSH，并说：
+从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.6) 下载
+`dsh-find-nyaa-anime-release-0.2.6.tgz`，交给 DSH，并说：
 
 > 请通过当前 profile 的插件管理器安装这个本地插件包，完成后确认技能可加载。
 
 也可以在 DSH CLI 中使用实际 profile 和本地绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.5.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.6.tgz"
 ```
 
 桌面端优先在应用内用插件管理器安装到当前 profile，不要照抄 `web` 去改另一个 profile。
@@ -83,7 +83,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.5.t
   保持不变，`0.2.2` 起安装来源为对应的 npm 精确版本。
 - 旧版路径、Git 或 `.tgz` 安装不会自动变成 npm 安装，也不显示原生注册表更新提示。
   迁移时先保留当前 profile 的配置和外部数据，再用插件管理器把同名依赖替换为
-  `dsh-find-nyaa-anime-release@0.2.5`，保留启用状态并按宿主要求重载。
+  `dsh-find-nyaa-anime-release@0.2.6`，保留启用状态并按宿主要求重载。
   若界面拒绝同名安装，可先移除插件再从 npm 添加；不要删除数据目录或定时任务。
 - 仍使用本地包时，需要手动下载新版 `.tgz` 并更新同名插件。不要只替换 `SKILL.md`；
   脚本、面板和宿主适配必须一起更新。
@@ -103,9 +103,13 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.5.t
 初次安装可让 Agent 进入技能资源目录执行 `python scripts/dsh_doctor.py`。
 它只检查本地前置条件，**不联网、不启动客户端、不下载、不修改记录**。
 
-## 图形面板（0.2.5）
+## 图形面板（0.2.6）
 
-本次同步已确认的召唤与水效：检查动作须等待阅读、放书或小动作结束并回到稳定静坐后进入；召唤鱼完整轮廓保持在当前可见水域上方 70% 高度内，窗口缩小时重新约束轨迹，不靠缩小鱼或重置摆尾掩盖越界。指尖循行采用已确认的修复素材，配合原生绘制的透视水效。透明角色按钮去除常驻背景、边框和阴影，保留键盘焦点提示。背景鱼与海洋底图不在本次更新范围。
+本次加入已确认的阅读连点：阅读时在约1.2秒内点三次，等书页落稳后合书、抱书并闭眼回避；水幕遮住角色期间播放重新开书的动作，散开时回到原阅读。单击仍有原来的轻微涟漪反馈；只有阅读状态识别这套连点动作。暂停、隐藏和减少动态设置仍有效，不会因连点新增检索或下载操作。
+
+海洋背景同步本机版本：同一幅构图分别锚定水面与海底，中心保留清爽留白；白天随机经过一小群鱼或一只动物，夜晚从深海动物与水母中选择。生物经过后再换下一组，不同时堆满页面；水母只在自身附近发出轻微亮光。所有背景装饰不拦截操作，与小鲸鱼检查时召唤的水鱼独立。
+
+原有召唤与水效保持：检查动作须等待阅读、放书或小动作结束并回到稳定静坐后进入；召唤鱼完整轮廓保持在当前可见水域上方70%高度内，窗口缩小时重新约束轨迹。指尖循行保留已确认的修复素材和透视水效，透明角色按钮不增加背景或阴影。
 
 小鲸鱼在静坐或阅读时，每隔约 25–45 秒稳定播放时间随机做一个小动作：轻晃脚尖、整理袖口、拨弄水珠、指尖循行或托腮思索。指尖的蓝色水珠逐渐变成黑色墨滴；拨水效果独立于人物。动作会等到自然衔接点才开始，不打断翻页。暂停背景动态、页面不可见或系统启用减少动态时一起暂停。小动作不调用模型、不联网、不触发业务操作。
 

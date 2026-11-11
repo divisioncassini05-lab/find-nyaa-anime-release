@@ -16,6 +16,8 @@ import { WhaleAmbientTimeline, clipFrame } from './whale-ambient-timeline.mjs';
 import { createNativeLiquid } from './whale-native-liquid.mjs';
 import { prepareWhaleChecking } from './whale-checking-assets.mjs';
 import { WhaleCheckHandoff } from './whale-check-handoff.mjs';
+import { prepareReadingRetreat } from './whale-reading-retreat.mjs';
+import { ReadingRetreatHandoff } from './whale-reading-handoff.mjs';
 
 const sources = {idle, receive, reading, return: putBack};
 const actionSources={'idle-feet':feet,'idle-sleeve':sleeve,'idle-droplet':droplet,'reading-trace':trace,'reading-think':think};
@@ -45,6 +47,7 @@ export function WhaleMascot({ running, visible = true, check }) {
     let disposed = false, clips = null, raf = 0, last = null;
     let loading=null, cached=null, liquids=null, checking=null, handoff=null;
     let checkingLoad=null, checkingFailed=false, wanted=false, pendingStart=false, pendingResult=null;
+    let retreat=null, retreatAssets=null, retreatLoad=null, retreatFailed=false, checkAfterRetreat=false;
     const failed=new Set();
     const context = canvas.current.getContext('2d');
     const surface = canvas.current;
@@ -68,7 +71,7 @@ export function WhaleMascot({ running, visible = true, check }) {
         viewBottom:Math.max(0,Math.min(area.height,window.innerHeight-area.top)),visible:onScreen.current};
     }
     async function prepareChecking() {
-      if(!clips||checkingLoad||checking||checkingFailed||!pendingStart)return;
+      if(!clips||checkingLoad||checking||checkingFailed||!pendingStart||retreat?.busy)return;
       checkingLoad=prepareWhaleChecking({idle:clips.idle,book:clips.book,cancelled:()=>disposed});
       try {
         const loaded=await checkingLoad;
@@ -84,6 +87,21 @@ export function WhaleMascot({ running, visible = true, check }) {
       } catch { checkingFailed=true;timeline?.setBlocked(false); }
       finally { checkingLoad=null; }
     }
+    async function prepareRetreat() {
+      if(retreatAssets||retreatLoad||retreatFailed||!clips)return;
+      retreatLoad=prepareReadingRetreat({reading:clips.reading,cancelled:()=>disposed});
+      try {
+        const loaded=await retreatLoad;
+        if(disposed){loaded.dispose();return;}
+        retreatAssets=loaded;
+      } catch {retreatFailed=true;retreat?.fail();}
+      finally {retreatLoad=null;}
+    }
+    function beginChecking() {
+      checkAfterRetreat=false;requested.current='idle';
+      if(handoff)handoff.start();
+      else if(!checkingFailed){timeline?.request('idle');timeline?.setBlocked(true);prepareChecking();}
+    }
     async function prepare(id) {
       if(!id||loading||clips[id]||failed.has(id))return;
       loading=id;
@@ -98,7 +116,10 @@ export function WhaleMascot({ running, visible = true, check }) {
       } catch {closeWhaleClips(loaded);failed.add(id);} finally {loading=null;}
     }
     function draw() {
-        const ownsCharacter=checking?.drawCharacter(context,timeline.bookElapsed);
+        magicContext?.clearRect(0,0,768,768);
+        const retreatOwns=retreat?.ownsCharacter;
+        if(retreatOwns)retreatAssets.drawCharacter(context,retreat.actor);
+        const ownsCharacter=retreatOwns||checking?.drawCharacter(context,timeline.bookElapsed);
         if(!ownsCharacter){
           context.clearRect(0, 0, 512, 512);
           context.drawImage(clips[timeline.stage].frames[timeline.frame], 0, 0);
@@ -109,12 +130,16 @@ export function WhaleMascot({ running, visible = true, check }) {
         }
         if(!ownsCharacter)liquids?.draw(context,timeline.action,timeline.elapsed,timeline.frame);
         checking?.drawFish(fishContext);checking?.drawMagic(magicContext);
-        surface.dataset.stage = ownsCharacter ? `checking-${checking.state}` : timeline.stage;
+        if(retreatOwns){magicContext?.clearRect(0,0,768,768);retreatAssets.drawMagic(magicContext,retreat.actor);}
+        surface.dataset.stage = retreatOwns ? `reading-retreat-${retreat.state}` : ownsCharacter ? `checking-${checking.state}` : timeline.stage;
         surface.dataset.parent = timeline.parent;
-        surface.dataset.frame = String(timeline.frame);
+        surface.dataset.frame = String(retreatOwns?retreat.actor.sample().character.frame:timeline.frame);
         surface.dataset.elapsed = String(timeline.totalElapsed);
         surface.dataset.bookElapsed=String(timeline.bookElapsed);
         surface.dataset.checking=checking?.state || (pendingStart&&!checkingFailed?'loading':'idle');
+        surface.dataset.readingRetreat=retreat?.state||'idle';
+        surface.dataset.retreatClip=retreatOwns?retreat.actor.sample().character.clip:'';
+        surface.dataset.retreatCompleted=String(retreat?.completed||0);
         fish.dataset.count=String(checking?.school.items.length||0);
         fish.dataset.waterBottom=String(checking?.school.waterBottom||0);
     }
@@ -122,7 +147,11 @@ export function WhaleMascot({ running, visible = true, check }) {
       if (disposed || !playing.current) return;
       const delta=last===null?0:Math.min(100,Math.max(0,now-last));
       const bounds=geometry();
-      if(handoff){
+      const retreatAdvanced=onScreen.current&&retreat?.advance(delta);
+      if(checkAfterRetreat&&!retreat?.busy)beginChecking();
+      if(retreatAdvanced){
+        if(bounds)checking?.update(delta,bounds);
+      }else if(handoff){
         if(bounds){
           if(onScreen.current||handoff.needsIdle)handoff.advance(delta,bounds);
           else checking.update(delta,bounds);
@@ -137,14 +166,19 @@ export function WhaleMascot({ running, visible = true, check }) {
     }
     const controller = {
       request(mode) { requested.current = mode; timeline?.request(mode); },
+      tapReading(mode) {
+        if(!playing.current||!onScreen.current||retreatFailed||wanted||handoff?.needsIdle)return false;
+        return retreat?.tap(mode)||false;
+      },
       check(value) {
         if(!value)return;
         if(value.checking&&!wanted){
-          wanted=true;pendingStart=true;requested.current='idle';
+          wanted=true;pendingStart=true;
           // Keep the first committed result while loading; wanted queues the restart.
           if(handoff||pendingResult==='cancelled')pendingResult=null;
-          if(handoff)handoff.start();
-          else if(!checkingFailed){timeline?.request('idle');timeline?.setBlocked(true);prepareChecking();}
+          retreat?.cancelPending();
+          if(retreat?.busy)checkAfterRetreat=true;
+          else beginChecking();
         }else if(!value.checking&&wanted){
           wanted=false;
           const result=value.result||'cancelled';
@@ -154,6 +188,7 @@ export function WhaleMascot({ running, visible = true, check }) {
       },
       setRunning(value) {
         timeline?.setRunning(value);
+        if(!value)retreat?.clearClicks();
         cancelAnimationFrame(raf);
         last = null;
         if (value && timeline && !disposed) raf = requestAnimationFrame(tick);
@@ -166,6 +201,8 @@ export function WhaleMascot({ running, visible = true, check }) {
       if (disposed) { closeWhaleClips(loaded); return; }
       clips = loaded;
       timeline = new WhaleAmbientTimeline(Object.fromEntries(Object.entries(clips).map(([key, value]) => [key, value.durations])),ambient.actions,{ready:id=>Boolean(clips[id])});
+      retreat=new ReadingRetreatHandoff(timeline,{ready:()=>retreatAssets,load:prepareRetreat,
+        single:mode=>controller.request(mode)});
       liquids=createNativeLiquid({cancelled:()=>disposed});
       timeline.request(requested.current);
       controller.check(checkSignal.current);
@@ -182,7 +219,7 @@ export function WhaleMascot({ running, visible = true, check }) {
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
-      checking?.dispose();liquids?.dispose();fish.remove();
+      checking?.dispose();retreatAssets?.dispose();liquids?.dispose();fish.remove();
       closeWhaleClips(clips);
       if (engine.current === controller) engine.current = null;
     };
@@ -191,7 +228,8 @@ export function WhaleMascot({ running, visible = true, check }) {
     if(engine.current?.checking)return;
     const readingNext = requested.current === 'auto'
       ? ['idle', 'return'].includes(engine.current?.stage || 'idle') : requested.current === 'idle';
-    engine.current?.request(readingNext ? 'reading' : 'idle');
+    const mode=readingNext?'reading':'idle';
+    if(!engine.current?.tapReading(mode))engine.current?.request(mode);
     clearTimeout(timer.current);
     setGreeting(true);
     timer.current = setTimeout(() => { setGreeting(false); timer.current = null; }, 1800);
@@ -203,7 +241,7 @@ export function WhaleMascot({ running, visible = true, check }) {
       <span className="anime-whale-ripple anime-whale-ripple-outer"/>
     </span>
     <button ref={button} type="button" className="anime-whale" data-playback="loading" title="轻轻碰一下小鲸鱼" aria-label="轻轻碰一下小鲸鱼"
-      onClick={greet} draggable={false} onDragStart={(event) => event.preventDefault()}>
+      onClick={greet} onKeyDown={event=>{if(event.repeat&&['Enter',' '].includes(event.key))event.preventDefault();}} draggable={false} onDragStart={(event) => event.preventDefault()}>
       <span className="anime-whale-float" aria-hidden="true">
         <img className="anime-whale-poster" src={poster} alt="" draggable={false}/>
         <canvas ref={canvas} className="anime-whale-canvas" width="512" height="512"/>

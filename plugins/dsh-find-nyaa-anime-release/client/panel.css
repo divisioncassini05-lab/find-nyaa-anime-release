@@ -7,6 +7,8 @@
   --ap-hover:#effafbf5; --ap-input:#ffffff; --ap-input-line:#b6ced7;
   --ap-glint:#ffffffd9; --ap-modal:#f9fcfd; --ap-disabled:#dfe9ec; --ap-disabled-ink:#637d85;
   --ap-current-edge:#3bafb8; --ap-current-fill:#8fdde3; --ap-current-glint:#ffffff; --ap-current-lilac:#a8a2d9;
+  --ap-ocean-depth:#e3f9f7; --ap-ocean-art:.88; --ap-ocean-light:.4;
+  --ap-bubble-opacity:.48; --ap-trace-opacity:.1;
   position:relative; isolation:isolate; container-type:inline-size;
   width:100%; height:100%; min-width:0; min-height:0; overflow:hidden;
   background:var(--ap-bg); color:var(--ap-fg);
@@ -22,6 +24,8 @@ body[data-ds-dark-theme] .anime-panel, html[data-theme='dark'] .anime-panel {
   --ap-hover:#24434ced; --ap-input:#173039; --ap-input-line:#53717b;
   --ap-glint:#c0e5ed19; --ap-modal:#182f37; --ap-disabled:#29434c; --ap-disabled-ink:#92acb4;
   --ap-current-edge:#55adb9; --ap-current-fill:#397e91; --ap-current-glint:#b9e4e9; --ap-current-lilac:#8d98c7;
+  --ap-ocean-depth:#0c3039; --ap-ocean-art:.82; --ap-ocean-light:.1;
+  --ap-bubble-opacity:.32; --ap-trace-opacity:.06;
   color-scheme:dark;
 }
 .anime-panel *, .anime-panel *::before, .anime-panel *::after { box-sizing:border-box; letter-spacing:0; }
@@ -68,6 +72,7 @@ body[data-ds-dark-theme] .anime-panel, html[data-theme='dark'] .anime-panel {
 .anime-whale-ripple { position:absolute; left:-22px; top:-4px; width:44px; height:10px; border:1px solid var(--ap-current-edge); border-top-color:var(--ap-current-glint); border-radius:50%; opacity:0; }
 .anime-whale-ripple-outer { left:-30px; top:-6px; width:60px; height:14px; }
 .anime-whale-seat.is-greeting .anime-whale-ripple { opacity:.45; }
+/* Keep the transparent sprite free of the shared button bevel, including on hover. */
 .anime-panel button.anime-whale { position:absolute; left:calc(var(--ap-whale-size) * -.5); top:calc(var(--ap-whale-size) * -.78125);
   width:var(--ap-whale-size); height:var(--ap-whale-size); aspect-ratio:1; min-height:0; padding:0; border:0; border-radius:8px;
   display:block; appearance:none; background:transparent; box-shadow:none; pointer-events:auto; touch-action:pan-y; -webkit-tap-highlight-color:transparent; }
@@ -256,25 +261,46 @@ body[data-ds-dark-theme] .anime-panel, html[data-theme='dark'] .anime-panel {
 .anime-scroll { scrollbar-width:thin; scrollbar-color:var(--ap-input-line) transparent; }
 .anime-spin { animation:anime-spin 1.4s linear infinite; }
 @keyframes anime-spin { to { transform:rotate(360deg); } }
-/* Decoration is independent of the scrolling, interactive content. */
-.anime-ocean { position:absolute; inset:0; pointer-events:none; user-select:none; overflow:hidden; z-index:0; }
-.anime-water { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:center; opacity:.55; }
-.anime-water-dark { display:none; opacity:.72; }
+/* Anchor the same painting at both edges without stretching or cropping its terrain vertically. */
+.anime-ocean { position:absolute; inset:0; pointer-events:none; user-select:none; overflow:hidden; z-index:0; background:var(--ap-ocean-depth); }
+.anime-water { position:absolute; display:block; width:max(100%,780px); height:auto; max-width:none; aspect-ratio:3 / 2; opacity:var(--ap-ocean-art); }
+.anime-water-surface { top:0; left:50%; transform:translateX(-50%); mask-image:linear-gradient(#000 0%,#000 14%,transparent 43%); }
+.anime-water-floor { bottom:0; right:0; mask-image:linear-gradient(transparent 61%,#000 90%); }
+.anime-water-dark { display:none; }
 .anime-starfish { position:absolute; right:26px; bottom:14px; width:96px; height:96px; object-fit:contain; opacity:.62; transform:rotate(16deg); }
 body[data-ds-dark-theme] .anime-starfish,html[data-theme='dark'] .anime-starfish { opacity:.32; }
 body[data-ds-dark-theme] .anime-water-light,html[data-theme='dark'] .anime-water-light { display:none; }
 body[data-ds-dark-theme] .anime-water-dark,html[data-theme='dark'] .anime-water-dark { display:block; }
-.anime-water-lighting { position:absolute; inset:-3%; background:linear-gradient(116deg,transparent 8%,#fff2 13%,transparent 21%,transparent 58%,#fff1 61%,transparent 68%); animation:anime-water-drift 34s ease-in-out infinite alternate paused; }
-.anime-bubble { position:absolute; right:5%; top:26%; width:13px; height:13px; border:1px solid #7bb9c95c; border-top:2px solid #ffffffe0; border-right:2px solid #ffffffb3; border-radius:50%; opacity:.55; animation:anime-bubble-rise 32s linear infinite paused; }
-.anime-bubble::after { content:''; position:absolute; left:2px; top:2px; width:4px; height:3px; border-radius:50%; border-top:1px solid #fff; }
-.anime-bubble-1 { right:2%; top:19%; width:23px; height:23px; animation-duration:38s; animation-delay:-17s; }
-.anime-bubble-2 { right:8%; top:11%; width:8px; height:8px; animation-duration:26s; animation-delay:-8s; }
-.anime-bubble-3 { right:3%; top:85%; width:11px; height:11px; animation-duration:30s; animation-delay:-22s; }
-.anime-bubble-4 { right:38%; top:95%; width:9px; height:9px; animation-duration:36s; animation-delay:-14s; }
-.anime-bubble-5 { right:55%; top:92%; width:6px; height:6px; animation-duration:28s; animation-delay:-5s; }
-.anime-ocean[data-running=true] .anime-bubble,.anime-ocean[data-running=true] .anime-water-lighting { animation-play-state:running; }
-@keyframes anime-bubble-rise { 0% { transform:translate(0,40px); opacity:0; } 15% { opacity:.55; } 85% { opacity:.45; } 100% { transform:translate(-14px,-160px); opacity:0; } }
-@keyframes anime-water-drift { from { transform:translate(-10px,-4px); opacity:.3; } to { transform:translate(12px,6px); opacity:.65; } }
+.anime-water-lighting { position:absolute; left:-3%; right:-3%; top:-3%; height:48%; background:linear-gradient(116deg,transparent 8%,#fff5 13%,transparent 21%,transparent 58%,#fff2 61%,transparent 68%); mask-image:linear-gradient(#000,transparent 90%); opacity:var(--ap-ocean-light); animation:anime-water-drift 34s ease-in-out infinite alternate paused; }
+.anime-ocean { --ap-ambient-play:paused; }
+.anime-ocean[data-running=true] { --ap-ambient-play:running; }
+.anime-current-traces { position:absolute; left:6%; top:110px; width:min(78%,900px); height:auto; opacity:var(--ap-trace-opacity); animation:anime-water-drift 52s ease-in-out infinite alternate; animation-play-state:var(--ap-ambient-play); }
+.anime-fauna-lane { position:absolute; left:5%; right:22%; top:126px; height:152px; overflow:clip; container-type:inline-size; --fauna-scale:1; --ap-fauna-play:paused; opacity:.76; mask-image:linear-gradient(to right,transparent,#000 9%,#000 88%,transparent); }
+.anime-day-fauna { --ap-fauna-play:var(--ap-ambient-play); }
+.anime-night-fauna { display:none; }
+body[data-ds-dark-theme] .anime-day-fauna,html[data-theme='dark'] .anime-day-fauna { display:none; --ap-fauna-play:paused; }
+body[data-ds-dark-theme] .anime-night-fauna,html[data-theme='dark'] .anime-night-fauna { display:block; --ap-fauna-play:var(--ap-ambient-play); }
+.anime-fauna-pass { position:absolute; top:4px; left:0; width:calc(var(--fauna-width) * var(--fauna-scale)); height:calc(var(--fauna-height) * var(--fauna-scale)); animation:anime-fauna-pass var(--fauna-duration) linear var(--fauna-delay) both; animation-play-state:var(--ap-fauna-play); }
+.anime-fauna-body { width:100%; height:100%; transform-origin:65% 50%; animation:anime-fish-stroke 2.6s ease-in-out infinite; animation-play-state:var(--ap-fauna-play); }
+.anime-fauna-body>img { display:block; width:100%; height:100%; object-fit:contain; }
+.anime-fauna-pass[data-movement=school] .anime-fauna-body { animation-duration:1.8s; }
+.anime-fauna-pass[data-movement=glide] .anime-fauna-body { animation-name:anime-ray-glide; animation-duration:5.8s; }
+.anime-fauna-pass[data-movement=hover] .anime-fauna-body { animation-name:anime-fauna-hover; animation-duration:4.8s; }
+.anime-fauna-pass[data-movement=pulse] .anime-fauna-body { animation-name:anime-jelly-pulse; animation-duration:3.8s; transform-origin:50% 25%; }
+.anime-ocean[data-static=true] .anime-fauna-pass { animation:none; transform:translateX(calc(50cqw - 50%)); opacity:1; }
+.anime-jellyfish-light { display:block; position:relative; width:100%; height:100%; isolation:isolate; pointer-events:none; user-select:none; }
+.anime-jellyfish-body { display:block; position:relative; width:100%; height:100%; object-fit:contain; opacity:.86; }
+.anime-jellyfish-glow { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; filter:blur(7px); mix-blend-mode:screen; mask-image:linear-gradient(#000 42%,transparent 68%); opacity:.36; animation:anime-jellyfish-glow 8s ease-in-out infinite alternate; animation-play-state:var(--ap-fauna-play,var(--ap-ambient-play,paused)); }
+.anime-bubble-trail { position:absolute; right:3%; top:118px; width:76px; height:auto; opacity:var(--ap-bubble-opacity); animation:anime-bubble-rise 32s ease-in-out infinite alternate; animation-play-state:var(--ap-ambient-play); }
+.anime-ocean[data-running=true] .anime-water-lighting { animation-play-state:running; }
+@keyframes anime-bubble-rise { from { transform:translate(0,12px); } to { transform:translate(-5px,-22px); } }
+@keyframes anime-fauna-pass { 0% { transform:translateX(-100%); opacity:0; } 9% { opacity:1; } 85% { opacity:1; } 100% { transform:translateX(100cqw); opacity:0; } }
+@keyframes anime-fish-stroke { 0%,100% { transform:translateY(3px) rotate(-1deg) skewY(-1.5deg); } 50% { transform:translateY(-3px) rotate(1deg) skewY(1.5deg); } }
+@keyframes anime-ray-glide { 0%,100% { transform:translateY(4px) rotate(-2deg) scaleY(.96); } 50% { transform:translateY(-5px) rotate(2deg) scaleY(1.02); } }
+@keyframes anime-fauna-hover { 0%,100% { transform:translateY(5px) rotate(-2deg); } 50% { transform:translateY(-7px) rotate(2deg); } }
+@keyframes anime-jelly-pulse { 0%,100% { transform:translateY(5px) scale(1.02,.98); } 35% { transform:translateY(-8px) scale(.94,1.04); } 65% { transform:translateY(-4px) scale(1,1); } }
+@keyframes anime-jellyfish-glow { from { opacity:.28; } to { opacity:.44; } }
+@keyframes anime-water-drift { from { transform:translate(-10px,-4px); } to { transform:translate(12px,6px); } }
 @container (max-width:1100px) {
   .anime-heading { align-items:flex-start; }
   .anime-table-heading,.anime-row { grid-template-columns:minmax(180px,2fr) 90px 68px 90px 100px 95px; gap:12px; }
@@ -328,10 +354,12 @@ body[data-ds-dark-theme] .anime-water-dark,html[data-theme='dark'] .anime-water-
   .anime-identity-fields { grid-template-columns:minmax(0,1fr) 84px; gap:10px; }
   .anime-form-columns { grid-template-columns:1fr; }
   .anime-panel .anime-weekdays label { width:calc((100% - 18px) / 4); }
-  .anime-water { object-position:60% center; opacity:.32; }
+  .anime-water { opacity:calc(var(--ap-ocean-art) * .8); }
   .anime-starfish { width:60px; height:60px; right:10px; bottom:9px; opacity:.35; }
   .anime-footer { padding-right:60px; }
-  .anime-bubble:nth-child(n+4) { display:none; }
+  .anime-fauna-lane { left:3%; right:45%; top:190px; height:115px; --fauna-scale:.68; opacity:.66; }
+  .anime-bubble-trail { right:6px; top:196px; width:52px; clip-path:inset(42% 0 0 0); }
+  .anime-current-traces { top:185px; width:90%; opacity:calc(var(--ap-trace-opacity) * .65); }
 }
 @media (prefers-reduced-motion:reduce) {
   .anime-panel *,.anime-panel *::before,.anime-panel *::after { animation:none !important; transition:none !important; }

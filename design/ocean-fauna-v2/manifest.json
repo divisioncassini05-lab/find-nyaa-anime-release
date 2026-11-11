@@ -1,0 +1,24 @@
+{
+  "generator": "built-in image_gen",
+  "source_directory": "original generated file IDs retained below; selected PNG masters are in this directory",
+  "assets": {
+    "clownfish-orange": "exec-38222c35-345b-4448-96d7-fbf593ad6d4a.png",
+    "clownfish-black": "exec-e0a29fcb-cdcd-450b-a416-22aaa8e6d875.png",
+    "butterflyfish": "exec-1ce6cd42-3ed4-4aae-8613-f2dd00be399d.png",
+    "porcupinefish": "exec-94482d0e-aac0-4deb-af0a-19718f1be24e.png",
+    "blue-spotted-ray": "exec-6473054a-4c5d-4933-9509-68004725e767.png",
+    "seahorse-gold": "exec-780b99aa-1cc5-4b70-9696-9de9b37aa2b1.png",
+    "seahorse-brown": "exec-25838f96-2624-4d09-9680-e3d66fedbc66.png",
+    "octopus-russet": "exec-4b55d8a8-202e-4258-abd3-9f732692b224.png",
+    "octopus-sand": "exec-8f492568-472f-49e4-8992-d68bf6601904.png",
+    "lanternfish": "exec-02721abe-247b-4f78-b7f2-21ad5047ee5a.png",
+    "hatchetfish": "exec-56363e33-9e05-4a29-9c10-a70510e501a1.png",
+    "barreleye": "exec-4c411989-6ee3-430e-ba87-c94c40db7b1f.png",
+    "dumbo-octopus": "exec-adb823b2-3f2b-44c1-b828-c531eb7acb6f.png",
+    "jelly-solmissus": "exec-9bc1f63a-faca-45a1-9ee5-33a28a8ff269.png",
+    "jelly-atolla": "exec-13199499-5660-472f-b65f-dab26ecde7e7.png",
+    "jelly-pandea": "exec-4f6c419e-61c4-40bb-ad81-a1c702a52206.png",
+    "jelly-crossota": "exec-7fcdd120-9a39-47ea-9538-d71b4462d6d2.png",
+    "jelly-phantom": "exec-65a0e358-1a28-46c4-84fc-390f508a5ae6.png"
+  }
+}

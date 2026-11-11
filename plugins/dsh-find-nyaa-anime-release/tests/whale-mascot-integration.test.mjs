@@ -7,6 +7,7 @@ import { closeWhaleClips } from '../client/whale-timeline.mjs';
 import { WhaleAmbientTimeline, clipFrame } from '../client/whale-ambient-timeline.mjs';
 import { WhaleCheckingController } from '../client/whale-checking.mjs';
 import { WhaleCheckHandoff } from '../client/whale-check-handoff.mjs';
+import { ReadingRetreatHandoff } from '../client/whale-reading-handoff.mjs';
 
 const source = await readFile(new URL('../client/WhaleMascot.jsx', import.meta.url), 'utf8');
 const { code } = await transform(source, { loader: 'jsx', format: 'cjs' });
@@ -20,10 +21,10 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 // Only hooks, canvas drawing and scheduling are faked. Run the actual component,
 // signal handler, loading continuation, timeline and checking controller together.
 function mount() {
-  const baseLoad = defer(), checkingLoad = defer(), raf = new Map(), hooks = [];
+  const baseLoad = defer(), checkingLoad = defer(), retreatLoad=defer(), raf = new Map(), hooks = [];
   let cursor = 0, effects = [], rafId = 0, now = 0, checkingOptions;
   let props = { running: true, visible: true, check: { checking: false } };
-  const harness = { hasGeometry: true, loads: 0 };
+  const harness = { hasGeometry: true, loads: 0, retreatLoads:0 };
   const context = () => Object.fromEntries(['clearRect', 'drawImage', 'save', 'restore', 'translate',
     'rotate', 'scale', 'setTransform', 'beginPath', 'ellipse', 'fill'].map(name => [name, () => {}]));
   const panel = { append() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 900 }) };
@@ -49,6 +50,10 @@ function mount() {
   };
   const modules = {
     react,
+    './whale-reading-handoff.mjs': {ReadingRetreatHandoff:class extends ReadingRetreatHandoff {
+      constructor(...args){super(...args);harness.retreat=this;}
+    }},
+    './whale-reading-retreat.mjs': {prepareReadingRetreat:()=>{harness.retreatLoads++;return retreatLoad.promise;}},
     './whale-timeline.mjs': { closeWhaleClips, decodeWhaleClips: () => baseLoad.promise },
     './whale-ambient-timeline.mjs': { clipFrame, WhaleAmbientTimeline: class extends WhaleAmbientTimeline {
       constructor(...args) { super(...args); harness.timeline = this; }
@@ -80,7 +85,13 @@ function mount() {
   }
   harness.render = changes => {
     props = { ...props, ...changes }; cursor = 0; effects = [];
-    attachRefs(module.exports.WhaleMascot(props));
+    const tree=module.exports.WhaleMascot(props);
+    attachRefs(tree);
+    function findClick(node){if(!node||typeof node!=='object')return;
+      if(node.props.onClick)harness.click=node.props.onClick;
+      for(const child of node.children)findClick(child);
+    }
+    findClick(tree);
     for (const effect of effects) effect();
   };
   harness.signal = (checking, result = null) => harness.render({ check: { checking, result } });
@@ -94,6 +105,12 @@ function mount() {
       ...Object.fromEntries(Object.entries(metadata.assets).map(([key, asset]) => [key, clip(asset.duration_ms)])) };
     harness.checking = new WhaleCheckingController({ clips, metadata, seed: 17 });
     checkingLoad.resolve(harness.checking); await settle();
+  };
+  harness.retreatReady=async()=>{
+    retreatLoad.resolve({durations:{reading:Array(16).fill(200),character:[...Array(16).fill(110),...Array(16).fill(140)],
+      rise:Array(16).fill(120),hold:Array(16).fill(180),reveal:Array(16).fill(180),recover:Array(16).fill(220)},
+      drawCharacter(){},drawMagic(){},dispose(){harness.retreatDisposed=true;}});
+    await settle();
   };
   harness.tick = delta => {
     now += delta;
@@ -192,4 +209,22 @@ test('inactive offscreen path still updates resident fish without advancing book
   h.render({ visible: false }); h.advance(500);
   assert.deepEqual([h.timeline.base.elapsed, h.timeline.bookElapsed, h.timeline.totalElapsed], before);
   assert.equal(h.checking.clock, clock + 500); assert.notEqual(JSON.stringify(h.checking.school.items), fish);
+});
+
+test('reading triple-click loads one branch and queued checking waits for reveal and the full original return',async t=>{
+ const h=mount();t.after(h.dispose);await h.baseReady();h.tick(0);h.timeline.request('reading');h.advance(6100);
+ assert.equal(h.timeline.parent,'reading');h.click();h.advance(80);h.click();h.advance(80);h.click();
+ assert.equal(h.retreatLoads,1);await h.retreatReady();h.advance(3000);
+ assert.equal(h.retreat.actor.stage,'character');const book=h.timeline.bookElapsed;
+ h.signal(true);h.signal(false,'success');assert.equal(h.loads,0);assert.equal(h.retreat.busy,true);
+ for(let i=0;i<180&&h.retreat.busy;i++)h.tick(100);
+ assert.equal(h.retreat.completed,1);assert.equal(h.loads,1);assert.ok(h.timeline.bookElapsed>book);
+ await h.checkingReady();h.advance(1);assert.equal(h.checking.active,false);
+ assert.equal(h.timeline.parent,'reading');h.advance(5600);
+ assert.equal(h.timeline.parent,'idle');assert.equal(h.checking.active,true);assert.equal(h.checking.actor.result,'success');
+});
+test('late retreat decode after unmount closes assets instead of resurrecting the character',async()=>{
+ const h=mount();await h.baseReady();h.tick(0);h.timeline.request('reading');h.advance(6100);
+ h.click();h.advance(80);h.click();h.advance(80);h.click();assert.equal(h.retreatLoads,1);
+ h.dispose();await h.retreatReady();assert.equal(h.retreatDisposed,true);
 });
