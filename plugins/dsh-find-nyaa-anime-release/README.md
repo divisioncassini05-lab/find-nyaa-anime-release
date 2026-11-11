@@ -42,7 +42,7 @@
 
 ### 从 npm 安装（推荐）
 
-本版本为 `0.2.6`。在 DSH「插件 → 添加插件」输入：
+本版本为 `0.2.7`。在 DSH「插件 → 添加插件」输入：
 
 ```text
 dsh-find-nyaa-anime-release
@@ -57,15 +57,15 @@ dsh-find-nyaa-anime-release
 
 ### 本地插件包（备用）
 
-从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.6) 下载
-`dsh-find-nyaa-anime-release-0.2.6.tgz`，交给 DSH，并说：
+从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.7) 下载
+`dsh-find-nyaa-anime-release-0.2.7.tgz`，交给 DSH，并说：
 
 > 请通过当前 profile 的插件管理器安装这个本地插件包，完成后确认技能可加载。
 
 也可以在 DSH CLI 中使用实际 profile 和本地绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.6.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.7.tgz"
 ```
 
 桌面端优先在应用内用插件管理器安装到当前 profile，不要照抄 `web` 去改另一个 profile。
@@ -83,7 +83,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.6.t
   保持不变，`0.2.2` 起安装来源为对应的 npm 精确版本。
 - 旧版路径、Git 或 `.tgz` 安装不会自动变成 npm 安装，也不显示原生注册表更新提示。
   迁移时先保留当前 profile 的配置和外部数据，再用插件管理器把同名依赖替换为
-  `dsh-find-nyaa-anime-release@0.2.6`，保留启用状态并按宿主要求重载。
+  `dsh-find-nyaa-anime-release@0.2.7`，保留启用状态并按宿主要求重载。
   若界面拒绝同名安装，可先移除插件再从 npm 添加；不要删除数据目录或定时任务。
 - 仍使用本地包时，需要手动下载新版 `.tgz` 并更新同名插件。不要只替换 `SKILL.md`；
   脚本、面板和宿主适配必须一起更新。
@@ -103,11 +103,13 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.6.t
 初次安装可让 Agent 进入技能资源目录执行 `python scripts/dsh_doctor.py`。
 它只检查本地前置条件，**不联网、不启动客户端、不下载、不修改记录**。
 
-## 图形面板（0.2.6）
+## 图形面板（0.2.7）
 
 本次加入已确认的阅读连点：阅读时在约1.2秒内点三次，等书页落稳后合书、抱书并闭眼回避；水幕遮住角色期间播放重新开书的动作，散开时回到原阅读。单击仍有原来的轻微涟漪反馈；只有阅读状态识别这套连点动作。暂停、隐藏和减少动态设置仍有效，不会因连点新增检索或下载操作。
 
-海洋背景同步本机版本：同一幅构图分别锚定水面与海底，中心保留清爽留白；白天随机经过一小群鱼或一只动物，夜晚从深海动物与水母中选择。生物经过后再换下一组，不同时堆满页面；水母只在自身附近发出轻微亮光。所有背景装饰不拦截操作，与小鲸鱼检查时召唤的水鱼独立。
+海洋背景保留同一幅水面与海底构图，新增独立环境动画：19类生物、22种外观使用原生帧图集播放，白天以浅海小鱼群为主，夜晚改为深海鱼与少量水母。同类可聚集、异类提前避让，胆小生物绕行，个体从屏外进入并游出；没有捕猎或写实生态模拟。水母和鮟鱇鱼只在自身附近柔和发光。
+
+海草根部贴合原画、叶尖错相轻摆；海床水光在白天稍明显、夜晚很弱；海洋雪缓慢沉降，白天稀少、夜晚略多，另有淡气泡与洋流。桌面白天上限40个环境生物、夜晚26个，手机为20/14；夜晚水母桌面最多2只、手机1只。全部跟随背景动态开关、页面可见性和系统减少动态设置。装饰层不拦截点击，始终低于普通环境鱼、女孩召唤鱼、女孩与页面内容；女孩及其召唤模块、坐点和现有图层未改动。
 
 原有召唤与水效保持：检查动作须等待阅读、放书或小动作结束并回到稳定静坐后进入；召唤鱼完整轮廓保持在当前可见水域上方70%高度内，窗口缩小时重新约束轨迹。指尖循行保留已确认的修复素材和透视水效，透明角色按钮不增加背景或阴影。
 

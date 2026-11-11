@@ -1,5 +1,32 @@
 # Ocean artwork
 
+## Living environment (0.2.7)
+
+`living/` now supplies 26 native-frame atlases for 19 species and 22 appearances,
+plus the reviewed bubble/current textures. `living/manifest.json` records their
+SHA-256 hashes. The renderer preserves native frame durations; it does not
+interpolate or duplicate frames to claim a higher frame rate. The preceding
+`overlays/` encounter pool remains an historical source, not the active renderer.
+
+`client/ocean/` owns the shared world, native-frame renderer and restrained
+atmosphere. Shoals use separation/alignment/cohesion, other species avoid one
+another, and shy species yield earlier. Birth/departure takes place offscreen.
+Day favors shallow-water fish; night favors deep-water fish and a few jellies.
+This is a playful two-dimensional art convention, not an ecological model.
+
+Seaweed roots and small painted waterlight patches use the existing floor
+painting's bottom-right anchor. Marine snow has three small, slow layers and
+is slightly more numerous at night. Fish, seaweed, snow, currents and bubbles
+share one scene clock. Motion disabled, hidden and reduced-motion states freeze
+the presentation without changing application data.
+
+The environment is isolated inside the existing lowest ocean stacking context.
+It cannot rise above the girl, her summoned fish, content or dialogs. The girl,
+summoning sources, seat, shared panel styles and both terrain paintings are
+unchanged from 0.2.6. No installation or cloud writes are performed by this UI.
+
+The sections below describe the preceding static encounter design.
+
 Generated bitmap decorations for the DSH dashboard:
 
 - `water-light.webp`: daylight painting, with overhead water, an open center and

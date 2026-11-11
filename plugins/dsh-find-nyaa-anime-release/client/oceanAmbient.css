@@ -1,0 +1,17 @@
+.anime-panel .anime-ocean { isolation:isolate; background:var(--ap-ocean-depth,#e3f9f7); --ap-environment-theme:day; }
+body[data-ds-dark-theme] .anime-panel .anime-ocean,html[data-theme='dark'] .anime-panel .anime-ocean { --ap-environment-theme:night; background:var(--ap-ocean-depth,#0c3039); }
+/* Keep the painting's existing edge anchors. The living seabed uses this same fit. */
+.anime-panel .anime-ocean>.anime-water { inset:auto; display:block; width:max(100%,780px); height:auto; max-width:none; aspect-ratio:3 / 2; opacity:var(--ap-ocean-art,.88); object-fit:initial; }
+.anime-panel .anime-ocean>.anime-water-surface { top:0; left:50%; transform:translateX(-50%); mask-image:linear-gradient(#000 0%,#000 14%,transparent 43%); }
+.anime-panel .anime-ocean>.anime-water-floor { bottom:0; right:0; mask-image:linear-gradient(transparent 61%,#000 90%); }
+.anime-panel .anime-ocean>.anime-water-dark { display:none; }
+body[data-ds-dark-theme] .anime-panel .anime-ocean>.anime-water-light,html[data-theme='dark'] .anime-panel .anime-ocean>.anime-water-light { display:none; }
+body[data-ds-dark-theme] .anime-panel .anime-ocean>.anime-water-dark,html[data-theme='dark'] .anime-panel .anime-ocean>.anime-water-dark { display:block; }
+.anime-panel .anime-environment { position:absolute; inset:0; z-index:0; isolation:isolate; pointer-events:none; user-select:none; overflow:hidden; }
+.anime-panel .anime-environment canvas { position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none; }
+.anime-panel .anime-environment-water { z-index:0; }
+.anime-panel .anime-environment-fauna { z-index:1; opacity:.78; }
+body[data-ds-dark-theme] .anime-panel .anime-environment-fauna,html[data-theme='dark'] .anime-panel .anime-environment-fauna { opacity:.72; }
+@container (max-width:600px) {
+  .anime-panel .anime-ocean>.anime-water { opacity:calc(var(--ap-ocean-art,.88) * .8); }
+}

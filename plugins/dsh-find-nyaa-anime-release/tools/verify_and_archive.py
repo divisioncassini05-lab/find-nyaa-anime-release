@@ -32,7 +32,7 @@ def file_sets():
     source = runtime | {prefix + path for path in skill_files} | {'.gitignore', '.npmignore', 'skills/.npmignore'}
     source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'tools').glob('*.py'))
     source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'tools').glob('*.mjs'))
-    source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'client').glob('*') if path.is_file())
+    source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'client').rglob('*') if path.is_file())
     source.add('package-lock.json')
     source.update(path.relative_to(ROOT).as_posix() for path in (ROOT / 'tests').glob('*')
                   if path.is_file() and path.suffix in {'.py', '.mjs'})

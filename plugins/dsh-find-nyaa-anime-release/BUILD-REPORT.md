@@ -1,4 +1,39 @@
-# Build verification: 0.2.6
+# Build verification: 0.2.7
+
+## Living ocean integration: 2026-11-11
+
+- Integrates the separately reviewed environment previously omitted from 0.2.6:
+  native-frame day/night fauna, social schooling/avoidance, restrained seaweed,
+  painted seabed waterlight, marine snow, bubbles and current traces.
+- The existing bottom-right floor framing is used for seabed anchors. Both
+  paintings, shared panel CSS, actor/seat sources, summoned fish sources and
+  every original character asset are unchanged from the published 0.2.6 tree.
+  Environmental canvases are isolated in the existing lowest ocean context;
+  pointer/focus handling cannot reach them. No new public RPC or user data.
+- Core and DSH generated skills remain synchronized without payload changes.
+  Core Python plus distribution tests: 765 passed. DSH Python plus archive test:
+  847 passed. Both retain 3 skips, 1 excluded live test and 15 passing subtests.
+  Both skill validators pass. A first DSH run encountered WinError 5 in the
+  unchanged two-process state replacement test; its focused rerun and the full
+  DSH rerun passed. This is recorded, not silently treated as a first-run pass.
+- Node: 304 passed, 5 optional host/dependency tests skipped, 0 failed. Includes
+  native frame selection, species motion, schooling, responsive density, fixed
+  terrain anchors, scene-time pauses and actor/checking/reading regressions.
+- Built-page browser checks pass at 1440/780/390/320px in both themes: nonblank
+  moving water/fish pixels, correct terrain framing and stacking contexts,
+  persistent pause, hidden/reduced-motion freeze, theme isolation, unchanged
+  content geometry, empty/error states and narrow configuration dialogs.
+- The unchanged actual character component also passes its 150px/132px reading
+  retreat check: all 16 hidden reopening frames, pause/resume, cleared magic
+  and restoration of the original reading. No external requests were observed.
+- Source ZIP collection now includes nested client modules; an explicit archive
+  regression ensures the new environment sources are not omitted. Runtime
+  tarball bytes and source ZIP contents are verified before publication.
+- This release does not install over the local DSH profile. It leaves the
+  existing npm 0.2.6 installation available for a user-driven update test.
+  No logged-in DSH GUI update, real download or Bangumi write is claimed here.
+
+## Previous verification: 0.2.6
 
 ## Reading retreat and approved ocean fauna: 2026-11-11
 

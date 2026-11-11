@@ -25,10 +25,10 @@
 | Codex | 下方 Skill 安装命令，原安装链接不变 |
 | DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
-DSH 本版本为 `0.2.6`，提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排。
-本次同步本机已确认的阅读连点动作和海洋背景：阅读时快速点三次，小鲸鱼会合书回避，在水幕内重新打开书，再回到原阅读；白天与夜晚分别有稀疏的海洋生物经过。原有常态、阅读循环、拿放书、召唤和随机小动作保留，背景生物与召唤鱼仍独立；这些表现不新增搜索或下载操作。
+DSH 本版本为 `0.2.7`，提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排。
+本次补齐新版水下环境：白天浅海鱼群、夜晚深海鱼与少量水母，各有原生逐帧动作、同类聚集和异类避让；海草轻摆、海床水光、海洋雪、气泡与洋流随统一时钟缓慢运动。地形、女孩及其召唤鱼的素材与图层不变；环境始终位于它们及页面操作下方。已有阅读连点、拿放书和随机小动作保留，这些表现不新增搜索或下载操作。
 推荐在 DSH「添加插件」输入 `dsh-find-nyaa-anime-release`，使用 npm 官方注册表安装，之后可通过原生版本检查更新。
-本版本安装包见 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.6)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
+本版本安装包见 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.7)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
 验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md)。Codex 安装链接及核心流程不变。
 
 ## 能做什么

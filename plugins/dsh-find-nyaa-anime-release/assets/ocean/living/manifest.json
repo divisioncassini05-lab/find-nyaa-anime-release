@@ -1,0 +1,147 @@
+{
+  "origin": "reviewed ocean-fauna-modules candidate",
+  "terrain_changed": false,
+  "native_frame_atlases": true,
+  "files": [
+    {
+      "file": "clownfish-orange.webp",
+      "sha256": "a09983f16488e8a5f4a3513c0ce4fb45ce9c4807e0e6b351cd1192b162e70898",
+      "bytes": 627506
+    },
+    {
+      "file": "jelly-solmissus.webp",
+      "sha256": "9d9c0f2a5cc1f6a045c9e278bd057a3ae29540edeba795661b1dd641a0990b76",
+      "bytes": 576888
+    },
+    {
+      "file": "anglerfish.webp",
+      "sha256": "cd664247308f003e07eb41b4b391689f8fe265aa41a116a10ca1f806c3d22851",
+      "bytes": 450868
+    },
+    {
+      "file": "barreleye.webp",
+      "sha256": "0e351b9986a45495d3ee62ecac91d01d1c08ba837cecc2502ef24014314d269a",
+      "bytes": 538572
+    },
+    {
+      "file": "blue-spotted-ray.webp",
+      "sha256": "a078453c93ae8f67379410377bbbd891809f9b2e4498f85767fd060b2cca1dc4",
+      "bytes": 227272
+    },
+    {
+      "file": "butterflyfish.webp",
+      "sha256": "91f46ebea1296aec46fad716629a97b2345257f37783035fc946704e4fce22b4",
+      "bytes": 540210
+    },
+    {
+      "file": "clownfish-black.webp",
+      "sha256": "020ee3f14a51a2d82cb08e08244413504ee36b2524d526de59ed20d08b6c4d1a",
+      "bytes": 452492
+    },
+    {
+      "file": "dumbo-octopus.webp",
+      "sha256": "ea39da098d6c503fb24df3085c73a936defd6adfbfab819f77d50f8045c2f371",
+      "bytes": 624558
+    },
+    {
+      "file": "fish-jade-0.webp",
+      "sha256": "a3a93d6c4ce11a549eb7658259c6288e247cbbb1153660fb38b8e01d5c8d0b23",
+      "bytes": 222066
+    },
+    {
+      "file": "fish-jade-1.webp",
+      "sha256": "b83b92c0ab3a5e5ad763ca472f1c1ec9f7b02ecb2001fa4dd4ff21507e1a2502",
+      "bytes": 239004
+    },
+    {
+      "file": "fish-jade-2.webp",
+      "sha256": "4a8bf3bc4a811e76a95bd8fcbb6aea3540ee14ed4bf5ce5f7b756a132006f1b6",
+      "bytes": 240052
+    },
+    {
+      "file": "fish-silver-0.webp",
+      "sha256": "357893877b021e077eab8ceb43ef2a8f6580e34f8e2d24b5ca449a821d1e4f12",
+      "bytes": 265270
+    },
+    {
+      "file": "fish-silver-1.webp",
+      "sha256": "6160480e25b42095cf63157a12fbf00aa95715a43418fc08a0d80adc4db921c5",
+      "bytes": 274452
+    },
+    {
+      "file": "fish-silver-2.webp",
+      "sha256": "f089c39c64a333e89da9c2a3c378ca96f0ac557df3167bf779a4c5bdafd06a89",
+      "bytes": 281704
+    },
+    {
+      "file": "hatchetfish.webp",
+      "sha256": "731e168f18e923b33a17e328dcc1ff5468ee0e743d0dbbb3cd74a7007792d417",
+      "bytes": 477992
+    },
+    {
+      "file": "jelly-atolla.webp",
+      "sha256": "e21ac5086e1aa6c79ad7e5eff8924bfdb804661a484db184c0eec58c3dfd3f97",
+      "bytes": 393710
+    },
+    {
+      "file": "jelly-crossota.webp",
+      "sha256": "be8f923afa75becd65580d386c72643100247b4e946839adf56b6c0f4a9a71a3",
+      "bytes": 1014436
+    },
+    {
+      "file": "jelly-pandea.webp",
+      "sha256": "065d327f0c441ea452372014fce5af3857b766f1ceae600500fb42be194eb632",
+      "bytes": 450914
+    },
+    {
+      "file": "jelly-phantom.webp",
+      "sha256": "92486143bdf67b0e470211893bb8dcf0f3b904746c63b295c9eba66074f244c0",
+      "bytes": 721750
+    },
+    {
+      "file": "lanternfish.webp",
+      "sha256": "63b1055c81c47003f4e611865b78aae22ea67246127e631f44aa524ca15c8107",
+      "bytes": 265640
+    },
+    {
+      "file": "octopus-russet.webp",
+      "sha256": "e0b993ed872bf8c561bce4d4947ebfb041ed83f9882011ac758dc2a932a2e40a",
+      "bytes": 586082
+    },
+    {
+      "file": "octopus-sand.webp",
+      "sha256": "9f37f84ca8d9891c937e9cca6dcb095caae15acf374be0f9f224e6c5660510c1",
+      "bytes": 593142
+    },
+    {
+      "file": "porcupinefish.webp",
+      "sha256": "d4d1a4e11c254d2219a4a367801b61d2e4ff46b4c98d829a7f3f0e1dca584106",
+      "bytes": 501622
+    },
+    {
+      "file": "seahorse-brown.webp",
+      "sha256": "ed62f1fddffe8b6076a44ea5a8d6b212859629cda151aeb21eb49843372a2a8a",
+      "bytes": 442300
+    },
+    {
+      "file": "seahorse-gold.webp",
+      "sha256": "becb97bfe747e1a97efa2f46ddfc437dff595e5c594d0d4e7fd9be09ebbfb88a",
+      "bytes": 452406
+    },
+    {
+      "file": "whale-easter-egg.webp",
+      "sha256": "7a8dcbea8182301dd4bb12096eea9cc1826c01c70c8631c53bf3e6f81958175c",
+      "bytes": 488912
+    },
+    {
+      "file": "bubble-trail.webp",
+      "sha256": "c96c02e66f3ec1bf7c0de78361dd910ca1856b7aedb1069275f2bc8834c04d34",
+      "bytes": 5742
+    },
+    {
+      "file": "current-traces.webp",
+      "sha256": "de08676661878e7d8e4626999766db6d126954e45f2d32220c232f3b5bf31f83",
+      "bytes": 26722
+    }
+  ]
+}
