@@ -20,7 +20,7 @@ export function drawWater(ctx,clips,timeline,manifest,core){
  buffer??=new OffscreenCanvas(768,768);const b=buffer.getContext('2d');b.clearRect(0,0,768,768);
  mix(b,previous,current,blend,manifest.effect_origin,manifest.effect_origin,manifest.effect_size);
  ctx.drawImage(buffer,0,0);
- // Only the effect eases in/out; the original reading cel is never cross-faded.
+ // Ease only the water effect, never the character or original reading cel.
  const opacity=s==='rise'?ease(t/180):s==='reveal'?1-ease((t-(timeline.durations.reveal-450))/450):1;
  if(opacity<1){ctx.save();ctx.globalCompositeOperation='destination-in';ctx.fillStyle=`rgba(0,0,0,${opacity})`;ctx.fillRect(0,0,768,768);ctx.restore();}
 }

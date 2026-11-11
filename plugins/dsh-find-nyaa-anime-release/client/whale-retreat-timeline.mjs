@@ -6,7 +6,7 @@ export function frameAt(times, elapsed) {
   return times.length-1;
 }
 
-// The opaque water interval, not the character's final pose, owns the reset.
+// The fully opaque water interval owns the return to the original reading clip.
 export class RetreatTimeline {
   constructor(clips) {
     this.clips=clips;this.clock=0;this.readingElapsed=0;this.stage='reading';
