@@ -2,9 +2,11 @@ import React, { useCallback, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Panel } from './Panel.jsx';
 import css from './panel.css';
+import { marketLibrary, marketShows, marketPlans } from './market-fixture.mjs';
 
 const style = document.createElement('style'); style.textContent = css; document.head.append(style);
 const params = new URLSearchParams(location.search);
+const market = params.get('state') === 'market';
 if (params.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
 const fixture = [
   { id:'demo-1', bangumiSubjectId:101, title:'葬送的芙莉莲', season:'S02', handled:5, latest:5, target:6, total:12, phase:'airing', waiting:false, pending:0, latestDelivery:{episode:5, checkedAt:'2026-11-07T10:00:00Z', sourceUrl:'https://nyaa.si/view/123456'} },
@@ -14,11 +16,13 @@ const fixture = [
 ];
 if (params.get('state') === 'bangumi') Object.assign(fixture[0], {watchSource:'bangumi', watchedCount:10, collectionType:4, syncPending:1});
 async function loadSnapshot(signal) {
+  if (market) return {exists:true, shows:marketShows};
   await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 180); signal.addEventListener('abort', () => {clearTimeout(timer); reject(new DOMException('Aborted','AbortError'));}, {once:true}); });
   if (params.get('state') === 'error') throw new Error('state_read_failed');
   return { exists: true, shows: params.get('state') === 'empty' ? [] : fixture };
 }
 async function loadBangumi() {
+  if (market) return {status:'ready', cached:true, checked_at:'2026-11-11T02:00:00Z', items:marketLibrary};
   if (params.get('state') === 'slow-library') await new Promise((resolve) => setTimeout(resolve, 2500));
   if (params.get('state') === 'connection' && !demoConnected) return { status:'not_configured', items:[] };
   if (params.get('state') === 'offline') throw new Error('bangumi_network_unavailable');
@@ -42,8 +46,9 @@ if (params.get('state') === 'missing') {
   demoPlans[0].evidence.resources=[1,2,3,4,5].map(episode=>({...demoPlans[0].evidence.latestFound,episode,infoHash:String(episode).repeat(40),download:{status:episode<=2?'completed':'not_submitted'}}));
   demoPlans.push({id:'found-package',revision:1,trackId:'demo-4',title:'紫罗兰永恒花园',mode:'season_batch',tier:'browse',enqueue:false,intervalHours:0,evidence:{foundPackage:true,completedDownloads:0,latestPackage:{scope:'season',infoHash:'b'.repeat(40),canDownload:true},download:{status:'not_submitted'}}});
 }
-async function loadPlans() { return { plans: structuredClone(demoPlans), schedulerAvailable:true }; }
+async function loadPlans() { return { plans: structuredClone(market ? marketPlans : demoPlans), schedulerAvailable:true }; }
 async function saveConfig(endpoint, payload) {
+  if (market) throw new Error('Documentation preview is read-only');
   if (endpoint === 'plans/download') { const p=demoPlans.find(p=>p.id===payload.id); const resource=p.evidence.resources?.find(r=>r.infoHash===payload.infoHash); if(resource) resource.download={status:'downloading',progress:.43}; else p.evidence.download={status:'downloading',progress:.43};p.revision++;return {status:'download_submitted'}; }
   if (endpoint === 'plans/requirements' || endpoint === 'plans/schedule') { const p=demoPlans.find(p=>p.id===payload.id);Object.assign(p,payload,{revision:p.revision+1});if(payload.schedule) {p.scheduleId=payload.schedule.kind==='manual'?null:'preview-task';p.scheduleActive=payload.schedule.kind!=='manual'&&!p.schedulePaused;}return {status:'saved'}; }
   if (endpoint === 'plans/schedulePause') { const p=demoPlans.find(p=>p.id===payload.id);p.schedulePaused=payload.paused;p.scheduleActive=!payload.paused;p.revision++;return {status:'saved'}; }

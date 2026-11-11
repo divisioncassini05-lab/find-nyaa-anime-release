@@ -2,7 +2,8 @@
 
 The user's update request applies to **both** the Codex skill and the DSH plugin.
 Keep the existing repository and Codex installation URL stable.
-The Chinese display name is `动漫搜索与自动追番`; keep technical identifiers unchanged.
+The public project name is `dsh-find-anime` (动漫搜索与追番管理); keep
+technical identifiers and installation URLs unchanged.
 
 - Canonical public core: `skills/find-nyaa-anime-release/`.
 - DSH distribution: `plugins/dsh-find-nyaa-anime-release/`.

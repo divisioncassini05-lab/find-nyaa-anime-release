@@ -1,0 +1,10 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 1120
+  },
+  "source": "client/Panel.jsx",
+  "fixture": "client/market-fixture.mjs",
+  "externalNetwork": false,
+  "errors": []
+}

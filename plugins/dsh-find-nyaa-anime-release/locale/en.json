@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "Anime search and tracking",
-    "description": "Review anime releases, verify Chinese subtitles and deliver qualified episodes or full seasons to qBittorrent.",
+    "title": "dsh-find-anime",
+    "description": "Search Nyaa for the latest episode, missing episodes or complete seasons with quality and Chinese subtitle checks. Includes scheduled tracking, qBittorrent delivery, a release inbox, Bangumi lists and manual progress sync, with animated day/night underwater themes.",
     "detail": "README.md"
   }
 }

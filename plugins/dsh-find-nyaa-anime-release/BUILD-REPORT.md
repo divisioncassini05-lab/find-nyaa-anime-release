@@ -1,4 +1,27 @@
-# Build verification: 0.2.7
+# Build verification: 0.2.8
+
+## Public presentation update: 2026-11-11
+
+- Public display name and page heading are now `dsh-find-anime`; the npm name,
+  plugin IDs, Codex installation URL and state locations are unchanged.
+- Rewrites the Chinese detail page and bilingual summary; five screenshots use
+  the actual panel with fictional, offline fixture records. Screenshot capture
+  blocks external requests and rejects configuration writes. No personal data.
+- The screenshot manifest ships beside package.json for public market discovery.
+  Preview fixtures are not part of the production client bundle.
+- Core/distribution Python: 765 passed. DSH/adapter/archive Python: 847 passed.
+  Each suite has 3 skips, 1 excluded live test and 15 passing subtests. Both retain
+  the existing unknown-live-marker warning. Both UTF-8 skill validators and the
+  generated-payload drift check pass. No core or adapter behavior changes.
+- Node suite exits successfully (309 test outcomes, including optional skips).
+  Production client builds successfully. Five Playwright/Edge screenshots have
+  zero page errors and were visually inspected, including the night theme.
+- Package/archive verification is performed on the exact release tarball before
+  publication. npm bytes and GitHub asset digests are verified independently.
+- No local DSH installation, real downloads, account writes or scheduler changes
+  are part of this release. Public market submission remains subject to review.
+
+## Previous verification: 0.2.7
 
 ## Living ocean integration: 2026-11-11
 

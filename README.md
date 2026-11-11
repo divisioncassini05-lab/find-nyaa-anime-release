@@ -1,4 +1,6 @@
-# 动漫搜索与自动追番
+# dsh-find-anime · 动漫搜索与自动追番
+
+DSH 版提供追番收件箱、定时安排、qBittorrent 下载联动与手动 Bangumi 进度同步。[新版详细页与界面配图](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md)。对外名称更新不改变现有 npm 包名、Codex Skill 名称和安装链接。
 
 `find-nyaa-anime-release` · Codex Skill / DeepSeek Harness 插件
 
@@ -25,10 +27,10 @@
 | Codex | 下方 Skill 安装命令，原安装链接不变 |
 | DeepSeek Harness | [DSH 插件详情](plugins/dsh-find-nyaa-anime-release/DETAILS.zh.md) · [安装说明](plugins/dsh-find-nyaa-anime-release/README.md) · [下载发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases) |
 
-DSH 本版本为 `0.2.7`，提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排。
-本次补齐新版水下环境：白天浅海鱼群、夜晚深海鱼与少量水母，各有原生逐帧动作、同类聚集和异类避让；海草轻摆、海床水光、海洋雪、气泡与洋流随统一时钟缓慢运动。地形、女孩及其召唤鱼的素材与图层不变；环境始终位于它们及页面操作下方。已有阅读连点、拿放书和随机小动作保留，这些表现不新增搜索或下载操作。
+DSH 本版本为 `0.2.8`，提供追番收件箱、完整 Bangumi 番单、原生配置窗口与定时安排。
+本次统一 `dsh-find-anime` 名称、简介与详细页，并更新五张界面配图。保留 0.2.7 的昼夜水下环境：浅海鱼群、深海鱼与水母、海草轻摆、水光、海洋雪、气泡与洋流；不改变地形、角色动作、图层或搜索下载逻辑。
 推荐在 DSH「添加插件」输入 `dsh-find-nyaa-anime-release`，使用 npm 官方注册表安装，之后可通过原生版本检查更新。
-本版本安装包见 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.7)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
+本版本安装包见 [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.8)；旧 `.tgz` / Git 安装需先[迁移到 npm 来源](plugins/dsh-find-nyaa-anime-release/README.md#更新已有安装)，不会自动转换。
 验证范围和预览截图见 [面板说明](plugins/dsh-find-nyaa-anime-release/README.md)。Codex 安装链接及核心流程不变。
 
 ## 能做什么
@@ -54,7 +56,7 @@ DSH 本版本为 `0.2.7`，提供追番收件箱、完整 Bangumi 番单、原�
 - Bangumi 番单展示五种收藏状态，支持封面、检索、类型筛选与评分/日期排序；读取番单不会自动下载。
 - 本地筛选、设置与手动同步不调用模型；资源检索仍保留必要的完整证据审核。
 
-![DSH 追番收件箱示例数据预览](plugins/dsh-find-nyaa-anime-release/assets/readme/dsh-panel-preview.png)
+![DSH 追番收件箱，当前组件离线预览，虚构示例数据](plugins/dsh-find-nyaa-anime-release/assets/readme/market/01-inbox-day.png)
 
 ## 安装（以 Codex 为例）
 

@@ -1,7 +1,7 @@
 {
   "meta": {
-    "title": "动漫搜索与自动追番",
-    "description": "用自然语言找 Nyaa 动漫资源，核对季集、画质和中文字幕，返回磁力或交给 qBittorrent，并支持定时追番。",
+    "title": "dsh-find-anime",
+    "description": "动漫搜索与追番管理：支持最新单集、补齐缺集与整季补番，按画质和中文字幕要求筛选 Nyaa 资源；提供定时追番、qBittorrent 下载联动与追番收件箱，可读取 Bangumi 番单并手动同步观看进度。附带昼夜水下主题、动态鱼群与互动角色。",
     "detail": "DETAILS.zh.md"
   }
 }

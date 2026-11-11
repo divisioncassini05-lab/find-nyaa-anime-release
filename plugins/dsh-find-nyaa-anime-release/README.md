@@ -1,6 +1,14 @@
-# 动漫搜索与自动追番 · DSH 插件
+# dsh-find-anime · 动漫搜索与追番管理
 
 [完整功能介绍与使用说明](DETAILS.zh.md) · [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases)
+
+动漫资源搜索与追番管理：支持最新单集、补齐缺集与整季补番，按画质和中文字幕要求筛选 Nyaa 资源；提供定时追番、qBittorrent 下载联动与追番收件箱，可读取 Bangumi 番单并手动同步页面计划的观看进度。附带昼夜水下主题、动态鱼群与互动角色。
+
+对外名称为 `dsh-find-anime`，安装包仍为 `dsh-find-nyaa-anime-release`，已有安装和更新渠道不变。
+
+![追番收件箱，当前组件离线预览，虚构示例数据](assets/readme/market/01-inbox-day.png)
+
+[查找范围与定时](DETAILS.zh.md#设好要求之后看结果) · [画质与字幕](DETAILS.zh.md#画质和字幕分别设要求) · [Bangumi 番单](DETAILS.zh.md#bangumi-番单不只是在看) · [夜间主题](DETAILS.zh.md#昼夜水下界面)
 
 第一次使用？先看 [使用教程与常用说法](skills/find-nyaa-anime-release/references/getting-started.md)，或直接对 Agent 说“使用教程”。
 
@@ -42,7 +50,7 @@
 
 ### 从 npm 安装（推荐）
 
-本版本为 `0.2.7`。在 DSH「插件 → 添加插件」输入：
+本版本为 `0.2.8`。在 DSH「插件 → 添加插件」输入：
 
 ```text
 dsh-find-nyaa-anime-release
@@ -57,15 +65,15 @@ dsh-find-nyaa-anime-release
 
 ### 本地插件包（备用）
 
-从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.7) 下载
-`dsh-find-nyaa-anime-release-0.2.7.tgz`，交给 DSH，并说：
+从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.8) 下载
+`dsh-find-nyaa-anime-release-0.2.8.tgz`，交给 DSH，并说：
 
 > 请通过当前 profile 的插件管理器安装这个本地插件包，完成后确认技能可加载。
 
 也可以在 DSH CLI 中使用实际 profile 和本地绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.7.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.8.tgz"
 ```
 
 桌面端优先在应用内用插件管理器安装到当前 profile，不要照抄 `web` 去改另一个 profile。
@@ -83,7 +91,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.7.t
   保持不变，`0.2.2` 起安装来源为对应的 npm 精确版本。
 - 旧版路径、Git 或 `.tgz` 安装不会自动变成 npm 安装，也不显示原生注册表更新提示。
   迁移时先保留当前 profile 的配置和外部数据，再用插件管理器把同名依赖替换为
-  `dsh-find-nyaa-anime-release@0.2.7`，保留启用状态并按宿主要求重载。
+  `dsh-find-nyaa-anime-release@0.2.8`，保留启用状态并按宿主要求重载。
   若界面拒绝同名安装，可先移除插件再从 npm 添加；不要删除数据目录或定时任务。
 - 仍使用本地包时，需要手动下载新版 `.tgz` 并更新同名插件。不要只替换 `SKILL.md`；
   脚本、面板和宿主适配必须一起更新。
@@ -103,7 +111,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.7.t
 初次安装可让 Agent 进入技能资源目录执行 `python scripts/dsh_doctor.py`。
 它只检查本地前置条件，**不联网、不启动客户端、不下载、不修改记录**。
 
-## 图形面板（0.2.7）
+## 图形面板（0.2.8）
 
 本次加入已确认的阅读连点：阅读时在约1.2秒内点三次，等书页落稳后合书、抱书并闭眼回避；水幕遮住角色期间播放重新开书的动作，散开时回到原阅读。单击仍有原来的轻微涟漪反馈；只有阅读状态识别这套连点动作。暂停、隐藏和减少动态设置仍有效，不会因连点新增检索或下载操作。
 
@@ -118,7 +126,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.7.t
 安装并按宿主提示重载后，支持 Client UI 的 profile 会注册侧栏“动漫追番”。
 纯终端或无 Client 服务的环境仍提供原来的 Skill，不强制安装 UI 服务。
 
-![图形面板独立预览，使用示例数据，并非已登录的 DSH 实机截图](assets/readme/dsh-panel-preview.png)
+![夜间追番收件箱，当前组件离线预览，虚构示例数据](assets/readme/market/05-inbox-night.png)
 
 - 页面分为 **追番收件箱** 和 **Bangumi 番单** 两个标签，默认打开收件箱；本地下载和云端观看进度分开显示。
 - 收件箱默认优先展示异常和新结果，列表直接显示找到的资源、下载状态和已同步进度。

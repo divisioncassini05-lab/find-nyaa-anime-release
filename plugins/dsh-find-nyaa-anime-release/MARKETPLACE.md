@@ -10,7 +10,7 @@
 - [npm 包](https://www.npmjs.com/package/dsh-find-nyaa-anime-release)
 - [DSH 自定义市场索引](https://raw.githubusercontent.com/divisioncassini05-lab/find-nyaa-anime-release/main/marketplace.json)
 
-将索引地址加入 DSH 的 Custom plugin indexes / Discover 后刷新，选择「动漫搜索与自动追番」。从 `0.2.2` 起，索引使用 npm 精确版本，更新时保留同一个索引 URL。本项目尚未宣称被公共市场收录。
+将索引地址加入 DSH 的 Custom plugin indexes / Discover 后刷新，选择「dsh-find-anime」。从 `0.2.2` 起，索引使用 npm 精确版本，更新时保留同一个索引 URL。本项目尚未宣称被公共市场收录。
 
 ## 发布仓库
 
