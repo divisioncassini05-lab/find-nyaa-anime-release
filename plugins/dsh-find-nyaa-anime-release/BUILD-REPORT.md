@@ -1,3 +1,19 @@
+# Local sync fix after 0.2.11 (unpublished)
+
+- A watched collection with missing episode marks no longer disables Sync or
+  short-circuits the native writer. Only verified episode readback completes it.
+- Preserve watched while filling the original requested range; partial retries
+  never widen that range. Startup still changes no episode progress.
+- Successful watched/finale sync stops local tracking, leaves Watching and stays
+  in Completed/All with existing downloads. Completed buttons show their result.
+- Core Python: 793 passed; DSH Python: 892 passed (3 platform skips, 1 live test
+  deselected and 15 passing subtests each). Changes affect the DSH panel adapter;
+  the shared Codex sync path already verifies and fills individual episode IDs.
+- Node regression: 312 passed, 5 platform/environment skips. Covers watched flags
+  with empty progress, failed readback, idempotent retries, preserved specials,
+  original retry scope, finale shutdown and leaving the active filter.
+- This local maintenance candidate has not been published to GitHub or npm.
+
 # Build verification: 0.2.11
 
 - Context-only startup is read-only in both hosts, including the DSH optional

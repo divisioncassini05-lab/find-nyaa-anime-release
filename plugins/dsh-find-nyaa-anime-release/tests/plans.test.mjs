@@ -353,7 +353,7 @@ test('on-hold stops both recurring and queued checks before write, retaining pla
 }));
 
 test('complete choice pauses a one-shot without deleting its plan', () => fixture(async (original, host, file) => {
-  const service = createPlanService({ file, scheduler: () => host, collectionWriter: async () => ({}) });
+  const service = createPlanService({ file, scheduler: () => host, collectionWriter: async () => ({progress:'synced'}) });
   await service.mutate('save', { ...values, mode: 'movie', bangumiSubjectId: 123 });
   const [plan] = (await service.list()).plans;
   await service.mutate('collection', { id: plan.id, revision: plan.revision, collectionType: 2 });
@@ -389,6 +389,35 @@ test('finale sync marks watched before downloads finish and pauses first', () =>
 test('unknown found evidence does not synchronize broadcast latest or next target', () => fixture(async (service) => {
   await service.mutate('save',values);const [p] = (await service.list()).plans;
   await assert.rejects(service.mutate('sync',{id:p.id,revision:p.revision}),/no_found_episode/);
+}));
+
+for(const progress of ['synced','pending','not_requested']) {
+  test(`already-watched sync stops tracking without inventing episode success: ${progress}`,()=>fixture(async(original,host,file)=>{
+    await original.mutate('save',{...values,intervalHours:4,bangumiSubjectId:123});
+    const [p]= (await original.list()).plans;
+    const service=createPlanService({file,scheduler:()=>host,evidenceReader:async()=>({[p.id]:{latestFound:{episode:12}}}),
+      collectionWriter:async()=>({collectionType:2,progress})});
+    const result=await service.mutate('sync',{id:p.id,revision:p.revision});
+    const [done]=(await service.list()).plans;
+    assert.equal(done.paused,true);assert.equal(done.collectionType,2);
+    assert.equal(host.tasks.get(p.scheduleId).status,'paused');
+    assert.equal(done.collectionAction,'sync');assert.equal(done.collectionEpisode,12);
+    assert.equal(done.syncedEpisode,progress==='synced'?12:undefined);
+    assert.equal(result.status,progress==='synced'?'collection_synced':'collection_partial');
+    assert.equal(result.trackingCompleted,progress==='synced');
+  }));
+}
+
+test('progress retry preserves its original scope when another episode was found',()=>fixture(async(original,host,file)=>{
+  await original.mutate('save',{...values,bangumiSubjectId:123});
+  const [p]=(await original.list()).plans;
+  let latest=5;const scopes=[];
+  const service=createPlanService({file,scheduler:()=>host,evidenceReader:async()=>({[p.id]:{latestFound:{episode:latest}}}),
+    collectionWriter:async(r)=>{scopes.push(r.throughEpisode);return {collectionType:2,progress:scopes.length===1?'pending':'synced'};}});
+  await service.mutate('sync',{id:p.id,revision:p.revision});
+  latest=6;const [pending]=(await service.list()).plans;
+  await service.mutate('sync',{id:p.id,revision:pending.revision});
+  assert.deepEqual(scopes,[5,5]);assert.equal((await service.list()).plans[0].syncedEpisode,5);
 }));
 
 test('old panel prompt upgrades without resuming a paused schedule', () => fixture(async (service, host) => {

@@ -2,6 +2,7 @@ import React from 'react';
 import { ChevronRight, ExternalLink, Download, CalendarDays, SlidersHorizontal, MoreHorizontal, Search, RotateCw, CircleCheck, CircleAlert, Clock3, Monitor, Captions } from 'lucide-react';
 import { Cover } from './Cover.jsx';
 import { PlanStatusActions } from './PlanStatusActions.jsx';
+import { primaryAction, syncedThrough } from './library.mjs';
 import { inboxResult } from './inbox.mjs';
 import { planFacts, nextCheckLabel, syncLabel } from './presentation.mjs';
 import { hasSchedule, scheduleLabel } from '../host/schedule.js';
@@ -13,8 +14,8 @@ export function InboxRecord({ record: r, expanded, toggle, action, busy }) {
   const p = r.plan;
   const result = inboxResult(r); const facts = planFacts(r); const sync = syncLabel(r);
   const ResultIcon = result.tone === 'warn' ? CircleAlert : result.tone === 'success' ? CircleCheck : result.download.status === 'downloading' ? Download : Clock3;
-  const synced = Math.max(p?.syncedEpisode || 0, r.watchedCount || 0);
-  const retryCollection = ['pending', 'partial'].includes(p?.collectionSync) && [2, 4, 5].includes(p.collectionType);
+  const synced = syncedThrough(p);
+  const retryCollection = primaryAction(r).kind === 'retry';
   const retry = () => retryCollection ? action('collection', r, p.collectionType) : action('sync', r);
   const autoEnabled = Boolean(p?.scheduleActive && !p.schedulePaused && !p.paused);
   const stopped = p?.paused ? collection[p.collectionType] || '已停止' : null;

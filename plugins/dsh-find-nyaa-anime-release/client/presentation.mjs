@@ -1,4 +1,5 @@
 import { hasSchedule, scheduleFor } from '../host/schedule.js';
+import { syncedThrough } from './library.mjs';
 
 export function syncLabel(record) {
   if (record.plan?.collectionSync === 'partial') return { text: '状态已同步，集数未补齐', tone: 'warn' };
@@ -7,8 +8,8 @@ export function syncLabel(record) {
   if (record.plan) {
     if (!record.bangumiSubjectId) return { text: '未关联', tone: 'muted' };
     const found = record.plan.evidence?.latestFound?.episode;
-    const synced = Math.max(record.plan.syncedEpisode || 0, record.watchedCount || 0);
-    if (record.plan.collectionType === 2 && record.plan.collectionSync === 'synced') return { text: '看过', tone: 'success' };
+    const synced = syncedThrough(record.plan);
+    if (record.plan.collectionType === 2 && record.plan.collectionSync === 'synced' && record.plan.collectionProgress === 'synced') return { text: '看过，分集进度已同步', tone: 'success' };
     if (found) return found > synced ? { text: `可同步至 E${String(found).padStart(2, '0')}`, tone: 'muted' } : { text: '已同步', tone: 'success' };
     return { text: '暂无新进度', tone: 'muted' };
   }

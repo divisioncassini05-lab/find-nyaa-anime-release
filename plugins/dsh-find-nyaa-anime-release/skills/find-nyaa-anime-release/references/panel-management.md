@@ -70,9 +70,15 @@ never revive a user-paused/deleted plan or a blocked/conflicting identity.
 
 The new-anime primary button is Sync. It synchronizes all regular episodes up to
 the latest successfully found episode, including gaps, even before download ends.
-When this is a reliably confirmed finale, the same click marks the work watched.
+When this is a reliably confirmed finale, the same click marks the work watched,
+stops local tracking and removes it from the active Watching filter. Retain its
+plan, resources and download history under Completed/All. A cloud work already
+marked watched can still have missing episode marks: Sync must fill its requested
+episode scope while preserving watched, then stop local tracking as well.
 The completed-anime/catch-up primary button is Mark watched. Both buttons turn
-disabled when nothing remains to sync. The small dropdown only offers on-hold and
+disabled with an explicit completed label only after episode progress is verified;
+a watched collection flag or aggregate count alone cannot disable Sync. A failed
+progress retry keeps its original episode scope. The small dropdown only offers on-hold and
 dropped, not watching/wish/watched. These writes run directly through the native host,
 verifies readback and retains the local plan. Completed, on-hold and dropped
 choices pause future schedules before cloud sync; a failed sync never resumes

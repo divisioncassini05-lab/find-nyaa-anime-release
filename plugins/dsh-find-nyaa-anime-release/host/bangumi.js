@@ -161,13 +161,20 @@ export async function updateBangumiCollection({ file = statePath(), subjectId, c
   const subject = await apiJson(token, `/v0/subjects/${subjectId}`, signal, request);
   if (subject.id !== subjectId || subject.type !== 2) throw fail('bangumi_invalid_subject');
   const collectionRoute = `/v0/users/${encodeURIComponent(config.username)}/collections/${subjectId}`;
+  let preservedWatched = false;
   if (preserveWatched) {
     let before;
     try { before = await apiJson(token, collectionRoute, signal, request); }
     catch (error) { if (error.code !== 'bangumi_http_404') throw error; }
-    if (before?.type === 2 && collectionType !== 2) return { status: 'bangumi_collection_updated', collectionType: 2, progress: 'not_requested', preservedWatched: true };
+    if (before?.type === 2) {
+      // Startup may preserve the flag only; an explicit progress click must still
+      // verify and fill its episode scope even when the whole work says watched.
+      if (throughEpisode === null && collectionType !== 2) return { status: 'bangumi_collection_updated', collectionType: 2, progress: 'not_requested', preservedWatched: true };
+      collectionType = 2;
+      preservedWatched = true;
+    }
   }
-  await apiJson(token, `/v0/users/-/collections/${subjectId}`, signal, request, { type: collectionType });
+  if (!preservedWatched) await apiJson(token, `/v0/users/-/collections/${subjectId}`, signal, request, { type: collectionType });
   const after = await apiJson(token, `/v0/users/${encodeURIComponent(config.username)}/collections/${subjectId}`, signal, request);
   if (after.type !== collectionType) throw fail('bangumi_write_not_confirmed');
   let progress = 'not_requested';
@@ -187,7 +194,7 @@ export async function updateBangumiCollection({ file = statePath(), subjectId, c
     cached.checked_at = null;
     await writeJson(bangumiCachePath(file), cached);
   }
-  return { status: 'bangumi_collection_updated', collectionType, progress, ...(progress === 'synced' ? { syncedEpisode: throughEpisode ?? subject.eps } : {}) };
+  return { status: 'bangumi_collection_updated', collectionType, progress, ...(preservedWatched ? { preservedWatched: true } : {}), ...(progress === 'synced' ? { syncedEpisode: throughEpisode ?? subject.eps } : {}) };
 }
 
 async function syncThroughEpisode(token, subject, through, signal, request) {

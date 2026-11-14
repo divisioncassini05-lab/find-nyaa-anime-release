@@ -149,9 +149,41 @@ for (const scenario of ['success', 'missing_number', 'duplicate_number', 'wrong_
       return Response.json({type:collectionType});
     };
     const r=await updateBangumiCollection({file,subjectId:123,collectionType:scenario==='finale_retry'?2:3,throughEpisode:5,preserveWatched:true,request});
-    if(scenario==='already_watched'){assert.equal(r.collectionType,2);assert.deepEqual(writes,[]);return;}
+    if(['already_watched','finale_retry'].includes(scenario)){
+      assert.equal(r.collectionType,2);assert.equal(r.progress,'synced');assert.equal(r.syncedEpisode,5);
+      assert.deepEqual(writes,[{episode_id:[102,103,104,105],type:2}]);
+      writes.length=0;
+      assert.equal((await updateBangumiCollection({file,subjectId:123,collectionType:3,throughEpisode:5,preserveWatched:true,request})).progress,'synced');
+      assert.deepEqual(writes,[]);return;
+    }
     assert.equal(r.progress,['success','finale_retry'].includes(scenario)?'synced':scenario==='wrong_readback'?'pending':'coverage_unconfirmed');
     if(['success','wrong_readback','finale_retry'].includes(scenario)) assert.deepEqual(writes[1],{episode_id:[102,103,104,105],type:2});
     else assert.equal(writes.length,1);
   }));
 }
+
+test('startup preserves watched without silently filling episode progress',()=>fixture(async(file)=>{
+  const routes=[];
+  const request=async(url,init)=>{
+    assert.equal(init.method,undefined);routes.push(url);
+    if(url.endsWith('/me'))return Response.json({id:7});
+    if(url.includes('/subjects/'))return Response.json({id:123,type:2,eps:12});
+    return Response.json({type:2});
+  };
+  const result=await updateBangumiCollection({file,subjectId:123,collectionType:3,preserveWatched:true,request});
+  assert.equal(result.progress,'not_requested');assert.equal(result.collectionType,2);
+  assert.equal(routes.some(url=>url.includes('/episodes')),false);
+}));
+
+test('watched collection cannot turn failed episode readback into success',()=>fixture(async(file)=>{
+  const request=async(url,init)=>{
+    assert.notEqual(init.method,'POST','never downgrade or rewrite watched');
+    if(url.endsWith('/me'))return Response.json({id:7});
+    if(url.includes('/subjects/'))return Response.json({id:123,type:2,eps:12});
+    if(init.method==='PATCH')return new Response(null,{status:204});
+    if(url.includes('/episodes?'))return Response.json({total:2,data:[1,2].map(n=>({episode:{id:100+n,subject_id:123,type:0,sort:n},type:0}))});
+    return Response.json({type:2});
+  };
+  const result=await updateBangumiCollection({file,subjectId:123,collectionType:3,throughEpisode:2,preserveWatched:true,request});
+  assert.equal(result.collectionType,2);assert.equal(result.progress,'pending');assert.equal(result.syncedEpisode,undefined);
+}));

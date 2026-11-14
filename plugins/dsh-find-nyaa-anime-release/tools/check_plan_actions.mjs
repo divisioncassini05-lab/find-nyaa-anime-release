@@ -60,7 +60,7 @@ try {
     await page.getByRole('button',{name:'保存定时',exact:true}).click(); await ready();
     await row.getByText('2099-12-01（仅一次） 20:15 · Asia/Shanghai',{exact:true}).waitFor();
     await row.getByRole('button',{name:'同步至第 5 集',exact:true}).click(); await ready();
-    assert.equal(await row.getByRole('button',{name:'同步至第 5 集',exact:true}).isDisabled(),true);
+    assert.equal(await row.getByRole('button',{name:'已同步至第 5 集',exact:true}).isDisabled(),true);
     await row.getByLabel('葬送的芙莉莲的其他番单操作').click();
     assert.equal(await row.locator('.anime-status-menu button').count(),2);
     await row.getByRole('button',{name:'搁置',exact:true}).click(); await ready();
@@ -71,7 +71,7 @@ try {
     const finished=page.locator('.anime-record').filter({hasText:'紫罗兰永恒花园'});
     await finished.getByRole('button',{name:'标记看过',exact:true}).click(); await ready();
     assert.equal(await page.locator('.anime-record').count(),2);
-    assert.equal(await finished.getByRole('button',{name:'标记看过',exact:true}).isDisabled(),true);
+    assert.equal(await finished.getByRole('button',{name:'已标记看过',exact:true}).isDisabled(),true);
     assert.equal(await page.getByRole('dialog').count(),0);
     await page.getByRole('tab',{name:'全部',exact:true}).click();
     await row.getByLabel('葬送的芙莉莲的其他番单操作').click();
@@ -142,6 +142,16 @@ try {
     await dialog.getByText('番单：尚未读取',{exact:true}).waitFor();
     await page.keyboard.press('Escape');
     assert.ok(await page.locator('.anime-record').count()>0,'disconnect keeps local plans');
+    await page.goto(`${base}/?state=watched-gap&theme=${theme}`); await ready();
+    await page.getByRole('tab',{name:'追番中',exact:true}).click();
+    const gapSync=page.locator('.anime-record').filter({hasText:'葬送的芙莉莲'});
+    assert.equal(await gapSync.getByRole('button',{name:'同步至第 12 集',exact:true}).isEnabled(),true);
+    await gapSync.getByRole('button',{name:'同步至第 12 集',exact:true}).click(); await ready();
+    await page.getByText('已同步 Bangumi 并结束追番，下载记录保留',{exact:true}).waitFor();
+    assert.equal(await gapSync.count(),0,'completed sync leaves Watching');
+    await page.getByRole('tab',{name:'已完成',exact:true}).click();
+    assert.equal(await gapSync.getByRole('button',{name:'已同步至第 12 集',exact:true}).isDisabled(),true);
+    await page.screenshot({path:fileURLToPath(new URL(`../.preview/sync-completed-${width}-${theme}.png`,import.meta.url)),fullPage:true});
     await page.close();
   }
   assert.deepEqual(errors,[]);

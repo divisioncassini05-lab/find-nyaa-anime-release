@@ -264,32 +264,44 @@ export function createPlanService({ file = statePath(), scheduler = () => null, 
           catch { if (action === 'sync') throw fail('history_check_incomplete'); }
           plan.bangumiSubjectId ||= evidence.bangumiSubjectId;
           const found = evidence.latestFound;
-          const throughEpisode = action === 'sync' ? found?.episode : null;
+          const retryProgress = action === 'sync' && plan.collectionAction === 'sync' && ['pending', 'partial'].includes(plan.collectionSync);
+          const throughEpisode = action === 'sync' ? (retryProgress ? plan.collectionEpisode : found?.episode) : null;
           if (action === 'sync' && (!Number.isSafeInteger(throughEpisode) || throughEpisode < 1)) throw fail('no_found_episode');
           const final = Number.isSafeInteger(found?.finalEpisode) && found.finalEpisode > 0 && throughEpisode >= found.finalEpisode;
-          const collectionType = action === 'sync' ? (final ? 2 : 3) : payload.collectionType;
+          const collectionType = action === 'sync' ? (retryProgress ? plan.collectionType : final ? 2 : 3) : payload.collectionType;
           // Stop future work before attempting a cloud write. Failure must not resume it.
           const stop = [2, 4, 5].includes(collectionType);
           if (stop) plan.paused = true;
           plan.collectionType = collectionType;
+          plan.collectionAction = action;
+          plan.collectionEpisode = throughEpisode;
           plan.collectionSync = 'pending';
           plan.collectionRequestedAt = new Date().toISOString();
           plan.revision += 1;
           await writePlans(store, data);
-          if (stop) {
+          const stopTasks = async () => {
             for (const task of [await owned(plan), await owned(plan, plan.runId || null), await owned(plan, plan.syncId || null)]) {
               if (task?.status === 'active') await edit(task, { active: false }, signal);
             }
-          }
+          };
+          if (stop) await stopTasks();
           try {
             if (!plan.bangumiSubjectId) throw fail('bangumi_binding_required');
             const result = await collectionWriter({ file, subjectId: plan.bangumiSubjectId, collectionType,
               ...(action === 'sync' ? { throughEpisode, preserveWatched: true } : {}), signal });
             plan.collectionType = result.collectionType ?? collectionType;
+            // A previously watched cloud entry must also finish local tracking
+            // when the user explicitly synchronizes its episodes.
+            if (!stop && plan.collectionType === 2) {
+              plan.paused = true;
+              await writePlans(store, data);
+              await stopTasks();
+            }
             plan.collectionProgress = result.progress || 'not_requested';
-            plan.collectionSync = ['pending', 'coverage_unconfirmed', 'unknown_total'].includes(plan.collectionProgress) ? 'partial' : 'synced';
+            const expectsProgress = action === 'sync' || collectionType === 2;
+            plan.collectionSync = expectsProgress && plan.collectionProgress !== 'synced' ? 'partial' : 'synced';
             plan.collectionSyncedAt = new Date().toISOString();
-            if (plan.collectionSync === 'synced' && action === 'sync') plan.syncedEpisode = Math.max(plan.syncedEpisode || 0, throughEpisode);
+            if (plan.collectionProgress === 'synced') plan.syncedEpisode = Math.max(plan.syncedEpisode || 0, throughEpisode || result.syncedEpisode || 0);
             dispatchStatus = plan.collectionSync === 'partial' ? 'collection_partial' : 'collection_synced';
           } catch { dispatchStatus = 'collection_sync_pending'; }
         } else if (action === 'download') {
@@ -318,7 +330,8 @@ export function createPlanService({ file = statePath(), scheduler = () => null, 
       plan.updatedAt = new Date().toISOString(); plan.revision += 1;
       await writePlans(store, data);
       return { status: dispatchStatus || (['check', 'sync'].includes(action) ? 'queued' : 'saved'), id: plan.id,
-        ...(['collection', 'sync'].includes(action) ? { progress: plan.collectionProgress } : {}) };
+        ...(['collection', 'sync'].includes(action) ? { progress: plan.collectionProgress,
+          trackingCompleted: plan.paused && plan.collectionType === 2 && plan.collectionSync === 'synced' && plan.collectionProgress === 'synced' } : {}) };
     });
   }
   return { list, mutate };

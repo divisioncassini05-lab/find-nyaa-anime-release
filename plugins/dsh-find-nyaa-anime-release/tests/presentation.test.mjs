@@ -19,6 +19,9 @@ test('sync display does not turn missing or different progress into success', ()
   assert.equal(syncLabel({ bangumiSubjectId: 1, handled: 2, watchedCount: 3 }).text, '进度不同');
   assert.equal(syncLabel({ bangumiSubjectId: 1, handled: 2, watchedCount: 2 }).text, '进度一致');
   assert.equal(syncLabel({ bangumiSubjectId: 1, handled: 2, watchedCount: 2, syncPending: 1 }).tone, 'warn');
+  const watched={bangumiSubjectId:1,bangumiStatus:2,watchedCount:12,plan:{collectionType:2,collectionSync:'synced',collectionProgress:'not_requested',evidence:{latestFound:{episode:12}}}};
+  assert.equal(syncLabel(watched).text,'可同步至 E12');
+  assert.equal(syncLabel({...watched,plan:{...watched.plan,collectionProgress:'synced',syncedEpisode:12}}).text,'看过，分集进度已同步');
 });
 
 test('progress is bounded and missing totals remain unknown', () => {

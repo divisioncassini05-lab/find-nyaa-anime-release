@@ -9,8 +9,11 @@ export function workSubtitle(record) {
   return [record.season, quarter, typeName(record.type)].filter(Boolean).join(' · ');
 }
 const statuses = { 1: '想看', 2: '看过', 3: '在看', 4: '搁置', 5: '抛弃' };
-export const needsAttention = (record) => record.pending > 0 || record.syncPending > 0 || Boolean(record.plan?.scheduleError || record.plan?.evidenceError || record.plan?.evidence?.downloadCheckIncomplete) || inboxResult(record).tone === 'warn' || inboxResult(record).failedSearch || record.plan?.evidence?.startSync === 'pending' || ['pending', 'partial'].includes(record.plan?.collectionSync) || ['blocked', 'finale_pending_evidence'].includes(record.phase);
+export const watchedPlan = (plan) => plan?.collectionType === 2 && plan.collectionSync === 'synced' && plan.collectionProgress === 'synced';
+export const syncedThrough = (plan) => plan?.collectionProgress === 'not_requested' ? 0 : plan?.syncedEpisode || 0;
+export const needsAttention = (record) => record.pending > 0 || record.syncPending > 0 || Boolean(record.plan?.scheduleError || record.plan?.evidenceError || record.plan?.evidence?.downloadCheckIncomplete) || inboxResult(record).tone === 'warn' || inboxResult(record).failedSearch || record.plan?.evidence?.startSync === 'pending' || ['pending', 'partial'].includes(record.plan?.collectionSync) || record.phase === 'blocked' || (record.phase === 'finale_pending_evidence' && !watchedPlan(record.plan));
 export function planStatus(record) {
+  if (watchedPlan(record.plan)) return 'completed';
   if (packageFound(record.plan)) return 'completed';
   if (record.plan?.paused) return 'paused';
   if (wholeWork(record.plan?.mode)) return 'package_pending';
@@ -18,7 +21,7 @@ export function planStatus(record) {
   return ['planned', 'finale_pending_evidence'].includes(record.phase) ? 'airing' : record.phase;
 }
 export const hasCompletedDownloads = (record) => (record.plan?.evidence?.completedDownloads || 0) > 0;
-export const hasCompletedTask = (record) => packageFound(record.plan) || hasCompletedDownloads(record);
+export const hasCompletedTask = (record) => watchedPlan(record.plan) || packageFound(record.plan) || hasCompletedDownloads(record);
 export function primaryAction(record) {
   const plan = record.plan || {};
   const evidence = plan.evidence || {};
@@ -26,13 +29,17 @@ export function primaryAction(record) {
   const type = plan.collectionSync === 'synced' ? plan.collectionType : record.bangumiStatus;
   const pending = ['pending', 'partial'].includes(plan.collectionSync);
   const found = evidence.latestFound?.episode || 0;
-  const synced = Math.max(plan.syncedEpisode || 0, record.watchedCount || 0);
+  // A collection flag or watched count does not prove contiguous episode coverage.
+  const synced = syncedThrough(plan);
   const finale = evidence.latestFound?.finalEpisode === found && found > 0;
-  const done = type === 2 && !pending;
-  const retryMove = pending && [2, 4, 5].includes(plan.collectionType);
-  const disabled = !retryMove && (done || (!finished && (!found || (!pending && synced >= found && !finale))));
-  return { kind: retryMove ? 'retry' : finished ? 'watched' : 'sync', label: pending ? '重试同步' : finished ? '标记看过' : found ? `同步至第 ${found} 集` : '同步进度', disabled,
-    reason: done ? '已标记看过' : !finished && !found ? '尚无已核验的资源' : disabled ? '已同步到最新找到集数' : undefined };
+  const done = !pending && (finished ? watchedPlan(plan) : found > 0 && synced >= found && (!finale || type === 2));
+  const retryMove = pending && plan.collectionAction !== 'sync' && [2, 4, 5].includes(plan.collectionType);
+  const disabled = done || (!retryMove && !finished && !found);
+  const label = pending ? '重试同步' : done ? (finished ? '已标记看过' : `已同步至第 ${found} 集`)
+    : finished ? (type === 2 ? '补全分集进度' : '标记看过') : found ? `同步至第 ${found} 集` : '同步进度';
+  return { kind: retryMove ? 'retry' : finished ? 'watched' : 'sync', label, disabled,
+    reason: done ? '分集进度已核验同步' : !finished && !found ? '尚无已核验的资源'
+      : type === 2 ? '保留看过状态，核对并补齐分集进度' : undefined };
 }
 export function filterRecords(records, tab, view) {
   const result = records.filter((record) => {
