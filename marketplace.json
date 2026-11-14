@@ -24,8 +24,8 @@
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4IiB2aWV3Qm94PSIwIDAgMTI4IDEyOCI+CiAgPHJlY3Qgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIHJ4PSIyNCIgZmlsbD0iIzE3M0M0MCIvPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEzIDkpIHNjYWxlKDMuMikiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzkzRTBEQSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj4KICAgIDxwYXRoIGQ9Im0xMCAzIDYgNiA2LTZNMTAgMjd2Mm0xMi0ydjIiIHN0cm9rZS13aWR0aD0iMi40Ii8+CiAgICA8cmVjdCB4PSIzIiB5PSI4IiB3aWR0aD0iMjYiIGhlaWdodD0iMTkiIHJ4PSI1IiBmaWxsPSIjOTNFMERBIiBmaWxsLW9wYWNpdHk9Ii4xMiIgc3Ryb2tlLXdpZHRoPSIyLjIiLz4KICAgIDxyZWN0IHg9IjciIHk9IjEyIiB3aWR0aD0iMTgiIGhlaWdodD0iMTEiIHJ4PSIyIiBmaWxsPSIjOTNFMERBIiBmaWxsLW9wYWNpdHk9Ii4wNiIgc3Ryb2tlPSJub25lIi8+CiAgICA8cGF0aCBkPSJNMTEgMTV2NG0xMC00djQiIHN0cm9rZS13aWR0aD0iMi42Ii8+CiAgPC9nPgo8L3N2Zz4K",
       "versions": [
         {
-          "version": "0.2.8",
-          "publishTimestamp": 1794380175,
+          "version": "0.2.9",
+          "publishTimestamp": 1794639172,
           "source": {
             "type": "npm",
             "registry": "https://registry.npmjs.org/"
