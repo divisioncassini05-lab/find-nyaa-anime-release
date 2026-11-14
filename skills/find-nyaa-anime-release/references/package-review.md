@@ -52,6 +52,15 @@ Read the complete file list together with the title and description. Fill:
 
 Set `reviewed:true` only after the Agent has read and completed the review.
 
+The comparison shape is `{"result":"unknown","reason":"EVIDENCE-BASED REASON",
+"limitations":"WHAT THE PAGES DO NOT ESTABLISH","alternatives":[]}`. Other results
+are `comparable`, `only_eligible`, `clear_advantage`. Each actual alternative needs
+`detail_report`, `relation`, `reason`, `quotes`; `relation: better` means the selected
+resource is better. `clear_advantage` also needs `selected_quotes` and a comparative
+alternative. Fill actual evidence, never copy placeholder conclusions. These
+fields share the single-episode schema; routine review does not require reading
+the validator's Python source.
+
 ## Audit, deliver and recover
 
 Use identical policy arguments for drafting, auditing and delivery. Movies default

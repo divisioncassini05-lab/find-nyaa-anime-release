@@ -1,5 +1,8 @@
 # DSH panel requests
 
+For execution of a panel-generated resource check, use
+[panel-search.md](panel-search.md). This reference covers plan/UI management.
+
 The native panel owns its plans and uses the DSH schedule service. These schedules
 also appear in the host's general automation list. Do not duplicate them.
 

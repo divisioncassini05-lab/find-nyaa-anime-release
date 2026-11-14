@@ -1,10 +1,20 @@
-# Build verification 0.2.9: on-demand usage guidance
+# Build verification 0.2.9: on-demand guidance and focused search startup
 
 2026-11-14: removed automatic first-invocation introductions from the shared
 skill, Bangumi workflow and DSH builder. Explicit tutorial requests still use
 getting-started.md and the existing --guide command. Host adapters are preserved.
 
-- Canonical/distribution Python: 765 passed; DSH Python: 842 passed. Each suite
+Panel searches now start with a scoped, read-only `context` command and a dedicated
+execution reference. It returns the selected plan, existing identity/progress,
+pending operations, policy flags and exact package binding without taking locks,
+probing downloads or writing cloud state. Manual and scheduled prompts use this
+route; normal retrieval no longer asks for a global snapshot or environment survey.
+Safe CLI errors preserve actionable failure codes and identify permission boundaries.
+Shared examples document track creation and package comparisons without requiring
+source-code discovery. Full candidate coverage, evidence, fresh audit, size/subtitle
+policy, ownership and delivery protections remain required.
+
+- Canonical/distribution Python: 765 passed; DSH Python: 856 passed. Each suite
   retains 3 platform skips, 1 live deselection and 15 passing subtests.
 - Native Node: 309 passed, none skipped. Both skill validators and generated
   payload reproducibility checks passed.
@@ -15,6 +25,11 @@ getting-started.md and the existing --guide command. Host adapters are preserved
 - Release artifacts are verified against the source before publication. Package,
   lockfile and installation examples identify 0.2.9. Registry version, latest tag,
   tarball integrity and GitHub assets are verified separately during publication.
+- Ten focused tests cover scoped output, no filesystem/service mutation, missing
+  tracks, all five search intents, pause/deletion/scheduled guards and error redaction.
+- Historical local traces showed redundant setup, permission diagnosis, help and
+  validator-source reads. These fixes remove their workflow causes; no paid model
+  rerun was performed, so no measured token or monetary reduction is claimed.
 
 # Build verification: 0.2.8
 

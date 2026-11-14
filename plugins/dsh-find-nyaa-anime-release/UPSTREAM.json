@@ -24,7 +24,7 @@
     },
     {
       "path": "references/airing-watch-state.md",
-      "sha256": "cd3eda235aafd749b5b76c1d32e8af1b417b09f505342abb7719d633f717c600"
+      "sha256": "f1ef49f863aa2029957a470b847cf2ab89d1a13a916893bf5d7ea0f2289445e9"
     },
     {
       "path": "references/anime_nickname_aliases.json",
@@ -60,7 +60,7 @@
     },
     {
       "path": "references/package-review.md",
-      "sha256": "f48163e7e09cdb00df0cc8494dd56a811ecb047b788fa1234fa70636bff33e26"
+      "sha256": "989647e15d43eae6c8524b1cebd15c124a8bbb85d12f4b5956f8856296a45e45"
     },
     {
       "path": "references/quality-ranking.md",
@@ -1092,6 +1092,7 @@
   "added_files": [
     "references/dsh-host-runtime.md",
     "references/panel-management.md",
+    "references/panel-search.md",
     "references/scheduled-new-anime.md",
     "scripts/dsh_doctor.py",
     "scripts/dsh_host.py",

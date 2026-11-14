@@ -7,9 +7,9 @@ description: Find and verify Nyaa anime releases, track with qBittorrent, and op
 
 Run commands from the absolute resource directory supplied by DSH, not the chat workspace.
 Use DSH file/terminal tools and an installed Python 3.11+ (python, python3, or py -3).
-For environment diagnostics use `python scripts/dsh_doctor.py` (read-only). No install-time commands run.
-Never use Codex tools, local Codex records or an assumed model/browser API. For scheduling
-and completion, read [DSH host integration](references/dsh-host-runtime.md) first.
+Only for an actual environment failure, use `python scripts/dsh_doctor.py` (read-only). No install-time commands run.
+Never use Codex tools, local Codex records or an assumed model/browser API. For creating
+or changing schedules and cleanup, read [DSH host integration](references/dsh-host-runtime.md).
 Read the matching workflow and load supporting references only when needed.
 
 Use compact evidence output as described in the retrieval workflow. Reuse complete
@@ -24,7 +24,9 @@ In DSH, use the native Anime tracking panel for plans and Bangumi/qBittorrent
 configuration. Provide usage guidance only on request; do not open Python
 setup windows automatically. Optional setup
 never blocks link-only searches. Headless users may use private file/env setup.
-For panel-generated requests, read [panel-management.md](references/panel-management.md).
+For every `[anime-plan:ID]` search, manual or scheduled, start with
+[panel-search.md](references/panel-search.md), not the generic scheduled-run route below.
+Read [panel-management.md](references/panel-management.md) for UI/plan management.
 Panel task execution marks non-watched works as watching; progress and completion
 writes require a user button click. Keep completed download history locally;
 this overrides the chat delivery-mirroring and cleanup defaults below.

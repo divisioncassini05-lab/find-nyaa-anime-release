@@ -42,6 +42,45 @@ def load_plan(state, plan_id):
     return plan
 
 
+def plan_context(state, plan):
+    """Read one search's inputs without locks, download probes or cloud writes."""
+    from types import SimpleNamespace
+    from quality_review import policy_from_args, bounds
+    from watch_v3.store import StateRepository
+    show = StateRepository(state).find(track_id=plan['trackId'])
+    saved = read(result_path(state, plan['id']), {})
+    policy = policy_from_args(SimpleNamespace(tier=plan['tier'], require_zh=plan['requireZh']))
+    lower, upper = bounds(policy)
+    package = plan['mode'] in {'season_batch', 'movie'}
+    intent = 'latest_regular' if plan['mode'] == 'next_tracked' else plan['mode']
+    flags = ['--tier', plan['tier'], *(['--require-zh'] if plan['requireZh'] else [])]
+    track = None
+    pending = []
+    if show:
+        track = {key: show[key] for key in ('track_id', 'identity_revision', 'identity',
+                                           'broadcast', 'progress', 'lifecycle')}
+        pending = [{key: op.get(key) for key in ('operation_id', 'info_hash', 'status')}
+                   for op in show.get('operations', {}).values() if not op.get('committed')]
+    finds = saved.get('finds', [])
+    return {'status': 'panel_context', 'read_only': True,
+            'skill_directory': str(Path(__file__).resolve().parents[1]),
+            'state_directory': str(state.resolve().parent),
+            'plan': {**{key: plan.get(key) for key in ('id', 'revision', 'title', 'season')},
+                     'track_id': plan['trackId'], 'bangumi_id': plan.get('bangumiSubjectId'),
+                     'intent': intent, 'enqueue_qbittorrent': bool(plan.get('enqueue'))},
+            'quality_policy': policy, 'policy_args': flags,
+            'size_bounds': {'regular_min_gib': lower, 'regular_max_gib': upper,
+                            'movie_min_total_gib': 10},
+            'track': track, 'pending_operations': pending,
+            'recorded': {'regular_episodes': sorted({item['episode'] for item in finds
+                         if item.get('scope') == 'regular' and type(item.get('episode')) is int}),
+                         'package_found': any(item.get('scope') in {'season', 'movie'} for item in finds)},
+            'review_reference': 'references/package-review.md' if package else 'references/agent-review.md',
+            'package_scope_binding': {
+                'title': plan['title'], 'season': plan.get('season'),
+                'bangumi_id': plan.get('bangumiSubjectId')} if package else None}
+
+
 def update_result(state, plan, values):
     file = result_path(state, plan['id'])
     with file_lock(file.with_suffix('.lock')):
@@ -328,7 +367,7 @@ def main(argv=None):
     parser.add_argument('--state', type=Path, default=state_path())
     parser.add_argument('--plan-id')
     parser.add_argument('--scheduled', action='store_true')
-    parser.add_argument('command', choices=['snapshot', 'targets', 'watch', 'package', 'download'])
+    parser.add_argument('command', choices=['context', 'snapshot', 'targets', 'watch', 'package', 'download'])
     parser.add_argument('args', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.command == 'snapshot':
@@ -339,6 +378,9 @@ def main(argv=None):
     plan = load_plan(args.state, args.plan_id)
     if args.scheduled and plan.get('schedulePaused'):
         raise ValueError('automatic_run_disabled')
+    if args.command == 'context':
+        print(json.dumps(plan_context(args.state, plan), ensure_ascii=False))
+        return 0
     previous_context = _context
     _context = (args.state, args.plan_id)
     try:
@@ -419,11 +461,24 @@ def execute(args, plan):
     return capture(lambda: package_main(args.args))
 
 
+def cli_error(error):
+    """Actionable local failures without arbitrary exception text or credentials."""
+    if isinstance(error, PermissionError):
+        return {'status': 'panel_operation_failed', 'error': 'permission_denied',
+                'path': str(error.filename) if error.filename else None,
+                'next_action': 'use_host_approved_access_or_stop',
+                'hint': 'An expected sandbox boundary is not a source-code or ACL defect. '
+                        'Do not retry through custom scripts or edit permissions.'}
+    code = str(error) if isinstance(error, ValueError) else ''
+    return {'status': 'panel_operation_failed',
+            'error': code if re.fullmatch(r'[a-z][a-z0-9_]{0,79}', code) else type(error).__name__}
+
+
 if __name__ == '__main__':
     # Imported validator hooks must share this execution context, not a second module.
     sys.modules['dsh_panel_run'] = sys.modules[__name__]
     try:
         raise SystemExit(main())
     except (ValueError, OSError) as error:
-        print(json.dumps({'status': 'panel_operation_failed', 'error': type(error).__name__}))
+        print(json.dumps(cli_error(error), ensure_ascii=False))
         raise SystemExit(3)

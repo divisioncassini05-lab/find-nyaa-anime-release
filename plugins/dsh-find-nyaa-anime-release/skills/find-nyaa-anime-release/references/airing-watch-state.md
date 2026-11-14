@@ -33,6 +33,18 @@ airing; initial progress stays zero and the date does not prove a release. Ambig
 must be resolved before create. For all temporary inputs use an owned workspace and
 register externally written JSON with evidence_artifacts.register.
 
+For example, after verifying the actual work (replace example values; retain null
+for unknown season/total rather than guessing):
+
+```json
+{"identity":{"title":"VERIFIED TITLE","aliases":["VERIFIED SEARCH TITLE"],
+ "season":null,"format":"TV","provider_bindings":{"bangumi":{"entry_id":12345}}},
+ "broadcast":{"total_episodes":null}}
+```
+
+Omit an unverified provider binding. Reuse an existing record; this payload must
+not reset progress. The command adds revision/progress/ledger fields itself.
+
 ## One state model and transaction boundary
 
 - identity and broadcast store scope, binding and completion evidence.

@@ -145,9 +145,9 @@ def rebuild(source, output_root=None, *, emit=True):
         'Run commands from this skill directory. Read the matching workflow and load its\nsupporting references only when needed.',
         'Run commands from the absolute resource directory supplied by DSH, not the chat workspace.\n'
         'Use DSH file/terminal tools and an installed Python 3.11+ (python, python3, or py -3).\n'
-        'For environment diagnostics use `python scripts/dsh_doctor.py` (read-only). No install-time commands run.\n'
-        'Never use Codex tools, local Codex records or an assumed model/browser API. For scheduling\n'
-        'and completion, read [DSH host integration](references/dsh-host-runtime.md) first.\n'
+        'Only for an actual environment failure, use `python scripts/dsh_doctor.py` (read-only). No install-time commands run.\n'
+        'Never use Codex tools, local Codex records or an assumed model/browser API. For creating\n'
+        'or changing schedules and cleanup, read [DSH host integration](references/dsh-host-runtime.md).\n'
         'Read the matching workflow and load supporting references only when needed.'))
     edit('SKILL.md', lambda text: replace_once(text,
         'Provide usage guidance only when the user asks for an introduction or tutorial.\n'
@@ -163,7 +163,9 @@ def rebuild(source, output_root=None, *, emit=True):
         'configuration. Provide usage guidance only on request; do not open Python\n'
         'setup windows automatically. Optional setup\n'
         'never blocks link-only searches. Headless users may use private file/env setup.\n'
-        'For panel-generated requests, read [panel-management.md](references/panel-management.md).\n'
+        'For every `[anime-plan:ID]` search, manual or scheduled, start with\n'
+        '[panel-search.md](references/panel-search.md), not the generic scheduled-run route below.\n'
+        'Read [panel-management.md](references/panel-management.md) for UI/plan management.\n'
         'Panel task execution marks non-watched works as watching; progress and completion\n'
         'writes require a user button click. Keep completed download history locally;\n'
         'this overrides the chat delivery-mirroring and cleanup defaults below.\n'
