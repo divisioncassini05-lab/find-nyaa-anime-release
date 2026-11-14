@@ -75,7 +75,7 @@ def test_full_detail_then_semantic_decision_audits_once_and_cleans_without_progr
     run = Path(result['run'])
     detailed = flow.details(state, run, ['2165948', '2165948'], client=client)
     assert len(detailed['candidates']) == 1
-    assert '\n\n'.join(text for ref, text in detailed['candidates'][0]['description']) == client.detail.description
+    assert ''.join(text for ref, text in detailed['candidates'][0]['description']) == client.detail.description
     assert [f[0] for f in detailed['candidates'][0]['files']] == [f.name for f in client.detail.files]
     final = flow.finish(state, run, decision(client), client=client)
     assert final['eligibility'] == 'passed'
@@ -105,7 +105,8 @@ def test_batch_queries_preserves_each_page_and_reports_actual_empty_query(tmp_pa
     added = flow.collect(state, initial['run'], query=['鋼の未収録名', 'Steel Ball Run alternate', '鋼の未収録名'], pages=1)
     assert queries == [('鋼の未収録名', 1), ('Steel Ball Run alternate', 1)]
     assert [page['rows'] for page in added['listings']] == [0, 27]
-    assert [row[1] for row in added['listings'][1]['values']] == [row[1] for row in initial['listings'][0]['values']]
+    assert added['listings'][1]['values'] == []
+    assert added['listings'][1]['repeated_ids'] == [row[0] for row in initial['listings'][0]['values']]
     flow.details(state, initial['run'], ['2165948'], client=client)
     final = flow.finish(state, initial['run'], decision(client), client=client)
     assert final['search_facts']['listing_rows'] == 54
@@ -130,7 +131,7 @@ def test_paragraph_and_file_refs_expand_exactly_without_guessing(tmp_path):
     value = flow.expand_refs({'work_refs': ['title'], 'subtitle_refs': [],
         'episodes': [{'refs': ['f1', 'd1'], 'reason': 'Agent mapping'}]}, report)
     assert value['work_quotes'] == [report['release']['title']]
-    assert value['episodes'][0]['quotes'] == [report['files'][0]['name'], report['description'].split('\n\n')[0]]
+    assert value['episodes'][0]['quotes'] == [report['files'][0]['name'], report['description'][:3000]]
     assert value['episodes'][0]['reason'] == 'Agent mapping'
     assert value['subtitle_quotes'] == []
 
@@ -149,6 +150,73 @@ def test_batch_partial_failure_cannot_masquerade_as_complete(tmp_path, monkeypat
     flow.details(state, initial['run'], ['2165948'], client=client)
     with pytest.raises(ValueError, match='incomplete_search_evidence'):
         flow.finish(state, initial['run'], decision(client), client=client)
+
+
+def test_long_listing_is_bounded_and_unread_titles_block_all_next_stages(tmp_path, monkeypatch):
+    from search_presentation import OUTPUT_BYTES, encoded_size
+    state, client, initial = setup(tmp_path, pages=1)
+    original = flow.raw.listing
+    def listing(query, page=1, **kwargs):
+        result = original(query, page, client=client)
+        sample = result['rows'][0]
+        result['rows'] = [{**sample, 'nyaa_id': str(3000000+i),
+            'title': f'作品 S01-S02 OVA 第{i}话 ' + ('完整标题' * 25)} for i in range(350)]
+        result.update(row_count=350, later_pages=[])
+        return result
+    monkeypatch.setattr(flow.raw, 'listing', listing)
+    result = flow.collect(state, initial['run'], query='long evidence', pages=1)
+    assert result['unread_parts'] > 0
+    for operation in (
+        lambda: flow.collect(state, initial['run'], query='another'),
+        lambda: flow.details(state, initial['run'], ['2165948'], client=client),
+        lambda: flow.finish(state, initial['run'], decision(client), client=client),
+        lambda: flow.close(state, initial['run'], 'latest_unresolved', 'Unknown'),
+    ):
+        with pytest.raises(ValueError, match='unread_search_output'):
+            operation()
+    titles = []
+    while True:
+        assert encoded_size(result) <= OUTPUT_BYTES + 512
+        titles.extend(row[1] for page in result['listings'] for row in page['values'])
+        if not result['unread_parts']:
+            break
+        result = flow.view(state, initial['run'])
+    assert titles == [f'作品 S01-S02 OVA 第{i}话 ' + ('完整标题' * 25) for i in range(350)]
+    assert flow.load_session(state, initial['run'])[1]['pending_views'] == []
+
+
+def test_full_long_description_and_file_list_survive_bounded_views(tmp_path):
+    from search_presentation import OUTPUT_BYTES, encoded_size
+    state, client, initial = setup(tmp_path, pages=1)
+    text = ('第一季、第二季和 OVA 需要逐项判断。\n\n' * 2500)
+    files = tuple(replace(client.detail.files[0], name=f'完整文件名-{i}-OVA.mkv') for i in range(250))
+    client.detail = replace(client.detail, description=text, files=files)
+    result = flow.details(state, initial['run'], ['2165948'], client=client)
+    assert result['unread_parts'] > 0
+    descriptions, names = [], []
+    while True:
+        assert encoded_size(result) <= OUTPUT_BYTES + 512
+        for candidate in result['candidates']:
+            descriptions.extend(value for ref, value in candidate['description'])
+            names.extend(row[0] for row in candidate['files'])
+        if not result['unread_parts']:
+            break
+        result = flow.view(state, initial['run'])
+    assert ''.join(descriptions) == text
+    assert names == [file.name for file in files]
+
+
+def test_only_identical_rows_collapse_never_changed_titles_or_metadata():
+    from search_presentation import compact_duplicates
+    row = ['123', '原始 S01 标题 + OVA', '12 GiB', '2026-11-14', 10, 0, 100, 'within_estimate']
+    variants = [row.copy(), row.copy(), row.copy()]
+    variants[1][1] = '原始 S01-S02 标题 + OVA'
+    variants[2][4] = 11
+    page = {'query': 'alternate', 'values': variants, 'rows': 3}
+    compact_duplicates([page], [{'values': [row]}])
+    assert page['repeated_ids'] == ['123']
+    assert page['values'] == variants[1:]
+    assert page['rows'] == 3 and page['query'] == 'alternate'
 
 
 @pytest.mark.parametrize('mutate,code', [

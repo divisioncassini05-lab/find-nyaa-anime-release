@@ -21,6 +21,7 @@ from anime_release.storage import atomic_json
 from evidence_artifacts import new_workspace, register, root, cleanup
 from quality_review import bounds, policy_from_args, validate_policy
 from runtime_paths import DEFAULT_STATE
+from search_presentation import compact_duplicates, description_blocks, response_parts
 from watch_v3.evidence import DiscoveryService, QualityPolicy, ReviewManifest, ReviewValidator
 from watch_v3.store import StateRepository
 
@@ -96,11 +97,40 @@ def load_session(state, run, binding=None):
                  for cid, name in session['details'].items()), 'invalid_session_evidence_paths')
     need(all(not (run / name).is_symlink() for name in session['listings'] + list(session['details'].values())),
          'invalid_session_evidence_paths')
+    need(all(re.fullmatch(r'view-[1-9][0-9]*\.json', name) and not (run / name).is_symlink()
+             for name in session.get('pending_views', [])), 'invalid_session_view_paths')
     validate_policy({'quality_policy': session['policy']}, session['policy'])
     if session.get('track_id'):
         show = checked_show(StateRepository(state), session['track_id'])
         need(show['identity_revision'] == session['identity_revision'], 'identity_revision_conflict')
     return run, session
+
+
+def present(state, run, session, response):
+    parts = list(response_parts(response))
+    session['pending_views'] = []
+    for part in parts[1:]:
+        session['view_count'] = session.get('view_count', 0) + 1
+        name = f'view-{session["view_count"]}.json'
+        save(run / name, part, state)
+        session['pending_views'].append(name)
+    save(run / 'session.json', session, state)
+    return view_status(parts[0], session)
+
+
+def view_status(response, session):
+    response['unread_parts'] = len(session.get('pending_views', []))
+    if response['unread_parts']:
+        response['next'] = 'Read all titles/details here, then run view --run RUN for the next intact part. Collect/details/finish are blocked until unread_parts is zero. Do not grep or count title patterns instead of reading.'
+    return response
+
+
+def view(state, run, *, binding=None):
+    run, session = load_session(state, run, binding)
+    need(bool(session.get('pending_views')), 'no_unread_search_output')
+    response = read(run / session['pending_views'].pop(0))
+    save(run / 'session.json', session, state)
+    return view_status(response, session)
 
 
 def start(state, *, track_id=None, title=None, query=None, pages=2, intent='next_tracked',
@@ -135,6 +165,7 @@ def start(state, *, track_id=None, title=None, query=None, pages=2, intent='next
 
 def collect(state, run, *, query, pages=2, binding=None, client=None):
     run, session = load_session(state, run, binding)
+    need(not session.get('pending_views'), 'unread_search_output')
     need(type(pages) is int and 1 <= pages <= 20, 'invalid_page_count')
     queries = [query] if isinstance(query, str) else query
     need(isinstance(queries, list) and queries and all(isinstance(q, str) and q.strip() for q in queries), 'queries_required')
@@ -158,16 +189,17 @@ def collect(state, run, *, query, pages=2, binding=None, client=None):
             reports.append(table(report, session['policy'], session.get('scope')))
             if page + 1 not in report['later_pages']:
                 break
-    save(run / 'session.json', session, state)
-    return {'status': 'search_incomplete' if session['errors'] else 'listings_ready',
-            'run': str(run), 'listings': reports, 'errors': session['errors'],
-            'next': 'Read every title. Request details for plausible candidates together; collect more pages/verified aliases if coverage is unresolved.'}
+    reports = compact_duplicates(reports, [table(page, session['policy'], session.get('scope')) for page in existing])
+    return present(state, run, session,
+        {'status': 'search_incomplete' if session['errors'] else 'listings_ready',
+         'run': str(run), 'listings': reports, 'errors': session['errors'],
+         'next': 'Read every original title. repeated_ids are identical rows already shown, with their additional query/page provenance retained here. Fetch plausible details together; collect more pages only if coverage is unresolved.'})
 
 
 def evidence_refs(report):
     """Candidate-local exact text; references cannot borrow another release's evidence."""
     return {'title': report['release']['title'],
-            **{f'd{i}': text for i, text in enumerate(report['description'].split('\n\n'), 1)},
+            **{f'd{i}': text for i, text in enumerate(description_blocks(report['description']), 1)},
             **{f'f{i}': entry['name'] for i, entry in enumerate(report['files'], 1)}}
 
 
@@ -213,6 +245,7 @@ def detail_view(report, policy):
 
 def details(state, run, ids, *, binding=None, client=None):
     run, session = load_session(state, run, binding)
+    need(not session.get('pending_views'), 'unread_search_output')
     ids = list(dict.fromkeys(str(cid) for cid in ids))
     rows = {r['nyaa_id'] for name in session['listings'] for r in raw.read(run / name, 'nyaa_listing')['rows']}
     need(ids and all(cid in rows for cid in ids), 'candidate_not_in_listing')
@@ -230,10 +263,10 @@ def details(state, run, ids, *, binding=None, client=None):
         session['details'][cid] = name
         session['errors'] = [e for e in session['errors'] if e.get('request') != key]
         reports.append(detail_view(report, session['policy']))
-    save(run / 'session.json', session, state)
-    return {'status': 'search_incomplete' if session['errors'] else 'details_ready',
-            'run': str(run), 'candidates': reports, 'errors': session['errors'],
-            'next': 'Submit semantic decision via stdin; use candidate-local title/dN/fN evidence refs to avoid copying quotes. Unknown subtitle languages stay unknown; size hints do not classify files or prove quality.'}
+    return present(state, run, session,
+        {'status': 'search_incomplete' if session['errors'] else 'details_ready',
+         'run': str(run), 'candidates': reports, 'errors': session['errors'],
+         'next': 'Submit semantic decision via stdin; use candidate-local title/dN/fN evidence refs to avoid copying quotes. Unknown subtitle languages stay unknown; size hints do not classify files or prove quality.'})
 
 
 def make_review(state, run, session, decision):
@@ -322,6 +355,7 @@ def final_receipt(result, scopes, session):
 
 def finish(state, run, decision, *, binding=None, client=None, enqueue=False, delivery_args=None, keep_run=False):
     run, session = load_session(state, run, binding)
+    need(not session.get('pending_views'), 'unread_search_output')
     need(not session['errors'], 'incomplete_search_evidence')
     if isinstance(decision, list):
         need(decision and not enqueue, 'choices_require_link_only')
@@ -364,6 +398,7 @@ def finish(state, run, decision, *, binding=None, client=None, enqueue=False, de
 
 def close(state, run, status, reason, *, binding=None):
     run, session = load_session(state, run, binding)
+    need(not session.get('pending_views'), 'unread_search_output')
     need(bool(reason.strip()), 'outcome_reason_required')
     if session['errors']:
         return {'status': 'search_incomplete', 'errors': session['errors'], 'run': str(run)}
@@ -389,6 +424,7 @@ def parser():
     c.add_argument('--query', required=True, action='append'); c.add_argument('--pages', type=int, default=2)
     d = sub.add_parser('details'); d.add_argument('--run', type=Path, required=True)
     d.add_argument('--ids', nargs='+', required=True)
+    v = sub.add_parser('view'); v.add_argument('--run', type=Path, required=True)
     f = sub.add_parser('finish'); f.add_argument('--run', type=Path, required=True)
     f.add_argument('--enqueue-qbittorrent', action='store_true')
     f.add_argument('--legal-ok', action='store_true')
@@ -409,6 +445,8 @@ def execute(args, *, binding=None, client=None):
         return collect(args.state, args.run, query=args.query, pages=args.pages, binding=binding, client=client)
     if args.command == 'details':
         return details(args.state, args.run, args.ids, binding=binding, client=client)
+    if args.command == 'view':
+        return view(args.state, args.run, binding=binding)
     if args.command == 'close':
         return close(args.state, args.run, args.status, args.reason, binding=binding)
     need(not args.enqueue_qbittorrent or args.legal_ok, 'delivery_authorization_required')

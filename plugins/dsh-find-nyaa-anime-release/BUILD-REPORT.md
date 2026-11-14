@@ -9,11 +9,16 @@
   changed evidence and incorrect episode/file mapping remain rejected.
 - Final objective wording is rendered from actual query counts and audit fields.
   It does not invent air dates, weekdays, subtitle languages or search attempts.
-- Core/distribution Python: 789 passed. DSH Python: 888 passed. Each suite has
+- A native benchmark exposed host truncation for a multi-alias result. Bounded
+  view parts now preserve all text and block further stages until consumed.
+  Only identical displayed rows collapse, with query/page references retained;
+  changed titles or metadata remain separate. No regex replaces title review.
+- Core/distribution Python: 792 passed. DSH Python: 891 passed. Each suite has
   3 platform skips, 1 live deselection and 15 passing subtests. Node: 309 outcomes,
   exit 0. Both skill validators and generated-payload reproducibility passed.
 - Captured-page tests cover batch query failures, empty-query accounting, full
-  title/description/file preservation, evidence references and read-only startup.
+  title/description/file preservation, evidence references, read-only startup,
+  long output round-trips and the unread-evidence gate.
   No live download or scheduler mutation is included in these tests. The native
   DSH model benchmark is recorded separately; offline tests do not measure cost.
 
