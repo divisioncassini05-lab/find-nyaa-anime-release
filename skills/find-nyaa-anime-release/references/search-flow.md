@@ -120,7 +120,9 @@ to finish; delivery includes validation. Use the returned `answer` for the final
 objective facts (queries, counts, selected release and state changes); for choices,
 use each choice's answer. You may append evidence-backed selection reasoning.
 Do not add guessed air dates/weekdays, expand the list of attempted aliases, or
-infer subtitle languages. Do not reread state or repeat cleanup.
+infer subtitle languages. `latest_already_handled` describes prior episode progress;
+it does not mean this search reused an old candidate. Use the receipt's retrieval
+and state wording. Do not reread state or repeat cleanup.
 
 ## Seasons and movies
 

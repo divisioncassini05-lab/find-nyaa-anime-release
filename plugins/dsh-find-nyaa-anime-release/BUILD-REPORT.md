@@ -2,6 +2,9 @@
 
 - Context-only startup is read-only in both hosts, including the DSH optional
   start-watching hook. Writing calls use host-approved access before execution.
+- DSH guidance defaults to a full-access session and reuses its authorization;
+  restricted sessions ask once for that mode. Skill text does not grant host
+  permissions or change global defaults. Codex permission guidance is unchanged.
 - Agents can submit verified aliases together; every returned original title and
   unsuccessful/empty query remains accounted for. No script infers title meaning.
 - Candidate-local title, description-paragraph and file references expand to exact
@@ -13,7 +16,7 @@
   view parts now preserve all text and block further stages until consumed.
   Only identical displayed rows collapse, with query/page references retained;
   changed titles or metadata remain separate. No regex replaces title review.
-- Core/distribution Python: 792 passed. DSH Python: 891 passed. Each suite has
+- Core/distribution Python: 793 passed. DSH Python: 892 passed. Each suite has
   3 platform skips, 1 live deselection and 15 passing subtests. Node: 309 outcomes,
   exit 0. Both skill validators and generated-payload reproducibility passed.
 - Captured-page tests cover batch query failures, empty-query accounting, full
@@ -21,6 +24,18 @@
   long output round-trips and the unread-evidence gate.
   No live download or scheduler mutation is included in these tests. The native
   DSH model benchmark is recorded separately; offline tests do not measure cost.
+- The native DSH retest used 8 model calls / 7 tool calls, 262,798 total tokens
+  (28,805 uncached input, 226,688 cached input, 7,305 output). Main-task estimated
+  off-peak cost: CNY 0.06255876 at 1 / 0.02 / 4 CNY per million respectively.
+  All 150 original listing rows and 9 candidate details were delivered intact;
+  no permission-failure retry, quote retry, host truncation or log/regex detour.
+  Progress and plans stayed unchanged; no download was submitted.
+- The first 0.2.11 model attempt failed output-completeness acceptance and is not
+  counted as a passing benchmark. The successful retest then exposed misleading
+  final prose about reusing an old result: the receipt and host prompt now clarify
+  that previously handled progress still permits a fresh search and review.
+  This receipt correction and DSH full-access guidance were made after the native
+  retest and passed the full regression suites above; no further paid model run.
 
 # Build verification: 0.2.10
 

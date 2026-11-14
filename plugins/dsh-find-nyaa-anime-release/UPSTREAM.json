@@ -88,7 +88,7 @@
     },
     {
       "path": "references/search-flow.md",
-      "sha256": "1d2caaeb6fe6652b0efad24128ebc87059cb029ad8851c470ec766972b5ccfe3"
+      "sha256": "1d88a4b8e3baef2c6dd85c732acd9228664230f42947b67c2a1a72a80f4b068b"
     },
     {
       "path": "references/third-party-notices.md",
@@ -792,7 +792,7 @@
     },
     {
       "path": "scripts/search_flow.py",
-      "sha256": "1cb73a8c21617cdac84e37b73279c6d2ca2bca1df15f278ae42aa8a8c710ea74"
+      "sha256": "178b2edb61e99aebe63abfb016f363b4044e697618167936f9e48f7746fcd976"
     },
     {
       "path": "scripts/search_nyaa_releases.py",
@@ -1060,7 +1060,7 @@
     },
     {
       "path": "tests/test_search_flow.py",
-      "sha256": "62e81f5c75c63abb356ec37bf028b921bf19367e5eb7e8f3d6c0fc86ea372ded"
+      "sha256": "a13c06eae433fa12b93ef45dea655b862bb2ec46ef9e778382f266591410b8a3"
     },
     {
       "path": "tests/test_state_invariants.py",

@@ -114,6 +114,22 @@ def test_batch_queries_preserves_each_page_and_reports_actual_empty_query(tmp_pa
     assert '"鋼の未収録名"：1 页、0 条' in final['answer']
 
 
+def test_previously_handled_episode_still_reports_fresh_search_without_progress(tmp_path):
+    state, client, initial = setup(tmp_path, pages=1)
+    saved = json.loads(state.read_text(encoding='utf-8'))
+    saved['shows'][0]['progress'].update(handled_episode=2, latest_release_episode=2, target_episode=3)
+    state.write_text(json.dumps(saved), encoding='utf-8')
+    before = state.read_bytes()
+    flow.details(state, initial['run'], ['2165948'], client=client)
+    final = flow.finish(state, initial['run'], decision(client), client=client)
+    assert final['status'] == 'latest_already_handled' and final['eligibility'] == 'passed'
+    assert final['selected']['nyaa_id'] == '2165948'
+    assert sum(call[0] == 'detail' for call in client.calls) == 2
+    assert '本次仍重新获取列表和候选详情并审核' in final['answer']
+    assert final['qbittorrent']['status'] == 'not_attempted' and final['progress']['advanced'] is False
+    assert state.read_bytes() == before
+
+
 @pytest.mark.parametrize('ref', ['d9999', '2165999:title', '../detail.json'])
 def test_reference_must_belong_to_selected_evidence(tmp_path, ref):
     state, client, initial = setup(tmp_path, pages=1)

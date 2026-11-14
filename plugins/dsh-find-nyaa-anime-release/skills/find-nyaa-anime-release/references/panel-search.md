@@ -9,11 +9,13 @@ flags to override the saved plan.
 
 `search start` without a query is read-only, including optional Bangumi sync.
 Actual searches write evidence and panel history under the returned `write_directory`
-(normally outside the DSH profile workspace). When workspace sandboxing does not
-cover that directory, request `pwsh` with `sandbox_permissions: "danger-full-access"`
-and a justification on the **first writing call**, using the host approval flow.
-Do not run a known-denied probe first or change permission presets/ACLs. Reuse
-approved access only within its granted scope; if denied, report the blocked stage.
+(normally outside the DSH profile workspace). Use DSH's **full-access session mode**
+for this workflow by default, with `sandbox_permissions: "danger-full-access"` on
+terminal calls. Reuse the active full-access authorization instead of asking for
+each directory. If the session is still restricted, ask the user once to switch
+the session to full access; a per-call request alone may still require manual
+approval. Skill text cannot enable a host mode or override a denial. Do not probe
+known-denied writes, change ACLs or silently change global permission defaults.
 
 # Search with semantic decisions
 
@@ -137,7 +139,9 @@ to finish; delivery includes validation. Use the returned `answer` for the final
 objective facts (queries, counts, selected release and state changes); for choices,
 use each choice's answer. You may append evidence-backed selection reasoning.
 Do not add guessed air dates/weekdays, expand the list of attempted aliases, or
-infer subtitle languages. Do not reread state or repeat cleanup.
+infer subtitle languages. `latest_already_handled` describes prior episode progress;
+it does not mean this search reused an old candidate. Use the receipt's retrieval
+and state wording. Do not reread state or repeat cleanup.
 
 ## Seasons and movies
 

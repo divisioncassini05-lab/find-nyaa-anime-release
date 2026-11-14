@@ -344,6 +344,8 @@ def final_receipt(result, scopes, session):
         if selected and not selected.get('subtitle_evidence'):
             lines.append('本次审核未核实具体字幕语言。')
     qb = report.get('qbittorrent') or {}
+    if report.get('status') == 'latest_already_handled':
+        lines.append('该集此前已处理；本次仍重新获取列表和候选详情并审核，所列资源是本轮审核结果。')
     if qb.get('status') == 'not_attempted':
         lines.append('本次未提交下载。')
     if (report.get('progress') or {}).get('advanced') is False:
