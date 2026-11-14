@@ -1,4 +1,4 @@
-# Local candidate 0.2.9: on-demand usage guidance
+# Build verification 0.2.9: on-demand usage guidance
 
 2026-11-14: removed automatic first-invocation introductions from the shared
 skill, Bangumi workflow and DSH builder. Explicit tutorial requests still use
@@ -12,9 +12,9 @@ getting-started.md and the existing --guide command. Host adapters are preserved
   isolated paths and existing dependencies passed unchanged tests. Native
   loopback tests required the normal-user context. No live download, account
   write, GUI interaction or scheduled Agent execution was performed.
-- Local source change only; npm, GitHub and marketplace remain unpublished.
-  Package and lockfile are staged as 0.2.9; installation examples still identify
-  the current published 0.2.8. Tarball verification is recorded with the artifacts.
+- Release artifacts are verified against the source before publication. Package,
+  lockfile and installation examples identify 0.2.9. Registry version, latest tag,
+  tarball integrity and GitHub assets are verified separately during publication.
 
 # Build verification: 0.2.8
 

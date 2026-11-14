@@ -1,6 +1,5 @@
 # dsh-find-anime · 动漫搜索与追番管理
 
-开发中的 `0.2.9`：取消首次调用自动开场白，仅在主动询问时提供教程。尚未发布；下方安装示例仍对应已发布的 `0.2.8`。
 
 [完整功能介绍与使用说明](DETAILS.zh.md) · [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases)
 
@@ -52,7 +51,7 @@
 
 ### 从 npm 安装（推荐）
 
-本版本为 `0.2.8`。在 DSH「插件 → 添加插件」输入：
+本版本为 `0.2.9`。在 DSH「插件 → 添加插件」输入：
 
 ```text
 dsh-find-nyaa-anime-release
@@ -67,15 +66,15 @@ dsh-find-nyaa-anime-release
 
 ### 本地插件包（备用）
 
-从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.8) 下载
-`dsh-find-nyaa-anime-release-0.2.8.tgz`，交给 DSH，并说：
+从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.9) 下载
+`dsh-find-nyaa-anime-release-0.2.9.tgz`，交给 DSH，并说：
 
 > 请通过当前 profile 的插件管理器安装这个本地插件包，完成后确认技能可加载。
 
 也可以在 DSH CLI 中使用实际 profile 和本地绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.8.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.9.tgz"
 ```
 
 桌面端优先在应用内用插件管理器安装到当前 profile，不要照抄 `web` 去改另一个 profile。
@@ -93,7 +92,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.8.t
   保持不变，`0.2.2` 起安装来源为对应的 npm 精确版本。
 - 旧版路径、Git 或 `.tgz` 安装不会自动变成 npm 安装，也不显示原生注册表更新提示。
   迁移时先保留当前 profile 的配置和外部数据，再用插件管理器把同名依赖替换为
-  `dsh-find-nyaa-anime-release@0.2.8`，保留启用状态并按宿主要求重载。
+  `dsh-find-nyaa-anime-release@0.2.9`，保留启用状态并按宿主要求重载。
   若界面拒绝同名安装，可先移除插件再从 npm 添加；不要删除数据目录或定时任务。
 - 仍使用本地包时，需要手动下载新版 `.tgz` 并更新同名插件。不要只替换 `SKILL.md`；
   脚本、面板和宿主适配必须一起更新。
@@ -113,7 +112,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.8.t
 初次安装可让 Agent 进入技能资源目录执行 `python scripts/dsh_doctor.py`。
 它只检查本地前置条件，**不联网、不启动客户端、不下载、不修改记录**。
 
-## 图形面板（0.2.8）
+## 图形面板（0.2.9）
 
 本次加入已确认的阅读连点：阅读时在约1.2秒内点三次，等书页落稳后合书、抱书并闭眼回避；水幕遮住角色期间播放重新开书的动作，散开时回到原阅读。单击仍有原来的轻微涟漪反馈；只有阅读状态识别这套连点动作。暂停、隐藏和减少动态设置仍有效，不会因连点新增检索或下载操作。
 
