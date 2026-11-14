@@ -1,3 +1,23 @@
+# Build verification: 0.2.10
+
+- Shared search_flow.py collects complete listing pages, preserves every original
+  title, batches requested full details, converts dates, binds policy, assembles
+  review files from Agent semantic decisions, validates and cleans owned evidence.
+- Aggregate and per-file size hints are inspection aids only. They never remove
+  records or classify episodes, OVA, extras or multi-season packages. Existing
+  identity, coverage, subtitle, per-file size and fresh-evidence gates remain.
+- Codex and DSH use the same flow; panel plan ownership, pause/revision checks,
+  saved policy, optional integration and manual progress rules remain adapted.
+- Core/distribution Python: 781 passed plus 2 subsequent season/OVA cases passed.
+  DSH Python: 879 passed; the 2 subsequently added season/OVA cases are checked
+  separately. Each full suite has 4 skips and 15 passing subtests. Node test run
+  exits successfully with 309 outcomes after restoring development dependencies.
+- Both skill validators and generated payload reproducibility checks passed.
+  Initial Node execution lacked linked React/esbuild; dependency-only repair
+  passed unchanged tests. No live download or scheduler mutation was tested.
+- A same-plan DSH model benchmark is performed separately before reporting costs.
+  This build report does not equate offline tests with measured token savings.
+
 # Build verification 0.2.9: on-demand guidance and focused search startup
 
 2026-11-14: removed automatic first-invocation introductions from the shared

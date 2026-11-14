@@ -4,7 +4,7 @@
   "source_files": [
     {
       "path": "SKILL.md",
-      "sha256": "c1f35b2e6ecc076c5dc5d78b34a90976367d060070e1947f07287e2f0354b862"
+      "sha256": "3596c17be2280656a367029df55934f42d25828eda20dfbc7d4fb59eb293ce3c"
     },
     {
       "path": "data/AOD-LICENSE.txt",
@@ -72,7 +72,7 @@
     },
     {
       "path": "references/retrieval-workflow.md",
-      "sha256": "d78c63da84648dd6c8f4ec25db8cbe536a7f264fff509f35a3833a863facd6db"
+      "sha256": "726357f70eebf7e25e561ea4870a6deedcb230fa41fb2a8dceaf15f06900049f"
     },
     {
       "path": "references/scheduled-new-anime.md",
@@ -84,7 +84,11 @@
     },
     {
       "path": "references/scheduled-run.md",
-      "sha256": "750cc66942d7bffd31881d7b9f991ca801f0494c5f8306f5621d4fde2b94edb2"
+      "sha256": "a1a61f02e123eb22df5b23f8029e8b03a3ba4f7061cdffdf1b96459c94ad3fb1"
+    },
+    {
+      "path": "references/search-flow.md",
+      "sha256": "56757db0635d4c75bf2fd4ca24e6c3f34dc34cc5e273aac2c1b6497d3fd0a559"
     },
     {
       "path": "references/third-party-notices.md",
@@ -787,6 +791,10 @@
       "sha256": "3b0d478c45145dff3e68c8b8b9d3dfd731e23eb91b37e61210b6b7b415b215c1"
     },
     {
+      "path": "scripts/search_flow.py",
+      "sha256": "3dd9b9dc0c33ccf50d46133b761beeb3f764197bcac6e1a4e7998f7a3624e30e"
+    },
+    {
       "path": "scripts/search_nyaa_releases.py",
       "sha256": "79134f82df862aa0f4dc80b65a60aa791adc727dd7e80a29f5fcd08d193228e0"
     },
@@ -1045,6 +1053,10 @@
     {
       "path": "tests/test_scheduled_watch.py",
       "sha256": "0f9841eb038912df8d5c6c70fe0cd5df6423bbbcfd975ed747232ec71922bdba"
+    },
+    {
+      "path": "tests/test_search_flow.py",
+      "sha256": "ded064864abba23fb5cc18cf20cf942f3e93ad18faffc67a43fc4895a65e069f"
     },
     {
       "path": "tests/test_state_invariants.py",

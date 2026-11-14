@@ -141,6 +141,11 @@ def rebuild(source, output_root=None, *, emit=True):
             destination = target / path.relative_to(ROOT / 'overlays')
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, destination)
+    search_guide = (source / 'references/search-flow.md').read_text(encoding='utf-8')
+    search_guide = search_guide.replace('python -X utf8 scripts/search_flow.py',
+        'python -X utf8 scripts/dsh_panel_run.py --plan-id ID search')
+    search_guide = search_guide.replace(' --track-id TRACK_ID --intent latest_regular', '')
+    edit('references/panel-search.md', lambda text: replace_once(text, '<!-- SHARED_SEARCH_FLOW -->', search_guide))
     edit('SKILL.md', lambda text: replace_once(text,
         'Run commands from this skill directory. Read the matching workflow and load its\nsupporting references only when needed.',
         'Run commands from the absolute resource directory supplied by DSH, not the chat workspace.\n'

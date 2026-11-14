@@ -367,7 +367,7 @@ def main(argv=None):
     parser.add_argument('--state', type=Path, default=state_path())
     parser.add_argument('--plan-id')
     parser.add_argument('--scheduled', action='store_true')
-    parser.add_argument('command', choices=['context', 'snapshot', 'targets', 'watch', 'package', 'download'])
+    parser.add_argument('command', choices=['context', 'snapshot', 'targets', 'search', 'watch', 'package', 'download'])
     parser.add_argument('args', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.command == 'snapshot':
@@ -390,6 +390,8 @@ def main(argv=None):
 
 
 def execute(args, plan):
+    if args.command == 'search':
+        return execute_search(args, plan)
     if args.command == 'targets':
         from dsh_panel_targets import worklist
         parser = argparse.ArgumentParser()
@@ -459,6 +461,59 @@ def execute(args, plan):
         return result
     from package_release import main as package_main
     return capture(lambda: package_main(args.args))
+
+
+def execute_search(args, plan):
+    """Bind shared mechanical orchestration to this live panel plan on every call."""
+    import search_flow
+    from quality_review import policy_from_args
+    from types import SimpleNamespace
+    values = search_flow.parser().parse_args(['--state', str(args.state), *args.args])
+    values.state = args.state
+    binding = {key: plan.get(key) for key in ('id', 'revision', 'trackId', 'title', 'season',
+               'bangumiSubjectId', 'mode', 'tier', 'requireZh', 'enqueue')}
+    if values.command == 'start':
+        values.track_id, values.title = plan['trackId'], plan['title']
+        values.intent = {'next_tracked': 'latest_regular', 'latest_regular': 'latest_regular',
+                         'missing_episodes': 'specific_episode', 'season_batch': 'season', 'movie': 'movie'}[plan['mode']]
+        expected = policy_from_args(SimpleNamespace(tier=plan['tier'], require_zh=plan['requireZh']))
+        # Defaults are supplied by the saved plan, never reconstructed by the model.
+        fixed = search_flow.parser().parse_args(['start', '--tier', plan['tier'],
+                         *(['--require-zh'] if plan['requireZh'] else [])])
+        for field in ('tier', 'require_zh', 'want_zh', 'min_gib_per_episode', 'max_gib_per_episode',
+                      'allow_upward_compatibility', 'min_total_gib', 'max_total_gib',
+                      'require_audio', 'require_source', 'prefer_group'):
+            setattr(values, field, getattr(fixed, field))
+        if values.intent in {'season', 'movie'} and values.scope is None and not values.scope_stdin:
+            print(json.dumps({**plan_context(args.state, plan), 'status': 'package_scope_required',
+                              'next': 'Verify work kind/count with an authoritative source; pass the reviewed scope via --scope-stdin.'}, ensure_ascii=False))
+            return 0
+    else:
+        _, session = search_flow.load_session(args.state, values.run, binding)
+        expected = policy_from_args(SimpleNamespace(tier=plan['tier'], require_zh=plan['requireZh']))
+        if session['policy'] != expected or session['track_id'] not in {None, plan['trackId']}:
+            raise ValueError('panel_search_scope_mismatch')
+    if values.command == 'finish':
+        if values.enqueue_qbittorrent and not plan.get('enqueue'):
+            raise ValueError('panel_download_not_authorized')
+        values.enqueue_qbittorrent = bool(plan.get('enqueue'))
+        values.legal_ok = bool(plan.get('enqueue'))
+    ensure_watching(args.state, plan)
+    try:
+        result = search_flow.execute(values, binding=binding)
+    except search_flow.WorkflowError as error:
+        result = {'status': 'review_required', **error.as_dict()}
+    if result.get('status') == 'identity_required':
+        result['context'] = plan_context(args.state, plan)
+    accepted = result.get('receipt') or {}
+    if accepted.get('accepted') is True:
+        file = result_path(args.state, plan['id'])
+        with file_lock(file.with_suffix('.lock')):
+            saved = read(file, {})
+            saved.setdefault('downloads', {})[accepted['info_hash']] = {'status': 'download_submitted'}
+            atomic_json(file, saved)
+    print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
+    return 6 if result.get('status') in {'review_required', 'search_incomplete'} else 0
 
 
 def cli_error(error):

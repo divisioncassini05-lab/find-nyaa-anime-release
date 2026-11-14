@@ -44,9 +44,9 @@ heartbeat 的 current_time_iso 是触发时间，不是等待后的当前时间�
 
 ## 3. 检索与交付
 
-读取 [retrieval-workflow.md](retrieval-workflow.md)，执行 workspace、discover、
-detail、Agent review、验证和交付。创建 review 时才读 agent-review.md；
-其他专题仅在该分支出现时加载。
+读取 [search-flow.md](search-flow.md)，用 start、details、finish 完成检索。
+脚本负责目录、分页、固定字段、鲜活验证和收尾；Agent 阅读每条原标题，判断
+作品、集数、版本和必要的详情。其他专题仅在该分支出现时加载。
 
 每轮最多交付一个未处理的最新常规正片。默认 browse 1–2 GiB、允许向上兼容、
 中文软偏好，review 和 deliver 使用相同条件；有显式上限/硬字幕要求则保留。
@@ -67,7 +67,7 @@ detail、Agent review、验证和交付。创建 review 时才读 agent-review.m
 和最终集 accepted receipt 都齐全，才能按 outbox 删除所属任务和本地记录。
 只清本次范围及必要关联目标，不删除视频、字幕或客户端任务。
 
-无新资源/只读等正常结束执行 `watch.py cleanup --run RUN_DIR`；
+search_flow 的 finish/close 已自动收尾；使用旧原子命令的正常结束才执行 `watch.py cleanup --run RUN_DIR`；
 交付成功由脚本清理，未完成操作/未持久化回执保留。临时文件只放托管 run_dir。
 无变化且无需行动时安静；交付、补查安排/耗尽、失败、完结简短通知。
 只报告工具确认的状态，区分已加入客户端、下载完成和已观看。

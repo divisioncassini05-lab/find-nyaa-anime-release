@@ -1,5 +1,9 @@
 # Retrieval and delivery
 
+Ordinary searches use [search-flow.md](search-flow.md): it joins the mechanical
+steps below while preserving full-title review and the existing validator. This
+reference documents individual commands for recovery and specialized callers.
+
 ## Resolve the request
 
 ```powershell

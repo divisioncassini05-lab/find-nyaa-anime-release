@@ -30,7 +30,7 @@ manual file/env setup. Existing config is not proof of live connection success.
 | --- | --- |
 | Introduction, usage tutorial, examples, or "how do I use this?" | [getting-started.md](references/getting-started.md) |
 | Bangumi list/progress, personal recommendations, or "I finished/watched" | [bangumi-sync.md](references/bangumi-sync.md) |
-| Interactive search/download, next/latest/exact release | [retrieval-workflow.md](references/retrieval-workflow.md) |
+| Interactive search/download, next/latest/exact release, season/movie | [search-flow.md](references/search-flow.md) |
 | Create/change an anime schedule | [scheduled-new-anime.md](references/scheduled-new-anime.md) |
 | A scheduled run or retry | [scheduled-run.md](references/scheduled-run.md) |
 | Recover an interrupted delivery | [failure-recovery.md](references/failure-recovery.md) |
@@ -80,8 +80,8 @@ manual file/env setup. Existing config is not proof of live connection success.
   episode scope; never overwrite ratings/comments/tags. Report pending or partial
   writes honestly and verify by readback. See bangumi-sync.md for host boundaries.
 - The Agent establishes identity, episode numbering and selection from complete
-  listings and details. Use [single-episode review](references/agent-review.md) or
-  [season/movie review](references/package-review.md). Every add needs fresh
+  listings and details. Use [scripted search](references/search-flow.md); scripts
+  assemble reviews from semantic decisions. Every add needs fresh
   validation and its matching process-local capability; raw magnets and serialized
   pass reports cannot authorize delivery.
 - v3 is the local delivery ledger and Bangumi cache/outbox. Recover pending work by its original
