@@ -150,10 +150,8 @@ def rebuild(source, output_root=None, *, emit=True):
         'and completion, read [DSH host integration](references/dsh-host-runtime.md) first.\n'
         'Read the matching workflow and load supporting references only when needed.'))
     edit('SKILL.md', lambda text: replace_once(text,
-        'On the first interactive invocation in a conversation, run `python scripts/first_use.py`.\n'
-        'If `reply_text` is nonempty, relay that fixed guidance verbatim once, then continue\n'
-        "the user's search. Do not repeat it for every title or block searches on optional\n"
-        'setup. A scheduled/background run never displays onboarding or opens windows.\n'
+        'Provide usage guidance only when the user asks for an introduction or tutorial.\n'
+        'A scheduled/background run never opens setup windows.\n'
         'When the user asks to connect Bangumi/enter a token, run\n'
         '`python scripts/setup_gui.py --section bangumi`. For needed local download settings,\n'
         'use `--section qbittorrent` after the existing client-readiness check.\n'
@@ -162,8 +160,8 @@ def rebuild(source, output_root=None, *, emit=True):
         'sandbox desktop. On `gui_unavailable`, explain the desktop/Tk requirement and offer\n'
         'manual file/env setup. Existing config is not proof of live connection success.',
         'In DSH, use the native Anime tracking panel for plans and Bangumi/qBittorrent\n'
-        'configuration. On first use, briefly point to that panel; do not run the Codex\n'
-        'fixed onboarding or open Python setup windows automatically. Optional setup\n'
+        'configuration. Provide usage guidance only on request; do not open Python\n'
+        'setup windows automatically. Optional setup\n'
         'never blocks link-only searches. Headless users may use private file/env setup.\n'
         'For panel-generated requests, read [panel-management.md](references/panel-management.md).\n'
         'Panel task execution marks non-watched works as watching; progress and completion\n'

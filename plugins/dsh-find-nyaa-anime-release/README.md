@@ -1,5 +1,7 @@
 # dsh-find-anime · 动漫搜索与追番管理
 
+开发中的 `0.2.9`：取消首次调用自动开场白，仅在主动询问时提供教程。尚未发布；下方安装示例仍对应已发布的 `0.2.8`。
+
 [完整功能介绍与使用说明](DETAILS.zh.md) · [GitHub 发布包](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases)
 
 动漫资源搜索与追番管理：支持最新单集、补齐缺集与整季补番，按画质和中文字幕要求筛选 Nyaa 资源；提供定时追番、qBittorrent 下载联动与追番收件箱，可读取 Bangumi 番单并手动同步页面计划的观看进度。附带昼夜水下主题、动态鱼群与互动角色。

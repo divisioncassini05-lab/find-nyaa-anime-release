@@ -21,8 +21,8 @@ candidate, resolve uncertain names/formats, and use necessary web fallback.
 Never skip identity, episode, size or required-subtitle checks to save tokens.
 
 In DSH, use the native Anime tracking panel for plans and Bangumi/qBittorrent
-configuration. On first use, briefly point to that panel; do not run the Codex
-fixed onboarding or open Python setup windows automatically. Optional setup
+configuration. Provide usage guidance only on request; do not open Python
+setup windows automatically. Optional setup
 never blocks link-only searches. Headless users may use private file/env setup.
 For panel-generated requests, read [panel-management.md](references/panel-management.md).
 Panel task execution marks non-watched works as watching; progress and completion

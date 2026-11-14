@@ -4,7 +4,7 @@
   "source_files": [
     {
       "path": "SKILL.md",
-      "sha256": "38f11ee9225c729179469f920cdf0fa75e5802d36b8f3de361aef0bf348281c3"
+      "sha256": "c1f35b2e6ecc076c5dc5d78b34a90976367d060070e1947f07287e2f0354b862"
     },
     {
       "path": "data/AOD-LICENSE.txt",
@@ -40,7 +40,7 @@
     },
     {
       "path": "references/bangumi-sync.md",
-      "sha256": "8f52b47247c64afa28fe003d065d94d59e51bc48f12547d914c3e1b3391038df"
+      "sha256": "16345689c5f1fad47768596db7dc1ebe697678c178fb2d759d32e9105cf00734"
     },
     {
       "path": "references/client-readiness.md",

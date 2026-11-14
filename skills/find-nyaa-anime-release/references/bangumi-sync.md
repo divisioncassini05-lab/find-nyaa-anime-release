@@ -32,12 +32,7 @@ of a verified accepted delivery.
   cloud write separately. Do not claim an unsupported collection-state command
   succeeded: the shared CLI supports watched/bind, not a general status setter.
 
-## First use
-
-Run `python scripts/first_use.py` on the first interactive invocation in a conversation.
-Relay its nonempty `reply_text` verbatim once, then continue any requested search.
-The report only checks local configuration, not live authorization or client health.
-Do not repeat the guide on each title or during scheduled jobs.
+## Optional setup
 
 When the user asks to connect/enter a token, run
 `python scripts/setup_gui.py --section bangumi`. It opens a small masked Token form

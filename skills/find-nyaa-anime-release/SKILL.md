@@ -16,10 +16,8 @@ Efficiency must not reduce search coverage or evidence quality: retain every
 candidate, resolve uncertain names/formats, and use necessary web fallback.
 Never skip identity, episode, size or required-subtitle checks to save tokens.
 
-On the first interactive invocation in a conversation, run `python scripts/first_use.py`.
-If `reply_text` is nonempty, relay that fixed guidance verbatim once, then continue
-the user's search. Do not repeat it for every title or block searches on optional
-setup. A scheduled/background run never displays onboarding or opens windows.
+Provide usage guidance only when the user asks for an introduction or tutorial.
+A scheduled/background run never opens setup windows.
 When the user asks to connect Bangumi/enter a token, run
 `python scripts/setup_gui.py --section bangumi`. For needed local download settings,
 use `--section qbittorrent` after the existing client-readiness check.

@@ -1,3 +1,21 @@
+# Local candidate 0.2.9: on-demand usage guidance
+
+2026-11-14: removed automatic first-invocation introductions from the shared
+skill, Bangumi workflow and DSH builder. Explicit tutorial requests still use
+getting-started.md and the existing --guide command. Host adapters are preserved.
+
+- Canonical/distribution Python: 765 passed; DSH Python: 842 passed. Each suite
+  retains 3 platform skips, 1 live deselection and 15 passing subtests.
+- Native Node: 309 passed, none skipped. Both skill validators and generated
+  payload reproducibility checks passed.
+- Initial verification lacked a temporary parent and test dependencies; corrected
+  isolated paths and existing dependencies passed unchanged tests. Native
+  loopback tests required the normal-user context. No live download, account
+  write, GUI interaction or scheduled Agent execution was performed.
+- Local source change only; npm, GitHub and marketplace remain unpublished.
+  Package and lockfile are staged as 0.2.9; installation examples still identify
+  the current published 0.2.8. Tarball verification is recorded with the artifacts.
+
 # Build verification: 0.2.8
 
 ## Public presentation update: 2026-11-11
