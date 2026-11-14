@@ -300,7 +300,8 @@ def test_exact_episode_is_locked(tmp_path):
 
 
 @pytest.mark.parametrize('unclassified', [False, True])
-def test_season_requires_ai_file_mapping_despite_aggregate_hint(tmp_path, unclassified):
+@pytest.mark.parametrize('references', [False, True])
+def test_season_requires_ai_file_mapping_despite_aggregate_hint(tmp_path, unclassified, references):
     state = tmp_path / 'state.json'
     client = Replay()
     file = client.detail.files[0]
@@ -316,6 +317,11 @@ def test_season_requires_ai_file_mapping_despite_aggregate_hint(tmp_path, unclas
             'reason': f'Explicit regular E{n:02}', 'quotes': [f'Steel Ball Run E{n:02}.mkv']} for n in (1,2)],
         'excluded_videos': [] if unclassified else [{'file': 'Steel Ball Run OVA.mkv',
                                                     'reason': 'Explicit OVA outside regular scope', 'quotes': ['Steel Ball Run OVA.mkv']}]}
+    if references:
+        for i, entry in enumerate(value['selection']['episodes'], 1):
+            entry.pop('files'); entry['file_refs'] = [f'f{i}']
+        for entry in value['selection']['excluded_videos']:
+            entry.pop('file'); entry['file_ref'] = 'f3'
     if unclassified:
         with pytest.raises(WorkflowError, match='unclassified_video_files'):
             flow.finish(state, listing['run'], value, client=client)

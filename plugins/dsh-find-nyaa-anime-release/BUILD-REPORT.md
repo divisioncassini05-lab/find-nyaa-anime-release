@@ -1,18 +1,32 @@
-# Local sync fix after 0.2.11 (unpublished)
+# Build verification: 0.2.12
 
-- A watched collection with missing episode marks no longer disables Sync or
-  short-circuits the native writer. Only verified episode readback completes it.
-- Preserve watched while filling the original requested range; partial retries
-  never widen that range. Startup still changes no episode progress.
-- Successful watched/finale sync stops local tracking, leaves Watching and stays
-  in Completed/All with existing downloads. Completed buttons show their result.
-- Core Python: 793 passed; DSH Python: 892 passed (3 platform skips, 1 live test
-  deselected and 15 passing subtests each). Changes affect the DSH panel adapter;
-  the shared Codex sync path already verifies and fills individual episode IDs.
-- Node regression: 312 passed, 5 platform/environment skips. Covers watched flags
-  with empty progress, failed readback, idempotent retries, preserved specials,
-  original retry scope, finale shutdown and leaving the active filter.
-- This local maintenance candidate has not been published to GitHub or npm.
+- A watched collection with missing episode marks remains synchronizable. Finale
+  sync completes local tracking only after verified per-episode readback and
+  retains plans, resources and download history under Completed/All.
+- Retry accepts empty 202 write acknowledgements, then verifies remote state.
+  A retained, hash-matched AI-reviewed package scope supplies the regular count
+  when an aggregate subject count includes extras. Unknown/incomplete scopes
+  stay partial; retries retain their original scope and report safe failure codes.
+- Shared Codex/DSH search tools provide one bounded public identity read and exact
+  file-reference expansion. Every original title, necessary detail and semantic
+  episode mapping remains AI-reviewed. Windows stdin and additional-page guidance
+  avoid the observed retry/dump detours; DSH uses the live permission schema.
+- The whale holds idle for at least 60 seconds and reading for at least 90 seconds,
+  switching only at full clip boundaries. Idle panels continue observing status;
+  visibility/focus refresh catches work started in another session. No model call
+  is made by status polling. Approved animation asset hashes are unchanged.
+- Core Python: 797 passed; DSH Python: 902 passed (3 platform skips, 1 live test
+  deselected and 15 passing subtests each). Node: 319 passed, 5 environment skips.
+  Coverage includes empty acknowledgements, failed readback, original retry scope,
+  trusted package counts, special preservation, permission/input adapters, intact
+  title/file evidence, idle-to-active observation and all animation handoffs.
+- Earlier native DSH verification filled 12 missing regular episode marks on an
+  already-watched work, removed it from Watching and retained download history.
+  The local candidate's later search completed with the user reporting active
+  whale animation. This is not a controlled comparison between identical queries.
+- The actual npm tarball, source ZIP and reproducible generated payload are checked
+  before publication. Host adapters, registry identity and installation URLs stay
+  unchanged. Personal configuration, credentials and tracking data are excluded.
 
 # Build verification: 0.2.11
 

@@ -60,7 +60,7 @@
     },
     {
       "path": "references/package-review.md",
-      "sha256": "989647e15d43eae6c8524b1cebd15c124a8bbb85d12f4b5956f8856296a45e45"
+      "sha256": "23c561d67bdb3c29b3ea1088c2d4fd3ad91df20b06ed0c0b9c8563f5eb474f63"
     },
     {
       "path": "references/quality-ranking.md",
@@ -88,7 +88,7 @@
     },
     {
       "path": "references/search-flow.md",
-      "sha256": "1d88a4b8e3baef2c6dd85c732acd9228664230f42947b67c2a1a72a80f4b068b"
+      "sha256": "f25217a79eff075815ce1d1df3251148872deb895d564ab0f5a1a29d0e52db0e"
     },
     {
       "path": "references/third-party-notices.md",
@@ -792,7 +792,11 @@
     },
     {
       "path": "scripts/search_flow.py",
-      "sha256": "178b2edb61e99aebe63abfb016f363b4044e697618167936f9e48f7746fcd976"
+      "sha256": "789758908d71a0aacef259a15398ea190231e43cfb768b86761609977634d0fa"
+    },
+    {
+      "path": "scripts/search_identity.py",
+      "sha256": "8e709497e01940e51f5509ae0334b5e22da1f61ccc58ecb662ad5165c884939b"
     },
     {
       "path": "scripts/search_nyaa_releases.py",
@@ -1060,7 +1064,11 @@
     },
     {
       "path": "tests/test_search_flow.py",
-      "sha256": "a13c06eae433fa12b93ef45dea655b862bb2ec46ef9e778382f266591410b8a3"
+      "sha256": "f2918148c3ca86ab6f56cb7b42459062dbc7bdd4056e7aa3eb3935488397cfc0"
+    },
+    {
+      "path": "tests/test_search_identity.py",
+      "sha256": "f74003670c66253e7d9796ec8aa385052dc2d1070589a34d10839045eb6286c1"
     },
     {
       "path": "tests/test_state_invariants.py",

@@ -2,19 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {WhaleTimeline, WHALE_STAGES, decodeWhaleClips} from '../client/whale-timeline.mjs';
+import {WhaleTimeline, WHALE_STAGES, WHALE_AUTO_HOLD_MS, decodeWhaleClips} from '../client/whale-timeline.mjs';
 
 const timing = {idle: Array(16).fill(200), receive: Array(16).fill(140),
   reading: Array(16).fill(200), return: [...Array(15).fill(150), 130]};
 
 test('four stages wrap to the same idle start; no fifth module', () => {
   const clock = new WhaleTimeline(timing);
-  clock.advance(6400); assert.equal(clock.stage, 'receive'); assert.equal(clock.frame, 0);
+  const idle = Math.ceil(WHALE_AUTO_HOLD_MS.idle / 3200) * 3200;
+  const reading = Math.ceil(WHALE_AUTO_HOLD_MS.reading / 3200) * 3200;
+  clock.advance(idle - 1); assert.equal(clock.stage, 'idle');
+  clock.advance(1); assert.equal(clock.stage, 'receive'); assert.equal(clock.frame, 0);
   clock.advance(2240); assert.equal(clock.stage, 'reading'); assert.equal(clock.frame, 0);
-  clock.advance(6400); assert.equal(clock.stage, 'return');
+  clock.advance(reading - 1); assert.equal(clock.stage, 'reading');
+  clock.advance(1); assert.equal(clock.stage, 'return');
   clock.advance(2380); assert.equal(clock.stage, 'idle'); assert.equal(clock.frame, 0);
   assert.equal(clock.elapsed, 0); assert.deepEqual(WHALE_STAGES, ['idle', 'receive', 'reading', 'return']);
-  clock.advance(17420*20); assert.equal(clock.stage, 'idle'); assert.equal(clock.frame, 0);
+  clock.advance((idle + reading + 2240 + 2380)*20); assert.equal(clock.stage, 'idle'); assert.equal(clock.frame, 0);
 });
 
 test('latest mode request waits at a safe boundary and cannot skip a handoff', () => {

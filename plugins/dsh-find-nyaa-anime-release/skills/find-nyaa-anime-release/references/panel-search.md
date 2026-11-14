@@ -10,8 +10,10 @@ flags to override the saved plan.
 `search start` without a query is read-only, including optional Bangumi sync.
 Actual searches write evidence and panel history under the returned `write_directory`
 (normally outside the DSH profile workspace). Use DSH's **full-access session mode**
-for this workflow by default, with `sandbox_permissions: "danger-full-access"` on
-terminal calls. Reuse the active full-access authorization instead of asking for
+for this workflow by default. In an already full-access session omit
+`sandbox_permissions`; it is an escalation request, not a session-mode setting.
+Follow the live terminal schema; any permitted escalation also needs its required
+`justification`. Reuse the active full-access authorization instead of asking for
 each directory. If the session is still restricted, ask the user once to switch
 the session to full access; a per-call request alone may still require manual
 approval. Skill text cannot enable a host mode or override a denial. Do not probe
@@ -55,6 +57,12 @@ reuse it automatically. An unqualified interactive request uses
 `identity_required`: verify exact work/season, then create the authorized track
 using [airing-watch-state.md](airing-watch-state.md). Existing bindings are reused.
 Pending operations use [failure-recovery.md](failure-recovery.md).
+When an exact Bangumi ID is already bound but identity/type/count is missing, read
+`python -X utf8 scripts/search_identity.py ID` once. DSH panel `search start`
+returns this public `identity_evidence` automatically when needed. AI verifies
+these source fields; they do not automatically approve a scope or an alias.
+Use another authoritative source only for missing/conflicting evidence. Do not
+dump plans, caches or a whole subject response to rediscover the same binding.
 
 Read **every complete original title** and its row. Size hints are coarse triage,
 including episode-count times size for packages. They cannot classify OVA,
@@ -75,7 +83,10 @@ If coverage needs another page or verified alias:
 python -X utf8 scripts/dsh_panel_run.py --plan-id ID search collect --run "RUN" --query "VERIFIED ALIAS" --pages 1
 ```
 
-This continues after that query's saved pages. Fetch currently plausible candidate
+This continues after that query's saved pages. `--pages N` means **N additional pages**, not the last page
+number: after pages 1–2, use `--pages 3` to read pages 3–5. Continue only while
+coverage is unresolved. Keep the returned output intact; do not add a filtering
+pipeline or infer completion from the number of rows. Fetch candidate
 details together; additional batches remain available:
 
 ```powershell
@@ -97,6 +108,18 @@ PowerShell can pipe a literal `@' ... '@` here-string to:
 ```powershell
 python -X utf8 scripts/dsh_panel_run.py --plan-id ID search finish --run "RUN"
 ```
+
+Use this complete PowerShell pattern for either `finish` or `start --scope-stdin`:
+
+```powershell
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+@'
+{"replace":"with the reviewed decision or scope object"}
+'@ | python -X utf8 scripts/dsh_panel_run.py --plan-id ID search finish --run "RUN"
+```
+
+PowerShell does not support `< file` input redirection. Do not create a temporary
+scope file just to pipe it back or inspect Python's encoding during a normal run.
 
 Single-episode decision (replace examples with actual evidence):
 
@@ -152,6 +175,11 @@ and `selection` with `work_reason`, `work_quotes`, `subtitle_quotes`, `episodes`
 `excluded_videos` and optional `source_exception` from that reference. The Agent
 maps every video to a regular episode or explicit exclusion; scripts check
 coverage and actual sizes. Aggregate estimates cannot replace that mapping.
+For package decisions, use the already displayed file IDs instead of rereading
+raw JSON or copying long paths: `episodes` entries accept `file_refs:["f1"]`
+alongside `episode`, `reason`, and `refs`; exclusions accept `file_ref:"f3"`,
+`reason`, and `refs`. Scripts resolve exact paths. AI must still interpret every
+filename and explicitly map each video; array order/count is never episode proof.
 Catalogue choice and download authorization rules from SKILL.md still apply.
 For several link-only choices, pipe a JSON array of decisions to finish; each is
 validated and cleanup runs once after all results. If no candidate can be offered,

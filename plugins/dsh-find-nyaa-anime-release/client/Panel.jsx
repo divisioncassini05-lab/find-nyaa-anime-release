@@ -8,7 +8,8 @@ import { OceanScene, useOceanMotion } from './OceanScene.jsx';
 import { TelevisionIcon } from './TelevisionIcon.jsx';
 import { CurrentRibbon } from './CurrentRibbon.jsx';
 import { WhaleCheckStatus } from './whale-check-status.mjs';
-import { syncLabel, progressPercent, nextCheckLabel, planFacts } from './presentation.mjs';
+import { observePanelActivity } from './panel-activity.mjs';
+import { syncLabel, progressPercent, nextCheckLabel, planFacts, collectionResultMessage } from './presentation.mjs';
 import { hasSchedule, scheduleLabel } from '../host/schedule.js';
 
 const collectionText = { 1: '想看', 2: '看过', 3: '在看', 4: '搁置', 5: '抛弃' };
@@ -123,9 +124,7 @@ export function Panel({ loadSnapshot, loadBangumi, loadMetadata, loadConfig, loa
   }, [loadBangumi, refresh]);
   useEffect(() => {
     const running = (plans.plans || []).some((plan) => ['queued', 'running'].includes(plan.checkStatus));
-    if (!running && !(plans.plans || []).some((plan) => (plan.scheduleActive && !plan.paused) || ['downloading', 'download_submitted'].includes(plan.evidence?.download?.status))) return;
-    const timer = setInterval(() => { if (!document.hidden) setLocalTick((old) => old + 1); }, running ? 15000 : 30000);
-    return () => clearInterval(timer);
+    return observePanelActivity(() => setLocalTick((old) => old + 1), running);
   }, [plans]);
   useEffect(() => {
     if (!loadMetadata || library.status !== 'ready') return;
@@ -175,10 +174,10 @@ export function Panel({ loadSnapshot, loadBangumi, loadMetadata, loadConfig, loa
     catch (error) { setNotice(message(error)); setOperationError(message(error)); if (endpoint.startsWith('plans/')) reload(false); throw error; } finally { setBusy(false); }
   }
   const safely = (promise) => promise.catch(() => {});
-  const syncMessage = (result) => result.status === 'collection_synced' ? (result.trackingCompleted ? '已同步 Bangumi 并结束追番，下载记录保留' : '已同步 Bangumi，本地下载历史保留') : result.status === 'collection_partial' ? '收藏状态已写入，集数未完全同步，可重试' : 'Bangumi 待同步，请检查连接或作品关联后重试';
+  const syncMessage = collectionResultMessage;
   const execute = (kind, r, infoHash) => { const p = r.plan; const payload = { id: p.id, revision: p.revision, ...(['pause', 'schedulePause'].includes(kind) ? { paused: kind === 'pause' ? !p.paused : p.scheduleActive } : {}), ...(kind === 'download' ? { infoHash: infoHash || (p.evidence.latestPackage || p.evidence.latestFound).infoHash } : {}) }; safely(call(`plans/${kind}`, payload, kind === 'sync' ? syncMessage : kind === 'download' ? (result) => ({ download_submitted: '已核验并提交原资源，等待下载完成', download_pending: '下载提交尚未确认，可重试提交，不会重新找番', resource_review_required: '原资源核验条件已变化，请重新核验；未提交下载' })[result.status] : kind === 'check' ? '本次查找已排队，原有定时安排不变' : '计划已更新')); };
   const action = (kind, r, collectionType) => {
-    if (kind === 'collection') safely(call('plans/collection', { id: r.plan.id, revision: r.plan.revision, collectionType }, (result) => result.status === 'collection_synced' ? '已同步 Bangumi，本地计划保留' : result.status === 'collection_partial' ? (result.progress === 'unknown_total' || result.progress === 'coverage_unconfirmed' ? '已移入看过，全集范围尚未确认，未补齐集数' : '已移入看过，集数同步未完成，请稍后重试') : '本地状态已保存，Bangumi 未同步；请检查连接或作品关联后再次点击'));
+    if (kind === 'collection') safely(call('plans/collection', { id: r.plan.id, revision: r.plan.revision, collectionType }, collectionResultMessage));
     else if (['edit', 'schedule', 'requirements'].includes(kind)) setModal({ kind, row: r });
     else if (kind === 'delete') setModal({ kind: 'confirm', action: kind, row: r });
     else if (!r.plan) setModal({ kind: 'edit', row: r });

@@ -278,6 +278,22 @@ def make_review(state, run, session, decision):
     listings = [run / name for name in session['listings']]
     selection = expand_refs(copy.deepcopy(decision.get('selection', {})), detail)
     need(isinstance(selection, dict), 'semantic_selection_required')
+    # The Agent maps episodes/exclusions to displayed file IDs. Resolve exact paths
+    # mechanically, without guessing from order, filename patterns or file count.
+    file_names = {f'f{i}': entry['name'] for i, entry in enumerate(detail['files'], 1)}
+    for entry in selection.get('episodes', []):
+        if 'file_refs' in entry:
+            refs = entry.pop('file_refs')
+            need(isinstance(refs, list) and refs and all(ref in file_names for ref in refs), 'invalid_file_reference')
+            files = [file_names[ref] for ref in refs]
+            need('files' not in entry or entry['files'] == files, 'conflicting_file_reference')
+            entry['files'] = files
+    for entry in selection.get('excluded_videos', []):
+        if 'file_ref' in entry:
+            ref = entry.pop('file_ref')
+            need(isinstance(ref, str) and ref in file_names, 'invalid_file_reference')
+            need('file' not in entry or entry['file'] == file_names[ref], 'conflicting_file_reference')
+            entry['file'] = file_names[ref]
     if session['track_id']:
         show = checked_show(StateRepository(state), session['track_id'])
         episode = decision.get('episode')

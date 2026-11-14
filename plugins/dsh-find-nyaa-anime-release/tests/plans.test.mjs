@@ -408,6 +408,29 @@ for(const progress of ['synced','pending','not_requested']) {
   }));
 }
 
+test('package retry preserves reviewed regular count and exposes a safe failure',()=>fixture(async(original,host,file)=>{
+  await original.mutate('save',{...values,mode:'season_batch',bangumiSubjectId:123});
+  let count=24, attempts=0;
+  const scopes=[];
+  const service=createPlanService({file,scheduler:()=>host,
+    evidenceReader:async()=>({[(await original.list()).plans[0].id]:{latestPackage:{regularEpisodes:count}}}),
+    collectionWriter:async request=>{
+      scopes.push(request.expectedRegularEpisodes);
+      if(!attempts++)throw Object.assign(new Error('secret must not be shown'),{code:'bangumi_timeout'});
+      return {collectionType:2,progress:'synced',syncedEpisode:24};
+    }});
+  let [plan]=(await service.list()).plans;
+  const first=await service.mutate('collection',{id:plan.id,revision:plan.revision,collectionType:2});
+  assert.equal(first.syncError,'bangumi_timeout');assert.equal(first.status,'collection_sync_pending');
+  count=26;[plan]=(await service.list()).plans;
+  assert.equal(plan.collectionError,'bangumi_timeout');
+  const result=await service.mutate('collection',{id:plan.id,revision:plan.revision,collectionType:2});
+  assert.equal(result.status,'collection_synced');assert.equal(result.syncError,undefined);
+  assert.deepEqual(scopes,[24,24]);
+  [plan]=(await service.list()).plans;
+  assert.equal(plan.syncedEpisode,24);assert.equal(plan.collectionError,undefined);
+}));
+
 test('progress retry preserves its original scope when another episode was found',()=>fixture(async(original,host,file)=>{
   await original.mutate('save',{...values,bangumiSubjectId:123});
   const [p]=(await original.list()).plans;

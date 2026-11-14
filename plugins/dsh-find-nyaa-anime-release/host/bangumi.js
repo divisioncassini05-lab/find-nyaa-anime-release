@@ -11,6 +11,14 @@ const MAX_BYTES = 4 * 1024 * 1024;
 const LIBRARY_VERSION = 2;
 const METADATA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const fail = (code) => Object.assign(new Error(code), { code });
+export function bangumiSyncError(error) {
+  const code = error?.code;
+  return networkCodes.includes(code) || /^bangumi_http_[1-5]\d\d$/u.test(code || '')
+    || ['cancelled', 'bangumi_token_required', 'bangumi_account_conflict', 'bangumi_connection_changed',
+      'bangumi_binding_required', 'bangumi_invalid_subject', 'bangumi_invalid_response',
+      'bangumi_invalid_page', 'bangumi_write_not_confirmed', 'bangumi_progress_not_confirmed'].includes(code)
+    ? code : 'bangumi_network_unavailable';
+}
 
 export function bangumiConfigPath(file = statePath()) {
   return file.replace(/\.json$/u, '.bangumi.json');
@@ -128,19 +136,26 @@ async function apiJson(token, route, signal, request = bangumiRequest, payload, 
     throw fail('bangumi_network_unavailable');
   }
   if (!response.ok) throw fail(`bangumi_http_${response.status}`);
-  return response.status === 204 ? null : response.json();
+  const body = await response.text();
+  // Some deployments acknowledge writes with 202 and an empty body. Acceptance
+  // is not confirmation: callers still read back the collection/episode state.
+  if (!body.trim() && payload) return null;
+  try { return JSON.parse(body); }
+  catch { throw fail('bangumi_invalid_response'); }
 }
 
-async function completeEpisodes(token, subject, signal, request) {
-  const total = subject.eps;
+async function completeEpisodes(token, subject, signal, request, expectedRegularEpisodes) {
+  const total = expectedRegularEpisodes ?? subject.eps;
   if (!Number.isSafeInteger(total) || total < 1 || total > 1000) return 'unknown_total';
   const route = `/v0/users/-/collections/${subject.id}/episodes`;
   const read = () => apiJson(token, `${route}?episode_type=0&limit=1000&offset=0`, signal, request);
   const before = await read();
   const valid = (page) => page?.total === total && Array.isArray(page.data) && page.data.length === total
     && new Set(page.data.map((r) => r.episode?.id)).size === total
+    && new Set(page.data.map((r) => r.episode?.sort)).size === total
     && page.data.every((r) => Number.isSafeInteger(r.episode?.id) && r.episode.id > 0
-      && r.episode.subject_id === subject.id && r.episode.type === 0);
+      && r.episode.subject_id === subject.id && r.episode.type === 0
+      && Number.isSafeInteger(r.episode.sort) && r.episode.sort >= 1 && r.episode.sort <= total);
   if (!valid(before)) return 'coverage_unconfirmed';
   const ids = before.data.filter((r) => r.type !== 2).map((r) => r.episode.id);
   if (ids.length) await apiJson(token, route, signal, request, { episode_id: ids, type: 2 }, 'PATCH');
@@ -150,9 +165,10 @@ async function completeEpisodes(token, subject, signal, request) {
   return 'synced';
 }
 
-export async function updateBangumiCollection({ file = statePath(), subjectId, collectionType, throughEpisode = null, preserveWatched = false, signal, request = bangumiRequest } = {}) {
+export async function updateBangumiCollection({ file = statePath(), subjectId, collectionType, throughEpisode = null, expectedRegularEpisodes = null, preserveWatched = false, signal, request = bangumiRequest } = {}) {
   if (!Number.isSafeInteger(subjectId) || subjectId < 1 || ![1, 2, 3, 4, 5].includes(collectionType)) throw fail('invalid_request');
   if (throughEpisode !== null && (!Number.isSafeInteger(throughEpisode) || throughEpisode < 1 || throughEpisode > 1000)) throw fail('invalid_request');
+  if (expectedRegularEpisodes !== null && (!Number.isSafeInteger(expectedRegularEpisodes) || expectedRegularEpisodes < 1 || expectedRegularEpisodes > 1000)) throw fail('invalid_request');
   const config = await readJson(bangumiConfigPath(file));
   if (!validConfig(config)) throw fail('bangumi_token_required');
   const token = await tokenFor(config);
@@ -178,10 +194,11 @@ export async function updateBangumiCollection({ file = statePath(), subjectId, c
   const after = await apiJson(token, `/v0/users/${encodeURIComponent(config.username)}/collections/${subjectId}`, signal, request);
   if (after.type !== collectionType) throw fail('bangumi_write_not_confirmed');
   let progress = 'not_requested';
+  let syncError;
   if (collectionType === 2 || throughEpisode !== null) {
-    try { progress = throughEpisode === null ? await completeEpisodes(token, subject, signal, request)
+    try { progress = throughEpisode === null ? await completeEpisodes(token, subject, signal, request, expectedRegularEpisodes)
       : await syncThroughEpisode(token, subject, throughEpisode, signal, request); }
-    catch { progress = 'pending'; }
+    catch (error) { progress = 'pending'; syncError = bangumiSyncError(error); }
     if (progress === 'synced') {
       const verified = await apiJson(token, `/v0/users/${encodeURIComponent(config.username)}/collections/${subjectId}`, signal, request);
       if (verified.type !== collectionType) throw fail('bangumi_write_not_confirmed');
@@ -190,11 +207,11 @@ export async function updateBangumiCollection({ file = statePath(), subjectId, c
   const cached = await readJson(bangumiCachePath(file));
   if (cached?.account_id === config.account_id) {
     const row = cached.items?.find((item) => item.subject_id === subjectId);
-    if (row) { row.collection_type = collectionType; if (progress === 'synced') row.watched_count = throughEpisode === null ? subject.eps : Math.max(row.watched_count || 0, throughEpisode); }
+    if (row) { row.collection_type = collectionType; if (progress === 'synced') row.watched_count = throughEpisode === null ? expectedRegularEpisodes ?? subject.eps : Math.max(row.watched_count || 0, throughEpisode); }
     cached.checked_at = null;
     await writeJson(bangumiCachePath(file), cached);
   }
-  return { status: 'bangumi_collection_updated', collectionType, progress, ...(preservedWatched ? { preservedWatched: true } : {}), ...(progress === 'synced' ? { syncedEpisode: throughEpisode ?? subject.eps } : {}) };
+  return { status: 'bangumi_collection_updated', collectionType, progress, ...(syncError ? { syncError } : {}), ...(preservedWatched ? { preservedWatched: true } : {}), ...(progress === 'synced' ? { syncedEpisode: throughEpisode ?? expectedRegularEpisodes ?? subject.eps } : {}) };
 }
 
 async function syncThroughEpisode(token, subject, through, signal, request) {

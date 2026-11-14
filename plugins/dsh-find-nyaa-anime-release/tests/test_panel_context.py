@@ -89,3 +89,23 @@ def test_safe_errors_identify_recoverable_stage_without_leaking_exception_text()
     assert 'password' not in json.dumps(report)
     assert panel.cli_error(ValueError('panel_work_mismatch'))['error'] == 'panel_work_mismatch'
     assert panel.cli_error(ValueError('credential=private'))['error'] == 'ValueError'
+
+
+@pytest.mark.parametrize('mutation', [None, 'different_subject', 'gap', 'tampered', 'outside'])
+def test_package_scope_comes_from_bound_retained_ai_review(tmp_path, mutation):
+    from submission_gate import digest
+    state, plan = setup(tmp_path, mode='season_batch')
+    review = {'reviewed': True, 'scope': {'kind': 'season', 'episodes': 24, 'bangumi_id':12345},
+              'selection': {'episodes': [{'episode': n} for n in range(1,25)]}}
+    if mutation == 'different_subject':
+        review['scope']['bangumi_id'] = 999
+    if mutation == 'gap':
+        review['selection']['episodes'][-1]['episode'] = 26
+    root = panel.result_path(state, plan['id']).parent / plan['id'] / ('a'*40)
+    root.mkdir(parents=True)
+    path = (tmp_path if mutation == 'outside' else root) / ('review-' + digest(review) + '.json')
+    if mutation == 'tampered':
+        review['scope']['episodes'] = 25
+    path.write_text(json.dumps(review), encoding='utf-8')
+    entry = {'infoHash':'a'*40, 'scope':'season', 'reviewPath':str(path)}
+    assert panel.package_regular_episodes(state,plan,entry) == (None if mutation else 24)

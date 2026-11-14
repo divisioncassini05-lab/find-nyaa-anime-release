@@ -1,9 +1,34 @@
 import { hasSchedule, scheduleFor } from '../host/schedule.js';
 import { syncedThrough } from './library.mjs';
 
+export function syncErrorText(code) {
+  return ({bangumi_timeout:'Bangumi 请求超时', bangumi_dns_failed:'Bangumi 地址解析失败',
+    bangumi_tls_failed:'Bangumi 证书校验失败', bangumi_connection_reset:'Bangumi 连接被中断',
+    bangumi_proxy_refused:'本机网络代理拒绝连接', bangumi_proxy_unsupported:'当前代理协议不受支持',
+    bangumi_network_unavailable:'Bangumi 暂时无法连接', bangumi_token_required:'请先连接 Bangumi',
+    bangumi_http_401:'Bangumi 登录凭据已失效', bangumi_http_403:'Bangumi 拒绝访问，请检查权限',
+    bangumi_http_429:'Bangumi 请求过于频繁，请稍后重试', bangumi_account_conflict:'Bangumi 账号与当前绑定不一致',
+    bangumi_connection_changed:'Bangumi 连接已变更，请刷新后重试', bangumi_binding_required:'尚未关联 Bangumi 作品',
+    bangumi_invalid_subject:'Bangumi 作品关联不匹配', bangumi_invalid_response:'Bangumi 响应格式异常',
+    bangumi_invalid_page:'Bangumi 分集列表不完整', bangumi_write_not_confirmed:'收藏写入尚未得到回读确认',
+    bangumi_progress_not_confirmed:'分集进度尚未得到回读确认', cancelled:'同步已取消或超时'})[code]
+    || (/^bangumi_http_\d{3}$/u.test(code || '') ? `Bangumi 请求失败（HTTP ${code.slice(-3)}）` : null);
+}
+
+export function collectionResultMessage(result) {
+  if (result.status === 'collection_synced') return result.trackingCompleted
+    ? '已同步 Bangumi 并结束追番，下载记录保留' : '已同步 Bangumi，本地下载历史保留';
+  const reason = syncErrorText(result.syncError);
+  if (result.status === 'collection_partial') return ['unknown_total', 'coverage_unconfirmed'].includes(result.progress)
+    ? '收藏状态已同步，正篇集数范围尚未确认，未补齐分集进度'
+    : `收藏状态已同步，分集进度待同步${reason ? '：' + reason : '，可重试'}`;
+  return `本地状态已保存，Bangumi 待确认${reason ? '：' + reason : '，请重试同步'}`;
+}
+
 export function syncLabel(record) {
-  if (record.plan?.collectionSync === 'partial') return { text: '状态已同步，集数未补齐', tone: 'warn' };
-  if (record.plan?.collectionSync === 'pending') return { text: '状态待同步', tone: 'warn' };
+  const error = syncErrorText(record.plan?.collectionError);
+  if (record.plan?.collectionSync === 'partial') return { text: '状态已同步，集数未补齐' + (error ? '：' + error : ''), tone: 'warn' };
+  if (record.plan?.collectionSync === 'pending') return { text: '状态待同步' + (error ? '：' + error : ''), tone: 'warn' };
   if (record.plan?.evidence?.startSync === 'pending') return { text: '在看状态待同步', tone: 'warn' };
   if (record.plan) {
     if (!record.bangumiSubjectId) return { text: '未关联', tone: 'muted' };

@@ -260,6 +260,36 @@ def web_files_complete(client, info_hash, root, observed=None):
     return True
 
 
+def package_regular_episodes(state, plan, entry):
+    """Recover the AI-verified package scope, including older retained reviews."""
+    if not entry or entry.get('scope') not in {'season', 'movie'} or not entry.get('reviewPath'):
+        return None
+    try:
+        from submission_gate import digest
+        info_hash = entry.get('infoHash', '')
+        if not re.fullmatch(r'[0-9a-f]{40}', info_hash):
+            return None
+        owned = result_path(state, plan['id']).parent / plan['id'] / info_hash
+        path = Path(entry['reviewPath'])
+        if path.is_symlink() or path.resolve().parent != owned.resolve():
+            return None
+        review = read(path, {})
+        if review.get('reviewed') is not True or path.name != 'review-' + digest(review) + '.json':
+            return None
+        scope = review.get('scope') or {}
+        count = scope.get('episodes')
+        if (scope.get('kind') != entry['scope'] or type(count) is not int or not 1 <= count <= 1000
+                or not plan.get('bangumiSubjectId') or scope.get('bangumi_id') != plan['bangumiSubjectId']
+                or plan.get('season') and scope.get('season') != plan['season']):
+            return None
+        numbers = [row.get('episode') for row in review.get('selection', {}).get('episodes', [])]
+        if len(numbers) == count and all(type(number) is int for number in numbers) and set(numbers) == set(range(1, count + 1)):
+            return count
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return None
+
+
 def snapshot(state):
     plans = read(state.with_suffix('.plans.json'), {}).get('plans', [])
     setup = read(state.with_suffix('.setup.json'), {})
@@ -326,6 +356,8 @@ def snapshot(state):
             if not entry:
                 return None
             value = {k: v for k, v in entry.items() if k not in {'reviewPath', 'qualityPolicy'}}
+            if entry.get('scope') in {'season', 'movie'}:
+                value['regularEpisodes'] = package_regular_episodes(state, plan, entry)
             value['canDownload'] = compatible(entry, plan)
             return value
         def download_status(entry):
@@ -485,8 +517,10 @@ def execute_search(args, plan):
                       'require_audio', 'require_source', 'prefer_group'):
             setattr(values, field, getattr(fixed, field))
         if values.intent in {'season', 'movie'} and values.scope is None and not values.scope_stdin:
+            from search_identity import subject_evidence
             print(json.dumps({**plan_context(args.state, plan), 'status': 'package_scope_required',
-                              'next': 'Verify work kind/count with an authoritative source; pass the reviewed scope via --scope-stdin.'}, ensure_ascii=False))
+                              'identity_evidence': subject_evidence(plan['bangumiSubjectId']) if plan.get('bangumiSubjectId') else None,
+                              'next': 'Read identity_evidence and verify work kind/count; pipe the AI-reviewed scope to --scope-stdin. Do not use PowerShell < redirection or inspect unrelated state.'}, ensure_ascii=False))
             return 0
     else:
         _, session = search_flow.load_session(args.state, values.run, binding)
@@ -508,6 +542,9 @@ def execute_search(args, plan):
         result = {'status': 'review_required', **error.as_dict()}
     if result.get('status') == 'identity_required':
         result['context'] = plan_context(args.state, plan)
+        if plan.get('bangumiSubjectId'):
+            from search_identity import subject_evidence
+            result['identity_evidence'] = subject_evidence(plan['bangumiSubjectId'])
     accepted = result.get('receipt') or {}
     if accepted.get('accepted') is True:
         file = result_path(args.state, plan['id'])

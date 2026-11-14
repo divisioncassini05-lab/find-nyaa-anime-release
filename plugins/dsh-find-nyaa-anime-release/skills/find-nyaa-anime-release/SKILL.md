@@ -7,8 +7,10 @@ description: Find and verify Nyaa anime releases, track with qBittorrent, and op
 
 Run commands from the absolute resource directory supplied by DSH, not the chat workspace.
 Use DSH file/terminal tools and an installed Python 3.11+ (python, python3, or py -3).
-Default to a DSH full-access session for this skill and use `sandbox_permissions: "danger-full-access"`
-on terminal calls. Reuse that authorization; do not ask separately for every directory.
+Default to a DSH full-access session for this skill. When already full access, omit
+`sandbox_permissions` (an escalation request, not a session-mode setting). Follow the live
+terminal schema, including required justification for any permitted escalation.
+Reuse session authorization; do not ask separately for every directory.
 If the session is restricted, ask once to switch to full access; the skill cannot grant host permissions.
 Only for an actual environment failure, use `python scripts/dsh_doctor.py` (read-only). No install-time commands run.
 Never use Codex tools, local Codex records or an assumed model/browser API. For creating

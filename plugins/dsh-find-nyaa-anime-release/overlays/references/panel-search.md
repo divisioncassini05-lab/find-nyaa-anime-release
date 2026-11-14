@@ -10,8 +10,10 @@ flags to override the saved plan.
 `search start` without a query is read-only, including optional Bangumi sync.
 Actual searches write evidence and panel history under the returned `write_directory`
 (normally outside the DSH profile workspace). Use DSH's **full-access session mode**
-for this workflow by default, with `sandbox_permissions: "danger-full-access"` on
-terminal calls. Reuse the active full-access authorization instead of asking for
+for this workflow by default. In an already full-access session omit
+`sandbox_permissions`; it is an escalation request, not a session-mode setting.
+Follow the live terminal schema; any permitted escalation also needs its required
+`justification`. Reuse the active full-access authorization instead of asking for
 each directory. If the session is still restricted, ask the user once to switch
 the session to full access; a per-call request alone may still require manual
 approval. Skill text cannot enable a host mode or override a denial. Do not probe

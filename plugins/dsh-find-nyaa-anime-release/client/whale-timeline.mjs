@@ -1,4 +1,6 @@
 export const WHALE_STAGES = ['idle', 'receive', 'reading', 'return'];
+// Hold stable poses in real animation time; clip length is not a rest interval.
+export const WHALE_AUTO_HOLD_MS = Object.freeze({idle: 60000, reading: 90000});
 
 // All requests take effect at complete clip boundaries, never halfway through a handoff.
 export class WhaleTimeline {
@@ -33,10 +35,10 @@ export class WhaleTimeline {
       this.loops++;
       let next = this.stage;
       if (this.stage === 'idle' && (this.requested === 'reading'
-        || (this.requested === 'auto' && this.loops >= 2))) next = 'receive';
+        || (this.requested === 'auto' && this.loops * this.totals.idle >= WHALE_AUTO_HOLD_MS.idle))) next = 'receive';
       else if (this.stage === 'receive') next = 'reading';
       else if (this.stage === 'reading' && (this.requested === 'idle'
-        || (this.requested === 'auto' && this.loops >= 2))) next = 'return';
+        || (this.requested === 'auto' && this.loops * this.totals.reading >= WHALE_AUTO_HOLD_MS.reading))) next = 'return';
       else if (this.stage === 'return') next = 'idle';
       if (next !== this.stage) { this.stage = next; this.loops = 0; }
     }

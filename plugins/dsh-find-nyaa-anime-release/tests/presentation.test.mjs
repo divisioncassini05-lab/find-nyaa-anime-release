@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { syncLabel, progressPercent, nextCheckLabel, episodeRanges, planFacts } from '../client/presentation.mjs';
+import { syncLabel, progressPercent, nextCheckLabel, episodeRanges, planFacts, collectionResultMessage, syncErrorText } from '../client/presentation.mjs';
 
 test('found resources, verified downloads and schedule uncertainty remain independent', () => {
   const facts = planFacts({plan:{checkStatus:'queued',evidence:{latestFound:{episode:12,finalEpisode:12},completedEpisodes:[1,2,3,5],downloadCheckIncomplete:true}}});
@@ -22,6 +22,14 @@ test('sync display does not turn missing or different progress into success', ()
   const watched={bangumiSubjectId:1,bangumiStatus:2,watchedCount:12,plan:{collectionType:2,collectionSync:'synced',collectionProgress:'not_requested',evidence:{latestFound:{episode:12}}}};
   assert.equal(syncLabel(watched).text,'可同步至 E12');
   assert.equal(syncLabel({...watched,plan:{...watched.plan,collectionProgress:'synced',syncedEpisode:12}}).text,'看过，分集进度已同步');
+});
+
+test('retry explains the verified failure without exposing arbitrary exception text', () => {
+  assert.match(collectionResultMessage({status:'collection_sync_pending',syncError:'bangumi_timeout'}),/请求超时/);
+  assert.match(syncLabel({plan:{collectionSync:'pending',collectionError:'bangumi_http_401'}}).text,/凭据已失效/);
+  assert.match(collectionResultMessage({status:'collection_partial',progress:'coverage_unconfirmed'}),/正篇集数范围尚未确认/);
+  assert.equal(syncErrorText('password=private'),null);
+  assert.doesNotMatch(collectionResultMessage({status:'collection_sync_pending',syncError:'password=private'}),/private/);
 });
 
 test('progress is bounded and missing totals remain unknown', () => {

@@ -8,6 +8,12 @@ reviews. Independently establish the work and expected episode count as before.
 
 ## Draft and review
 
+When using `search_flow.py`, pipe the scope below directly to `start --scope-stdin`
+using the PowerShell example in search-flow.md. Then use `details` and `finish`;
+skip the manual draft/read/write commands below. Its displayed file IDs support
+`file_refs` for episode files and `file_ref` for exclusions, with AI-supplied
+episode mapping/reasons and candidate-local evidence `refs`.
+
 Save the independently verified scope as JSON in the run directory:
 
 ```json

@@ -19,6 +19,8 @@
 这是独立的 DSH 适配包，不需要先安装 Codex，也不会读取你的 Codex 追番记录。
 模型负责理解与审阅，Python 脚本负责取证、校验和交付；体积大不等于画质一定更好。
 
+0.2.12 修复最终集收尾与 Bangumi 重试同步，支持按已审核的正篇范围补齐合集进度；减少检索前的机械步骤，并降低小鲸鱼静态/看书切换频率。逐条标题与必要详情仍由 AI 判断。
+
 ## 能做什么
 
 - 原生侧栏“动漫追番”：查看 DSH 追番记录、交付进度、下一目标和待核验操作；筛选与刷新不调用模型。
@@ -51,7 +53,7 @@
 
 ### 从 npm 安装（推荐）
 
-本版本为 `0.2.11`。在 DSH「插件 → 添加插件」输入：
+本版本为 `0.2.12`。在 DSH「插件 → 添加插件」输入：
 
 ```text
 dsh-find-nyaa-anime-release
@@ -66,15 +68,15 @@ dsh-find-nyaa-anime-release
 
 ### 本地插件包（备用）
 
-从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.11) 下载
-`dsh-find-nyaa-anime-release-0.2.11.tgz`，交给 DSH，并说：
+从 [GitHub Release](https://github.com/divisioncassini05-lab/find-nyaa-anime-release/releases/tag/dsh-v0.2.12) 下载
+`dsh-find-nyaa-anime-release-0.2.12.tgz`，交给 DSH，并说：
 
 > 请通过当前 profile 的插件管理器安装这个本地插件包，完成后确认技能可加载。
 
 也可以在 DSH CLI 中使用实际 profile 和本地绝对路径：
 
 ```sh
-dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.11.tgz"
+dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.12.tgz"
 ```
 
 桌面端优先在应用内用插件管理器安装到当前 profile，不要照抄 `web` 去改另一个 profile。
@@ -92,7 +94,7 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.11.
   保持不变，`0.2.2` 起安装来源为对应的 npm 精确版本。
 - 旧版路径、Git 或 `.tgz` 安装不会自动变成 npm 安装，也不显示原生注册表更新提示。
   迁移时先保留当前 profile 的配置和外部数据，再用插件管理器把同名依赖替换为
-  `dsh-find-nyaa-anime-release@0.2.11`，保留启用状态并按宿主要求重载。
+  `dsh-find-nyaa-anime-release@0.2.12`，保留启用状态并按宿主要求重载。
   若界面拒绝同名安装，可先移除插件再从 npm 添加；不要删除数据目录或定时任务。
 - 仍使用本地包时，需要手动下载新版 `.tgz` 并更新同名插件。不要只替换 `SKILL.md`；
   脚本、面板和宿主适配必须一起更新。
@@ -112,9 +114,11 @@ dsh plugin --profile web add "/absolute/path/dsh-find-nyaa-anime-release-0.2.11.
 初次安装可让 Agent 进入技能资源目录执行 `python scripts/dsh_doctor.py`。
 它只检查本地前置条件，**不联网、不启动客户端、不下载、不修改记录**。
 
-## 图形面板（0.2.11）
+## 图形面板（0.2.12）
 
-本次加入已确认的阅读连点：阅读时在约1.2秒内点三次，等书页落稳后合书、抱书并闭眼回避；水幕遮住角色期间播放重新开书的动作，散开时回到原阅读。单击仍有原来的轻微涟漪反馈；只有阅读状态识别这套连点动作。暂停、隐藏和减少动态设置仍有效，不会因连点新增检索或下载操作。
+本版修复“整部已标看过，但分集进度未同步”时按钮无法点击的问题。同步会核对并补齐请求范围；最终集或已看过作品同步成功后结束追番，保留资源和下载历史，并明确显示已同步结果。
+
+面板支持阅读连点：阅读时在约1.2秒内点三次，等书页落稳后合书、抱书并闭眼回避；水幕遮住角色期间播放重新开书的动作，散开时回到原阅读。单击仍有原来的轻微涟漪反馈；只有阅读状态识别这套连点动作。暂停、隐藏和减少动态设置仍有效，不会因连点新增检索或下载操作。
 
 海洋背景保留同一幅水面与海底构图，新增独立环境动画：19类生物、22种外观使用原生帧图集播放，白天以浅海小鱼群为主，夜晚改为深海鱼与少量水母。同类可聚集、异类提前避让，胆小生物绕行，个体从屏外进入并游出；没有捕猎或写实生态模拟。水母和鮟鱇鱼只在自身附近柔和发光。
 

@@ -86,10 +86,15 @@ them. Do not duplicate that write in a chat task. Never infer status changes fro
 complaints or from a found/downloaded resource.
 
 Mark watched explicitly authorizes filling all regular episodes only when the
-subject's declared count and complete episode-ID inventory agree. Use the episode
+verified scope and complete regular episode-ID inventory agree. A retained,
+hash-matched AI-reviewed package scope for the same subject supplies its regular
+count; otherwise use the subject's declared count. Never include OVA/specials to
+make an aggregate count agree. Retries retain that original scope. Use the episode
 collection API, never an anime `ep_status` write. Unknown totals, incomplete
 inventory and failed readbacks must report partial success separately from the
 verified collection status. Preserve ratings, comments, tags and special episodes.
+An empty accepted-write response is not a sync failure or proof of success:
+verify state by readback. Report safe, specific failure causes on the retry UI.
 Resume is a separate plan action; the next task execution marks it watching again
 unless already watched. Do not automatically resume on refresh or failed cloud writes.
 

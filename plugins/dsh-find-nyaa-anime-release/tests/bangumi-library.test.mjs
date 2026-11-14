@@ -103,6 +103,35 @@ test('metadata RPC rejects guest, oversized batches and arbitrary paths', async 
   }
 });
 
+for (const confirmed of [true, false]) test(`empty 202 write still requires readback: ${confirmed}`, () => fixture(async file => {
+  const request = async (url, init) => {
+    if (url.endsWith('/me')) return Response.json({id:7});
+    if (url.includes('/subjects/')) return Response.json({id:123,type:2});
+    if (init.method === 'POST') return new Response(null,{status:202});
+    return Response.json({type:confirmed ? 4 : 3});
+  };
+  const run = updateBangumiCollection({file,subjectId:123,collectionType:4,request});
+  if (confirmed) assert.equal((await run).collectionType,4);
+  else await assert.rejects(run,/bangumi_write_not_confirmed/);
+}));
+
+for (const expected of [null,24]) test(`verified regular scope excludes aggregate OVA count: ${expected}`, () => fixture(async file => {
+  const patched=[]; let done=false;
+  const request=async(url,init)=>{
+    if(url.endsWith('/me'))return Response.json({id:7});
+    if(url.includes('/subjects/'))return Response.json({id:123,type:2,eps:25});
+    if(init.method==='POST')return new Response(null,{status:202});
+    if(init.method==='PATCH'){patched.push(...JSON.parse(init.body).episode_id);done=true;return new Response(null,{status:202});}
+    if(url.includes('/episodes?'))return Response.json({total:24,data:Array.from({length:24},(_,i)=>({
+      type:done?2:0,episode:{id:100+i,sort:i+1,type:0,subject_id:123}}))});
+    return Response.json({type:2});
+  };
+  const result=await updateBangumiCollection({file,subjectId:123,collectionType:2,expectedRegularEpisodes:expected,request});
+  assert.equal(result.progress,expected?'synced':'coverage_unconfirmed');
+  assert.equal(patched.length,expected?24:0);
+  assert.equal(result.syncedEpisode,expected||undefined);
+}));
+
 for (const scenario of ['success', 'unknown', 'missing', 'failure', 'wrong_readback', 'wrong_subject']) {
   test(`mark watched fills only verified regular episodes: ${scenario}`, () => fixture(async (file) => {
     const writes = []; let patched = false;
@@ -115,7 +144,7 @@ for (const scenario of ['success', 'unknown', 'missing', 'failure', 'wrong_readb
         if (scenario === 'failure') throw new Error('offline');
         patched = true; return new Response(null, {status:204});
       }
-      if (url.includes('/episodes?')) return Response.json({total:2, data:(scenario === 'missing' ? [1] : [1,2]).map((id) => ({episode:{id, subject_id:scenario === 'wrong_subject' ? 999 : 123, type:0}, type:id === 1 || (patched && scenario !== 'wrong_readback') ? 2 : 0}))});
+      if (url.includes('/episodes?')) return Response.json({total:2, data:(scenario === 'missing' ? [1] : [1,2]).map((id) => ({episode:{id, sort:id, subject_id:scenario === 'wrong_subject' ? 999 : 123, type:0}, type:id === 1 || (patched && scenario !== 'wrong_readback') ? 2 : 0}))});
       return Response.json({type:2, rate:8, comment:'preserved'});
     };
     const result = await updateBangumiCollection({file, subjectId:123, collectionType:2, request});

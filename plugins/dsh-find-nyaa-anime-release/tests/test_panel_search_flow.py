@@ -47,6 +47,22 @@ def test_no_query_start_never_writes_or_attempts_optional_sync(tmp_path, monkeyp
     assert before == {str(path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
 
 
+def test_package_start_returns_only_bound_identity_evidence_without_mutation(tmp_path, monkeypatch, capsys):
+    import search_identity
+    state, plan = setup(tmp_path, mode='season_batch')
+    calls = []
+    def fetch(subject_id):
+        calls.append(subject_id)
+        return {'status': 'identity_evidence', 'subject': {'id': subject_id, 'eps': 11}}
+    monkeypatch.setattr(search_identity, 'subject_evidence', fetch)
+    monkeypatch.setattr(panel, 'ensure_watching', lambda *args: pytest.fail('unexpected cloud write'))
+    before = {str(path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    code, result = call(state, capsys, 'start')
+    assert code == 0 and result['status'] == 'package_scope_required'
+    assert calls == [12345] and result['identity_evidence']['subject']['eps'] == 11
+    assert before == {str(path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+
+
 def test_panel_full_flow_records_validated_find_and_preserves_manual_progress(tmp_path, monkeypatch, capsys):
     state, plan, client = prepared(tmp_path, monkeypatch)
     before = state.read_bytes()
@@ -93,6 +109,8 @@ def test_panel_does_not_accept_download_flag_when_plan_is_link_only(tmp_path, mo
 
 @pytest.mark.parametrize('mode', ['season_batch', 'movie'])
 def test_package_starts_with_exact_plan_binding_and_no_synthetic_track(tmp_path, monkeypatch, capsys, mode):
+    import search_identity
+    monkeypatch.setattr(search_identity, 'subject_evidence', lambda subject_id: {'status': 'identity_evidence_unavailable'})
     state, plan = setup(tmp_path, mode=mode)
     code, result = call(state, capsys, 'start')
     assert code == 0 and result['status'] == 'package_scope_required'
