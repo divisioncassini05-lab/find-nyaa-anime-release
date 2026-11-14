@@ -7,6 +7,14 @@ saved quality policy, checks the live plan on each stage, and records validated
 finds. Do not call the core script directly for a panel task. Do not add policy
 flags to override the saved plan.
 
+`search start` without a query is read-only, including optional Bangumi sync.
+Actual searches write evidence and panel history under the returned `write_directory`
+(normally outside the DSH profile workspace). When workspace sandboxing does not
+cover that directory, request `pwsh` with `sandbox_permissions: "danger-full-access"`
+and a justification on the **first writing call**, using the host approval flow.
+Do not run a known-denied probe first or change permission presets/ACLs. Reuse
+approved access only within its granted scope; if denied, report the blocked stage.
+
 <!-- SHARED_SEARCH_FLOW -->
 
 For `missing_episodes`, first establish latest regular episode N, then use the

@@ -118,8 +118,9 @@ def start(state, *, track_id=None, title=None, query=None, pages=2, intent='next
     context = {'identity': identity_context(show) if show and not package else scope,
                'intent': intent, 'quality_policy': policy, 'size_bounds_gib': bounds(policy)}
     if not query:
-        return {'status': 'query_required', **context,
-                'next': 'Choose a verified distinctive search alias; repeat start with --query. No episode suffix guessing.'}
+        return {'status': 'query_required', 'read_only': True, **context,
+                'write_directory': str(Path(state).resolve().parent),
+                'next': 'Choose distinctive verified work aliases (usually the romanized release name); batch them as repeated --query arguments. Interpret season markers from titles, not fragile query suffixes. Query stages write evidence: use host-approved access to write_directory.'}
     need(intent != 'specific_episode' or type(episode) is int and episode > 0, 'target_episode_required')
     need(not package or isinstance(scope, dict) and scope.get('kind') == intent, 'package_scope_required')
     run = new_workspace(state)
@@ -135,43 +136,78 @@ def start(state, *, track_id=None, title=None, query=None, pages=2, intent='next
 def collect(state, run, *, query, pages=2, binding=None, client=None):
     run, session = load_session(state, run, binding)
     need(type(pages) is int and 1 <= pages <= 20, 'invalid_page_count')
+    queries = [query] if isinstance(query, str) else query
+    need(isinstance(queries, list) and queries and all(isinstance(q, str) and q.strip() for q in queries), 'queries_required')
+    queries = list(dict.fromkeys(q.strip() for q in queries))
     existing = [raw.read(run / name, 'nyaa_listing') for name in session['listings']]
-    first = max((p['page'] for p in existing if p['query'] == query), default=0) + 1
     reports = []
-    for page in range(first, first + pages):
-        key = {'query': query, 'page': page}
-        try:
-            report = raw.listing(query, page, client=client)
-        except Exception as error:
+    for query in queries:
+        first = max((p['page'] for p in existing if p['query'] == query), default=0) + 1
+        for page in range(first, first + pages):
+            key = {'query': query, 'page': page}
+            try:
+                report = raw.listing(query, page, client=client)
+            except Exception as error:
+                session['errors'] = [e for e in session['errors'] if e.get('request') != key]
+                session['errors'].append({'request': key, 'error': type(error).__name__})
+                break
+            name = f'listing-{len(session["listings"]) + 1}.json'
+            save(run / name, report, state)
+            session['listings'].append(name)
             session['errors'] = [e for e in session['errors'] if e.get('request') != key]
-            session['errors'].append({'request': key, 'error': type(error).__name__})
-            break
-        name = f'listing-{len(session["listings"]) + 1}.json'
-        save(run / name, report, state)
-        session['listings'].append(name)
-        session['errors'] = [e for e in session['errors'] if e.get('request') != key]
-        reports.append(table(report, session['policy'], session.get('scope')))
-        if page + 1 not in report['later_pages']:
-            break
+            reports.append(table(report, session['policy'], session.get('scope')))
+            if page + 1 not in report['later_pages']:
+                break
     save(run / 'session.json', session, state)
     return {'status': 'search_incomplete' if session['errors'] else 'listings_ready',
             'run': str(run), 'listings': reports, 'errors': session['errors'],
             'next': 'Read every title. Request details for plausible candidates together; collect more pages/verified aliases if coverage is unresolved.'}
 
 
+def evidence_refs(report):
+    """Candidate-local exact text; references cannot borrow another release's evidence."""
+    return {'title': report['release']['title'],
+            **{f'd{i}': text for i, text in enumerate(report['description'].split('\n\n'), 1)},
+            **{f'f{i}': entry['name'] for i, entry in enumerate(report['files'], 1)}}
+
+
+def expand_refs(value, report):
+    """The Agent chooses evidence; scripts copy it without paraphrasing or guessing."""
+    sources = evidence_refs(report)
+    keys = {'refs': 'quotes', 'work_refs': 'work_quotes', 'evidence_refs': 'evidence_quotes',
+            'subtitle_refs': 'subtitle_quotes', 'selected_refs': 'selected_quotes'}
+    if isinstance(value, list):
+        return [expand_refs(item, report) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: expand_refs(item, report) for key, item in value.items() if key not in keys}
+    for key, dest in keys.items():
+        if key not in value:
+            continue
+        refs = value[key]
+        need(isinstance(refs, list) and all(isinstance(ref, str) and ref in sources for ref in refs),
+             'evidence_ref_not_in_candidate')
+        quotes = result.get(dest, [])
+        need(isinstance(quotes, list), 'evidence_quotes_required')
+        result[dest] = list(dict.fromkeys([*quotes, *(sources[ref] for ref in refs)]))
+    return result
+
+
 def detail_view(report, policy):
     release = report['release']
     lower, upper = bounds(policy)
     files = []
-    for entry in report['files']:
+    for i, entry in enumerate(report['files'], 1):
         size = entry.get('size_bytes')
         gib = size / 1024 ** 3 if type(size) is int else None
         hint = 'unknown' if gib is None else 'below' if gib < lower else 'above' if upper is not None and gib > upper else 'within'
-        files.append([entry['name'], entry['size'], round(gib, 6) if gib is not None else None, hint])
+        files.append([entry['name'], entry['size'], round(gib, 6) if gib is not None else None, hint, f'f{i}'])
     return {'id': release['nyaa_id'], 'title': release['title'], 'size': release['size'],
             'published': date_text(release), 'seeders': release['seeders'],
             'leechers': release['leechers'], 'downloads': release['downloads'],
-            'description': report['description'], 'file_columns': ['name', 'size', 'gib', 'regular_size_hint'],
+            'title_ref': 'title', 'description_columns': ['ref', 'text'],
+            'description': [[ref, text] for ref, text in evidence_refs(report).items() if ref.startswith('d')],
+            'file_columns': ['name', 'size', 'gib', 'regular_size_hint', 'ref'],
             'files': files}
 
 
@@ -197,7 +233,7 @@ def details(state, run, ids, *, binding=None, client=None):
     save(run / 'session.json', session, state)
     return {'status': 'search_incomplete' if session['errors'] else 'details_ready',
             'run': str(run), 'candidates': reports, 'errors': session['errors'],
-            'next': 'Submit semantic decision to finish via stdin. Unknown subtitle languages stay unknown; size hints do not classify files or prove quality.'}
+            'next': 'Submit semantic decision via stdin; use candidate-local title/dN/fN evidence refs to avoid copying quotes. Unknown subtitle languages stay unknown; size hints do not classify files or prove quality.'}
 
 
 def make_review(state, run, session, decision):
@@ -207,7 +243,7 @@ def make_review(state, run, session, decision):
     detail_path = run / session['details'][cid]
     detail = raw.read(detail_path, 'nyaa_detail')
     listings = [run / name for name in session['listings']]
-    selection = copy.deepcopy(decision.get('selection', {}))
+    selection = expand_refs(copy.deepcopy(decision.get('selection', {})), detail)
     need(isinstance(selection, dict), 'semantic_selection_required')
     if session['track_id']:
         show = checked_show(StateRepository(state), session['track_id'])
@@ -233,12 +269,55 @@ def make_review(state, run, session, decision):
                   'listing_reports': [str(p) for p in listings], 'detail_report': str(detail_path)}
     comparison = copy.deepcopy(decision.get('quality_comparison', {}))
     need(isinstance(comparison, dict), 'quality_comparison_required')
-    for alternative in comparison.get('alternatives', []):
+    alternatives = comparison.pop('alternatives', [])
+    comparison = expand_refs(comparison, detail)
+    comparison['alternatives'] = []
+    for alternative in alternatives:
         alt_id = str(alternative.pop('candidate_id', ''))
         need(alt_id in session['details'], 'comparison_details_required')
+        alternative = expand_refs(alternative, raw.read(run / session['details'][alt_id], 'nyaa_detail'))
         alternative['detail_report'] = str(run / session['details'][alt_id])
+        comparison['alternatives'].append(alternative)
     review.update(selection=selection, quality_comparison=comparison, reviewed=True)
     return review
+
+
+def final_receipt(result, scopes, session):
+    """Objective answer facts come from recorded requests and the validation result."""
+    report = result.get('report', result)
+    counts = {}
+    for page in scopes:
+        count = counts.setdefault(page['query'], {'pages': 0, 'rows': 0})
+        count['pages'] += 1
+        count['rows'] += page['rows']
+    facts = {'queries': [{'query': q, **n} for q, n in counts.items()],
+             'listing_rows': sum(p['rows'] for p in scopes), 'candidate_details': len(session['details'])}
+    lines = [f"本次获取 {facts['listing_rows']} 条完整列表记录，检查 {facts['candidate_details']} 份候选详情。",
+             '实际查询：' + '；'.join(f"{json.dumps(q, ensure_ascii=False)}：{n['pages']} 页、{n['rows']} 条" for q, n in counts.items()) + '。']
+    if report.get('eligibility') == 'passed':
+        title = (report.get('work_identity') or session.get('scope') or {}).get('title')
+        episode = report.get('target_episode')
+        lines.append(f"审核通过：{title or '目标作品'}" + (f"，第 {episode} 集。" if type(episode) is int else '。'))
+        selected = report.get('selected') or {}
+        url = selected.get('url') or report.get('source_url')
+        if url:
+            lines.append(f"资源：{url}")
+        if selected.get('title'):
+            lines.append('标题：' + selected['title'])
+        if selected.get('size'):
+            lines.append('大小：' + str(selected['size']))
+        if selected.get('seeders') is not None:
+            lines.append('做种数：' + str(selected['seeders']))
+        if selected and not selected.get('subtitle_evidence'):
+            lines.append('本次审核未核实具体字幕语言。')
+    qb = report.get('qbittorrent') or {}
+    if qb.get('status') == 'not_attempted':
+        lines.append('本次未提交下载。')
+    if (report.get('progress') or {}).get('advanced') is False:
+        lines.append('观看进度未推进。')
+    result['search_facts'] = facts
+    result['answer'] = '\n\n'.join(lines)
+    return result
 
 
 def finish(state, run, decision, *, binding=None, client=None, enqueue=False, delivery_args=None, keep_run=False):
@@ -250,6 +329,8 @@ def finish(state, run, decision, *, binding=None, client=None, enqueue=False, de
         return {'status': 'choices_ready', 'choices': results, 'cleanup': cleanup(StateRepository(state), run=run)}
     review = make_review(state, run, session, decision)
     path = save(run / 'review.json', review, state)
+    scopes = [{'query': page['query'], 'page': page['page'], 'rows': page['row_count']}
+              for name in session['listings'] for page in [raw.read(run / name, 'nyaa_listing')]]
     if session['track_id']:
         show = checked_show(StateRepository(state), session['track_id'])
         policy = QualityPolicy(**session['policy'])
@@ -271,7 +352,8 @@ def finish(state, run, decision, *, binding=None, client=None, enqueue=False, de
                 save_path=str(delivery_args.qbittorrent_save_path) if delivery_args.qbittorrent_save_path else None)
         else:
             _, result, _ = package_release.audit(path, session['policy'], client=client)
-    # Keep the audit result intact; append a mechanical receipt for cleanup only.
+    final_receipt(result, scopes, session)
+    # Keep the audit result intact; append the factual receipt and owned cleanup.
     if not keep_run and (result.get('eligibility') == 'passed' or result.get('status') in {'delivery_recorded', 'already_accepted', 'recovered'}):
         try:
             result['cleanup'] = cleanup(StateRepository(state), run=run) if run.exists() else {'status': 'already_cleaned'}
@@ -296,7 +378,7 @@ def parser():
     sub = p.add_subparsers(dest='command', required=True)
     start_parser = sub.add_parser('start')
     start_parser.add_argument('--track-id'); start_parser.add_argument('--title')
-    start_parser.add_argument('--query'); start_parser.add_argument('--pages', type=int, default=2)
+    start_parser.add_argument('--query', action='append'); start_parser.add_argument('--pages', type=int, default=2)
     start_parser.add_argument('--intent', choices=['latest_regular', 'specific_episode', 'next_tracked', 'season', 'movie'], default='next_tracked')
     start_parser.add_argument('--episode', type=int)
     scope_group = start_parser.add_mutually_exclusive_group()
@@ -304,7 +386,7 @@ def parser():
     scope_group.add_argument('--scope-stdin', action='store_true')
     quality_args(start_parser)
     c = sub.add_parser('collect'); c.add_argument('--run', type=Path, required=True)
-    c.add_argument('--query', required=True); c.add_argument('--pages', type=int, default=2)
+    c.add_argument('--query', required=True, action='append'); c.add_argument('--pages', type=int, default=2)
     d = sub.add_parser('details'); d.add_argument('--run', type=Path, required=True)
     d.add_argument('--ids', nargs='+', required=True)
     f = sub.add_parser('finish'); f.add_argument('--run', type=Path, required=True)

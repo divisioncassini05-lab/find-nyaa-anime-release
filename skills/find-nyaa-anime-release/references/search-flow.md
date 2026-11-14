@@ -14,11 +14,18 @@ Run from the skill resource directory. For a tracked latest-episode request:
 python -X utf8 scripts/search_flow.py start --track-id TRACK_ID --intent latest_regular
 ```
 
-This returns saved identity and policy. Choose a verified distinctive alias;
-repeat with `--query "VERIFIED ALIAS"`. If identity and alias are already known,
-supply the query on the first call. The script fetches the first two chronological
-pages when available and creates an owned run. It never interprets the alias or
-adds episode suffixes. Exact episode: `--intent specific_episode --episode N`;
+This call is read-only and returns saved identity, policy and `write_directory`.
+Choose a distinctive verified work alias in the spelling used by release titles,
+usually the romanized work name; do not depend on a particular Roman numeral or
+season suffix matching the search index. AI interprets season/part from every title.
+If independent aliases are needed, submit them together as repeated
+`--query "ALIAS ONE" --query "ALIAS TWO"`, rather than serial spelling trials.
+If identity and aliases are already known, supply them on the first call.
+Before that writing call, obtain host-approved access if `write_directory` is
+outside the writable workspace; do not deliberately incur a permission failure.
+The script fetches the first two chronological pages **per supplied query** when
+available and creates an owned run. It never invents aliases or episode suffixes.
+Exact episode: `--intent specific_episode --episode N`;
 next tracked episode: `--intent next_tracked`.
 
 Keep the user's policy on `start`: `--tier`, `--require-zh`, explicit bounds,
@@ -73,9 +80,9 @@ Single-episode decision (replace examples with actual evidence):
   "candidate_id": "ID", "episode": 12,
   "coverage": {"complete_for_target": true, "reason": "Release-window boundary and why no higher regular episode is unresolved"},
   "selection": {
-    "kind": "regular", "work_reason": "Why this is the locked work", "work_quotes": ["exact quote"],
-    "numbering": {"release_label": "12", "reason": "Source-to-local mapping", "evidence_quotes": ["exact quote"]},
-    "subtitle_quotes": []
+    "kind": "regular", "work_reason": "Why this is the locked work", "work_refs": ["title"],
+    "numbering": {"release_label": "12", "reason": "Source-to-local mapping", "evidence_refs": ["title"]},
+    "subtitle_refs": []
   },
   "quality_comparison": {"result": "unknown", "reason": "Evidence-based selection", "limitations": "What is unverified", "alternatives": []}
 }
@@ -83,20 +90,31 @@ Single-episode decision (replace examples with actual evidence):
 
 Comparison result: `unknown`, `comparable`, `only_eligible` or `clear_advantage`.
 Selection-changing alternatives use
-`{"candidate_id":"ID2","relation":"unknown","reason":"...","quotes":["exact quote"]}`;
+`{"candidate_id":"ID2","relation":"unknown","reason":"...","refs":["title"]}`;
 relation: `better` (selected has advantage), `comparable`, `unknown`, `ineligible`.
-Clear advantage also needs `selected_quotes` and a `better` alternative. Optional
+Clear advantage also needs `selected_refs` and a `better` alternative. Optional
 `key_decisions` records only consequential ambiguities:
 `{"candidate_id":"ID","verdict":"match|exclude|unresolved","reason":"...","episode":12}`.
 Resolve consequential uncertainty before finishing. Audio/source requirements use
-`selection.requirement_evidence` entries with `kind`, `value`, `reason`, `quotes`.
+`selection.requirement_evidence` entries with `kind`, `value`, `reason`, `refs`.
+
+Details preserve every description paragraph as `[ref, original_text]` and every
+file with its `ref`. Choose candidate-local `title`, `dN` or `fN` references after
+reading them; scripts copy exact saved text into the unchanged validator. A selected
+release's work/numbering/subtitle refs must come from that release; each alternative
+uses its own refs. This avoids retyping titles and borrowing another release's
+evidence. Literal `*_quotes`/`quotes` remain supported when a narrower exact span is
+needed. Evidence references never supply semantic reasons or episode/file mapping.
 
 Scripts fill paths, policy, identity revision, target season and sole video path,
 run the existing fresh validator once, and clean successful runs. `review_required`
 retains evidence for correction; never weaken constraints. Link-only never downloads
 or advances progress. For authorized delivery add `--enqueue-qbittorrent --legal-ok`
-to finish; delivery includes validation. Return the verified result briefly without
-rereading state or repeating cleanup. Do not infer English from a release group.
+to finish; delivery includes validation. Use the returned `answer` for the final
+objective facts (queries, counts, selected release and state changes); for choices,
+use each choice's answer. You may append evidence-backed selection reasoning.
+Do not add guessed air dates/weekdays, expand the list of attempted aliases, or
+infer subtitle languages. Do not reread state or repeat cleanup.
 
 ## Seasons and movies
 

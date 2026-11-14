@@ -27,9 +27,9 @@ def decision(client):
     return {'candidate_id': '2165948', 'episode': 2,
         'coverage': {'complete_for_target': True, 'reason': 'Full chronological page crosses current E02 into older E01.'},
         'selection': {'kind': 'regular', 'work_reason': 'Exact Steel Ball Run subtitle identifies the tracked standalone work.',
-            'work_quotes': ['Steel Ball Run'], 'numbering': {'release_label': 'S06E02',
-                'reason': 'Source season six E02 maps to local standalone work E02.', 'evidence_quotes': ['S06E02']},
-            'subtitle_quotes': []},
+            'work_refs': ['title'], 'numbering': {'release_label': 'S06E02',
+                'reason': 'Source season six E02 maps to local standalone work E02.', 'evidence_refs': ['title']},
+            'subtitle_refs': []},
         'quality_comparison': {'result': 'unknown', 'reason': 'Only metadata, no evidence of comparative picture advantage.',
                                'limitations': 'Subtitle tracks and picture superiority unverified.', 'alternatives': []}}
 
@@ -75,15 +75,80 @@ def test_full_detail_then_semantic_decision_audits_once_and_cleans_without_progr
     run = Path(result['run'])
     detailed = flow.details(state, run, ['2165948', '2165948'], client=client)
     assert len(detailed['candidates']) == 1
-    assert detailed['candidates'][0]['description'] == client.detail.description
+    assert '\n\n'.join(text for ref, text in detailed['candidates'][0]['description']) == client.detail.description
     assert [f[0] for f in detailed['candidates'][0]['files']] == [f.name for f in client.detail.files]
     final = flow.finish(state, run, decision(client), client=client)
     assert final['eligibility'] == 'passed'
     assert final['selected']['nyaa_id'] == '2165948'
     assert final['selected']['subtitle_evidence'] == []
     assert final['qbittorrent']['status'] == 'not_attempted'
+    assert final['search_facts'] == {'queries': [{'query': 'Steel Ball Run', 'pages': 1, 'rows': 27}],
+                                   'listing_rows': 27, 'candidate_details': 1}
+    assert '星期' not in final['answer'] and '每周' not in final['answer']
+    assert '"Steel Ball Run"：1 页、27 条' in final['answer']
+    assert final['selected']['url'] in final['answer']
     assert state.read_bytes() == before and not run.exists()
     assert sum(c[0] == 'detail' for c in client.calls) == 2  # collect + one fresh audit
+
+
+def test_batch_queries_preserves_each_page_and_reports_actual_empty_query(tmp_path, monkeypatch):
+    state, client, initial = setup(tmp_path, pages=1)
+    original = flow.raw.listing
+    queries = []
+    def listing(query, page=1, **kwargs):
+        queries.append((query, page))
+        result = original(query, page, client=client)
+        if query == '鋼の未収録名':
+            result.update(rows=[], row_count=0, later_pages=[])
+        return result
+    monkeypatch.setattr(flow.raw, 'listing', listing)
+    added = flow.collect(state, initial['run'], query=['鋼の未収録名', 'Steel Ball Run alternate', '鋼の未収録名'], pages=1)
+    assert queries == [('鋼の未収録名', 1), ('Steel Ball Run alternate', 1)]
+    assert [page['rows'] for page in added['listings']] == [0, 27]
+    assert [row[1] for row in added['listings'][1]['values']] == [row[1] for row in initial['listings'][0]['values']]
+    flow.details(state, initial['run'], ['2165948'], client=client)
+    final = flow.finish(state, initial['run'], decision(client), client=client)
+    assert final['search_facts']['listing_rows'] == 54
+    assert final['search_facts']['queries'][1] == {'query': '鋼の未収録名', 'pages': 1, 'rows': 0}
+    assert '"鋼の未収録名"：1 页、0 条' in final['answer']
+
+
+@pytest.mark.parametrize('ref', ['d9999', '2165999:title', '../detail.json'])
+def test_reference_must_belong_to_selected_evidence(tmp_path, ref):
+    state, client, initial = setup(tmp_path, pages=1)
+    flow.details(state, initial['run'], ['2165948'], client=client)
+    value = decision(client)
+    value['selection']['work_refs'] = [ref]
+    with pytest.raises(ValueError, match='evidence_ref_not_in_candidate'):
+        flow.finish(state, initial['run'], value, client=client)
+
+
+def test_paragraph_and_file_refs_expand_exactly_without_guessing(tmp_path):
+    state, client, initial = setup(tmp_path, pages=1)
+    flow.details(state, initial['run'], ['2165948'], client=client)
+    report = flow.raw.read(Path(initial['run']) / 'detail-2165948.json', 'nyaa_detail')
+    value = flow.expand_refs({'work_refs': ['title'], 'subtitle_refs': [],
+        'episodes': [{'refs': ['f1', 'd1'], 'reason': 'Agent mapping'}]}, report)
+    assert value['work_quotes'] == [report['release']['title']]
+    assert value['episodes'][0]['quotes'] == [report['files'][0]['name'], report['description'].split('\n\n')[0]]
+    assert value['episodes'][0]['reason'] == 'Agent mapping'
+    assert value['subtitle_quotes'] == []
+
+
+def test_batch_partial_failure_cannot_masquerade_as_complete(tmp_path, monkeypatch):
+    state, client, initial = setup(tmp_path, pages=1)
+    original = flow.raw.listing
+    def listing(query, page=1, **kwargs):
+        if query == 'failed alias':
+            raise OSError('transport failed')
+        return original(query, page, client=client)
+    monkeypatch.setattr(flow.raw, 'listing', listing)
+    response = flow.collect(state, initial['run'], query=['failed alias', 'other alias'], pages=1)
+    assert response['status'] == 'search_incomplete'
+    assert response['listings'][0]['query'] == 'other alias'
+    flow.details(state, initial['run'], ['2165948'], client=client)
+    with pytest.raises(ValueError, match='incomplete_search_evidence'):
+        flow.finish(state, initial['run'], decision(client), client=client)
 
 
 @pytest.mark.parametrize('mutate,code', [

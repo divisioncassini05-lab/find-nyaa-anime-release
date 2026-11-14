@@ -498,7 +498,10 @@ def execute_search(args, plan):
             raise ValueError('panel_download_not_authorized')
         values.enqueue_qbittorrent = bool(plan.get('enqueue'))
         values.legal_ok = bool(plan.get('enqueue'))
-    ensure_watching(args.state, plan)
+    # Identity/policy discovery must stay read-only, including optional sync.
+    # Actual query stages use the host's approved access before their first write.
+    if values.command != 'start' or values.query:
+        ensure_watching(args.state, plan)
     try:
         result = search_flow.execute(values, binding=binding)
     except search_flow.WorkflowError as error:

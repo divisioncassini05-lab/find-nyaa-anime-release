@@ -34,6 +34,19 @@ def call(state, capsys, *args):
     return code, json.loads(capsys.readouterr().out)
 
 
+def test_no_query_start_never_writes_or_attempts_optional_sync(tmp_path, monkeypatch, capsys):
+    state, plan, client = prepared(tmp_path, monkeypatch)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Read-only context attempted a write/sync')
+    monkeypatch.setattr(panel, 'ensure_watching', forbidden)
+    before = {str(path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+    code, result = call(state, capsys, 'start')
+    assert code == 0 and result['status'] == 'query_required' and result['read_only'] is True
+    assert result['write_directory'] == str(state.resolve().parent)
+    assert client.calls == []
+    assert before == {str(path): path.read_bytes() for path in tmp_path.rglob('*') if path.is_file()}
+
+
 def test_panel_full_flow_records_validated_find_and_preserves_manual_progress(tmp_path, monkeypatch, capsys):
     state, plan, client = prepared(tmp_path, monkeypatch)
     before = state.read_bytes()

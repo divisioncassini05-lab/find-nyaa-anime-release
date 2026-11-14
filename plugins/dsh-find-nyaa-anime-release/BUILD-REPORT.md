@@ -1,3 +1,22 @@
+# Build verification: 0.2.11
+
+- Context-only startup is read-only in both hosts, including the DSH optional
+  start-watching hook. Writing calls use host-approved access before execution.
+- Agents can submit verified aliases together; every returned original title and
+  unsuccessful/empty query remains accounted for. No script infers title meaning.
+- Candidate-local title, description-paragraph and file references expand to exact
+  evidence before the existing validator. Cross-candidate/missing references,
+  changed evidence and incorrect episode/file mapping remain rejected.
+- Final objective wording is rendered from actual query counts and audit fields.
+  It does not invent air dates, weekdays, subtitle languages or search attempts.
+- Core/distribution Python: 789 passed. DSH Python: 888 passed. Each suite has
+  3 platform skips, 1 live deselection and 15 passing subtests. Node: 309 outcomes,
+  exit 0. Both skill validators and generated-payload reproducibility passed.
+- Captured-page tests cover batch query failures, empty-query accounting, full
+  title/description/file preservation, evidence references and read-only startup.
+  No live download or scheduler mutation is included in these tests. The native
+  DSH model benchmark is recorded separately; offline tests do not measure cost.
+
 # Build verification: 0.2.10
 
 - Shared search_flow.py collects complete listing pages, preserves every original

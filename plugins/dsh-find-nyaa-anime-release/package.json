@@ -1,6 +1,6 @@
 {
   "name": "dsh-find-nyaa-anime-release",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Anime search and tracking for DSH: Nyaa release checks, scheduled catch-up, qBittorrent delivery, Bangumi lists and manual progress sync.",
   "type": "module",
   "main": "./index.js",
